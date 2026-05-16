@@ -1,0 +1,124 @@
+.operations-dashboard {
+  padding: 24px;
+  max-width: 1280px;
+  margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+}
+
+.operations-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.operations-header h1 {
+  margin: 0 0 8px;
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.operations-header p {
+  margin: 0;
+  color: #555;
+  font-size: 15px;
+  line-height: 1.6;
+  max-width: 680px;
+}
+
+.summary-pill {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.summary-pill span {
+  display: inline-flex;
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: #f3f6fb;
+  border: 1px solid #d8dfec;
+  color: #1a1a1a;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.operations-message,
+.operations-error {
+  margin: 16px 0;
+  padding: 16px 18px;
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+.operations-message {
+  background: #f1f7ff;
+  color: #1f497d;
+}
+
+.operations-error {
+  background: #fff1f0;
+  color: #8a1f1f;
+  border: 1px solid #f5c6cb;
+}
+
+.operations-table-wrapper {
+  overflow-x: auto;
+  border-radius: 12px;
+  border: 1px solid #e0e0e0;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.04);
+}
+
+.operations-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 920px;
+  background: #fff;
+}
+
+.operations-table th,
+.operations-table td {
+  padding: 16px 18px;
+  border-bottom: 1px solid #f0f0f0;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.operations-table th {
+  background: #f8fafc;
+  color: #2c3e50;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.operations-table tbody tr:hover {
+  background: #f7fbff;
+}
+
+.operations-table td {
+  color: #202020;
+  font-size: 14px;
+}
+
+.empty-row {
+  padding: 40px 0;
+  text-align: center;
+  color: #777;
+}
+
+@media (max-width: 900px) {
+  .operations-header {
+    flex-direction: column;
+  }
+
+  .operations-table {
+    min-width: 780px;
+  }
+}
