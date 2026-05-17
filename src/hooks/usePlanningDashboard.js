@@ -268,11 +268,15 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
       setTeams(prev => [...prev, newTeam]);
 
       if (teamPayload.responder_ids?.length) {
-        await Promise.all(
-          teamPayload.responder_ids.map(responderId =>
+        await Promise.all([
+          ...teamPayload.responder_ids.map(responderId =>
             assignResponderToTeam(supabaseClient, responderId, newTeam.team_id)
-          )
-        );
+          ),
+          supabaseClient
+            .from('responders')
+            .update({ status: 'Attached' })
+            .in('responder_id', teamPayload.responder_ids)
+        ]);
 
         // Refresh dashboard data after adding responders
         await fetchDashboardData();
@@ -429,7 +433,14 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
    */
   const attachResponderToTeam = useCallback(async (responderId, teamId) => {
     try {
-      await assignResponderToTeam(supabaseClient, responderId, teamId);
+      // Update both the junction table and the responder's operational status
+      await Promise.all([
+        assignResponderToTeam(supabaseClient, responderId, teamId),
+        supabaseClient
+          .from('responders')
+          .update({ status: 'Attached' })
+          .eq('responder_id', responderId)
+      ]);
       // refresh dashboard data to keep everything in sync
       await fetchDashboardData();
       return { success: true };
@@ -445,7 +456,14 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
    */
   const detachResponderFromTeam = useCallback(async (responderId, teamId) => {
     try {
-      await removeResponderFromTeam(supabaseClient, responderId, teamId);
+      // Remove association and return responder to the 'Staged' pool
+      await Promise.all([
+        removeResponderFromTeam(supabaseClient, responderId, teamId),
+        supabaseClient
+          .from('responders')
+          .update({ status: 'Staged' })
+          .eq('responder_id', responderId)
+      ]);
       await fetchDashboardData();
       return { success: true };
     } catch (err) {

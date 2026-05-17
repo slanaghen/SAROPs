@@ -257,8 +257,8 @@ const PlanningDashboard = ({
     }
   };
 
-  const handleSaveTeam = async () => {
-    if (!teamForm.leader_responder_id) {
+  const handleSaveTeam = async (formData) => {
+    if (!formData.leader_responder_id) {
       setError('A team leader must be selected in order to save a team.');
       return;
     }
@@ -267,37 +267,37 @@ const PlanningDashboard = ({
       setLoading(true);
       
       // Ensure leader is included in responder_ids for consistency
-      const currentResponders = teamForm.responder_ids || [];
-      const finalResponderIds = (teamForm.leader_responder_id && !currentResponders.includes(teamForm.leader_responder_id))
-        ? [...currentResponders, teamForm.leader_responder_id]
+      const currentResponders = formData.responder_ids || [];
+      const finalResponderIds = (formData.leader_responder_id && !currentResponders.includes(formData.leader_responder_id))
+        ? [...currentResponders, formData.leader_responder_id]
         : currentResponders;
 
-      if (teamForm.team_id && updateTeam) {
+      if (formData.team_id && updateTeam) {
         // 1. Update core team details
-        await updateTeam(teamForm.team_id, {
-          team_name_number: teamForm.team_name_number,
-          sartopo_color_hex: teamForm.sartopo_color_hex,
-          type: teamForm.type,
-          status: teamForm.status,
-          leader_responder_id: teamForm.leader_responder_id,
-          equipment: teamForm.equipment,
+        await updateTeam(formData.team_id, {
+          team_name_number: formData.team_name_number,
+          sartopo_color_hex: formData.sartopo_color_hex,
+          type: formData.type,
+          status: formData.status,
+          leader_responder_id: formData.leader_responder_id,
+          equipment: formData.equipment,
         });
 
         // 2. Reconcile responder attachments
-        const originalIds = teamForm.current_responders?.map(r => r.responder_id) || [];
+        const originalIds = formData.current_responders?.map(r => r.responder_id) || [];
         const toAdd = finalResponderIds.filter(id => !originalIds.includes(id));
         const toRemove = originalIds.filter(id => !finalResponderIds.includes(id));
 
         if (toAdd.length > 0 || toRemove.length > 0) {
           await Promise.all([
-            ...toAdd.map(id => attachResponderToTeam?.(id, teamForm.team_id)),
-            ...toRemove.map(id => detachResponderFromTeam?.(id, teamForm.team_id))
+            ...toAdd.map(id => attachResponderToTeam?.(id, formData.team_id)),
+            ...toRemove.map(id => detachResponderFromTeam?.(id, formData.team_id))
           ]);
         }
 
         setSuccessMessage('Team updated');
       } else if (createTeam) {
-        await createTeam({ ...teamForm, responder_ids: finalResponderIds });
+        await createTeam({ ...formData, responder_ids: finalResponderIds });
         setSuccessMessage('Team created');
       }
       setShowTeamForm(false);

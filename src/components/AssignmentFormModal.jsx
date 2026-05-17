@@ -23,8 +23,9 @@ const AssignmentFormModal = ({
         {error && <div className="alert alert-error">{error}</div>}
 
         <div className="form-row">
-          <label>Division</label>
+          <label htmlFor="asn_division">Division</label>
           <input
+            id="asn_division"
             type="text"
             value={assignmentForm.division || ''}
             onChange={e => setAssignmentForm({ ...assignmentForm, division: e.target.value })}
@@ -33,8 +34,9 @@ const AssignmentFormModal = ({
         </div>
 
         <div className="form-row">
-          <label>Assignment Name</label>
+          <label htmlFor="asn_name">Assignment Name</label>
           <input
+            id="asn_name"
             type="text"
             value={assignmentForm.name || ''}
             onChange={e => setAssignmentForm({ ...assignmentForm, name: e.target.value })}
@@ -43,8 +45,9 @@ const AssignmentFormModal = ({
         </div>
 
         <div className="form-row">
-          <label>Assignment Type</label>
+          <label htmlFor="asn_type">Assignment Type</label>
           <input
+            id="asn_type"
             type="text"
             value={assignmentForm.assignment_type || ''}
             onChange={e => setAssignmentForm({ ...assignmentForm, assignment_type: e.target.value })}
@@ -53,8 +56,9 @@ const AssignmentFormModal = ({
         </div>
 
         <div className="form-row">
-          <label>Assignment Size</label>
+          <label htmlFor="asn_size">Assignment Size</label>
           <input
+            id="asn_size"
             type="text"
             value={assignmentForm.assignment_size || ''}
             onChange={e => setAssignmentForm({ ...assignmentForm, assignment_size: e.target.value })}
@@ -63,8 +67,9 @@ const AssignmentFormModal = ({
         </div>
 
         <div className="form-row">
-          <label>TAC Channel</label>
+          <label htmlFor="asn_tac">TAC Channel</label>
           <input
+            id="asn_tac"
             type="text"
             value={assignmentForm.tac_channel || ''}
             onChange={e => setAssignmentForm({ ...assignmentForm, tac_channel: e.target.value })}
@@ -73,8 +78,9 @@ const AssignmentFormModal = ({
         </div>
 
         <div className="form-row">
-          <label>Description Narrative</label>
+          <label htmlFor="asn_narrative">Description Narrative</label>
           <textarea
+            id="asn_narrative"
             value={assignmentForm.description_narrative || ''}
             onChange={e => setAssignmentForm({ ...assignmentForm, description_narrative: e.target.value.slice(0, 500) })}
             placeholder="Assignment narrative"

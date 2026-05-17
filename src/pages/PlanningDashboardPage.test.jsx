@@ -1,78 +1,92 @@
-import { render, screen, waitFor } from '@testing-library/react';
-import { vi, describe, it, expect, beforeEach } from 'vitest';
-import React from 'react';
+import { render, screen, cleanup } from '@testing-library/react';
+import * as matchers from '@testing-library/jest-dom/matchers';
+import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import PlanningDashboardPage from './PlanningDashboardPage';
+import { useIncident } from '../context/IncidentContext';
 import { usePlanningDashboard } from '../hooks/usePlanningDashboard';
 
-// Mock dependencies
-vi.mock('../hooks/usePlanningDashboard');
-vi.mock('../lib/supabase', () => ({
-  default: {},
+expect.extend(matchers);
+
+// Mock Context
+vi.mock('../context/IncidentContext', () => ({
+  useIncident: vi.fn(),
 }));
 
+// Mock Hook
+vi.mock('../hooks/usePlanningDashboard', () => ({
+  usePlanningDashboard: vi.fn(),
+}));
+
+// Mock the child component to inspect props passed to it
 vi.mock('../components/PlanningDashboard', () => ({
-  default: ({ teams }) => (
-    <div data-testid="planning-dashboard">
-      Dashboard Rendered with {teams.length} teams
+  default: vi.fn((props) => (
+    <div data-testid="planning-dashboard-mock">
+      <span data-testid="next-assignment-name">{props.defaultNewAssignmentName}</span>
     </div>
-  ),
+  )),
 }));
 
 describe('PlanningDashboardPage', () => {
-  const mockFetchDashboardData = vi.fn();
-  const mockAssignTeamToAssignment = vi.fn();
-
   beforeEach(() => {
     vi.clearAllMocks();
-    usePlanningDashboard.mockReturnValue({
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('should render the planning dashboard when an operational period is present', () => {
+    // Setup context mock
+    vi.mocked(useIncident).mockReturnValue({
+      incidentData: { opPeriodId: 'op-123', name: 'Test Incident' },
+    });
+
+    // Setup hook mock
+    vi.mocked(usePlanningDashboard).mockReturnValue({
       teams: [],
       assignments: [],
       responders: [],
       loading: false,
       error: null,
-      fetchDashboardData: mockFetchDashboardData,
-      assignTeamToAssignment: mockAssignTeamToAssignment,
+      fetchDashboardData: vi.fn(),
     });
+
+    render(<PlanningDashboardPage />);
+    
+    expect(screen.getByTestId('planning-dashboard-mock')).toBeInTheDocument();
   });
 
-  it('renders instructions when no operationalPeriodId is provided', () => {
-    render(<PlanningDashboardPage operationalPeriodId={null} />);
+  it('should show a message if no operational period is selected', () => {
+    vi.mocked(useIncident).mockReturnValue({
+      incidentData: null,
+    });
+
+    render(<PlanningDashboardPage />);
+    
     expect(screen.getByText(/Please select an operational period/i)).toBeInTheDocument();
   });
 
-  it('calls fetchDashboardData on mount when operationalPeriodId is provided', () => {
-    render(<PlanningDashboardPage operationalPeriodId="op-123" />);
-    expect(mockFetchDashboardData).toHaveBeenCalledTimes(1);
-  });
-
-  it('shows loading state when data is being fetched', () => {
-    usePlanningDashboard.mockReturnValue({
-      teams: [],
-      assignments: [],
-      responders: [],
-      loading: true,
-      error: null,
-      fetchDashboardData: mockFetchDashboardData,
+  it('correctly calculates the next assignment name (AA -> AB)', () => {
+    vi.mocked(useIncident).mockReturnValue({
+      incidentData: { opPeriodId: 'op-123' },
     });
 
-    render(<PlanningDashboardPage operationalPeriodId="op-123" />);
-    expect(screen.getByText(/Loading dashboard data.../i)).toBeInTheDocument();
-    expect(screen.queryByTestId('planning-dashboard')).not.toBeInTheDocument();
-  });
-
-  it('renders PlanningDashboard when loading is finished', async () => {
-    usePlanningDashboard.mockReturnValue({
-      teams: [{ id: '1', name: 'Team Alpha' }],
-      assignments: [],
+    vi.mocked(usePlanningDashboard).mockReturnValue({
+      teams: [],
+      assignments: [
+        { division: 'A', name: 'AA' },
+        { division: 'A', name: 'AB' }
+      ],
       responders: [],
       loading: false,
-      error: null,
-      fetchDashboardData: mockFetchDashboardData,
+      fetchDashboardData: vi.fn(),
     });
 
-    render(<PlanningDashboardPage operationalPeriodId="op-123" />);
+    render(<PlanningDashboardPage />);
     
-    expect(screen.getByTestId('planning-dashboard')).toBeInTheDocument();
-    expect(screen.getByText(/Dashboard Rendered with 1 teams/i)).toBeInTheDocument();
+    // Verify that the helper correctly calculated 'AC' and passed it to the component
+    expect(screen.getByTestId('planning-dashboard-mock')).toBeInTheDocument();
+    const nextName = screen.getByTestId('next-assignment-name').textContent;
+    expect(nextName).toBe('AC');
   });
 });

@@ -52,6 +52,14 @@ export const IncidentProvider = ({ children }) => {
       return parsed && typeof parsed === 'object' ? parsed.responderStatus || '' : '';
     } catch { return ''; }
   });
+  const [accessLevel, setAccessLevel] = useState(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (!saved) return '';
+      const parsed = JSON.parse(saved);
+      return parsed && typeof parsed === 'object' ? parsed.accessLevel || '' : '';
+    } catch { return ''; }
+  });
   const [isAdmin, setIsAdmin] = useState(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (!saved) return false;
@@ -72,16 +80,20 @@ export const IncidentProvider = ({ children }) => {
 
   // Persist state to localStorage whenever any value changes
   useEffect(() => {
+    // If we are in a logged-out state, ensure storage is kept clear
+    if (!isActive && !responderName && !isAdmin) return;
+
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       isActive,
       incidentId,
       responderId,
       responderName,
       responderStatus,
+      accessLevel,
       isAdmin,
       incidentData
     }));
-  }, [isActive, incidentId, responderId, responderName, responderStatus, isAdmin, incidentData]);
+  }, [isActive, incidentId, responderId, responderName, responderStatus, accessLevel, isAdmin, incidentData]);
 
   const startIncident = (id, name, opNumber, opPeriodId) => {
     setIncidentId(id);
@@ -100,6 +112,7 @@ export const IncidentProvider = ({ children }) => {
     setResponderId(null);
     setResponderName('');
     setResponderStatus('');
+    setAccessLevel('');
     setIncidentData({ name: '', opNumber: '', opPeriodId: '' });
     localStorage.removeItem(STORAGE_KEY);
   };
@@ -111,6 +124,7 @@ export const IncidentProvider = ({ children }) => {
       responderId,
       responderName,
       responderStatus,
+      accessLevel,
       incidentData, 
       startIncident, 
       endIncident,
@@ -118,6 +132,7 @@ export const IncidentProvider = ({ children }) => {
       isAdmin,
       setIsAdmin,
       setResponderId,
+      setAccessLevel,
       setResponderName,
       setResponderStatus
     }}>

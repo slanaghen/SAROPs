@@ -5,8 +5,8 @@ import { useIncident } from '../context/IncidentContext';
 import '../styles/IncidentEditPage.css'; // Reusing existing card styles
 
 const CheckOutPage: React.FC = () => {
-  const navigate = useNavigate();
-  const { responderId, responderName, setResponderStatus, isActive } = useIncident();
+  const navigate = useNavigate(); //
+  const { responderId, responderName, logout, isActive } = useIncident(); //
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -20,24 +20,19 @@ const CheckOutPage: React.FC = () => {
     setError(null);
 
     try {
-      const checkoutTime = new Date().toISOString();
-
-      // Update database: set status to CheckedOut (Cleared)
-      const { error: dbError } = await supabase
-        .from('responders')
-        .update({
-          checkout_datetime: checkoutTime,
-          status: 'CheckedOut',
-        })
+      // Delete the responder record from the database
+      const { error: dbError } = await supabase //
+        .from('responders') //
+        .delete() //
         .eq('responder_id', responderId);
 
       if (dbError) throw dbError;
 
-      // Update local context: change status but leave incident/name as is
-      setResponderStatus('CheckedOut');
+      // Clear the global incident context and local session
+      logout(); //
       
       alert("You have been successfully cleared from the incident.");
-      navigate('/responder-dashboard');
+      navigate('/checkin'); //
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Check-out failed';
       console.error('Check-out error:', err);
@@ -70,8 +65,8 @@ const CheckOutPage: React.FC = () => {
         <div style={{ fontSize: '48px', marginBottom: '20px' }}>👋</div>
         <h2>Ready to clear, {responderName}?</h2>
         <p style={{ color: '#64748b', marginBottom: '32px', maxWidth: '500px', margin: '0 auto 32px' }}>
-          Checking out will mark your status as <strong>Checked Out</strong> in the database. 
-          Your incident session and operational data will remain visible in the banner.
+          Checking out will remove your record from the incident and clear your local session.
+          You will need to check back in to rejoin the operation.
         </p>
 
         {error && <p className="alert alert-error" style={{ marginBottom: '24px' }}>{error}</p>}

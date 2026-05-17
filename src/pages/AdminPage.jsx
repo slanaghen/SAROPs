@@ -72,7 +72,8 @@ const AdminPage = () => {
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
-    setIsAdmin(false);
+    logout(); // Use the global logout to clear everything
+    navigate('/checkin');
   };
 
   useEffect(() => {

@@ -182,6 +182,13 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
 
       setDraggedItem(null);
       setDropTarget(null);
+
+      const teamName = team?.team_name_number || 'Unknown Team';
+      const asnName = assignment?.name || 'Unknown Assignment';
+      await recordAction(`Assigned ${teamName} to ${asnName} via drag and drop`);
+
+      // Re-fetch all data to ensure full synchronization with DB and triggers
+      await fetchSummary();
     } catch (err) {
       setError(err.message || 'Failed to link resources');
       console.error('Drop link error:', err);
@@ -280,6 +287,9 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
         setTeams(prev => [...prev, saved]);
       }
       setShowTeamForm(false);
+
+      // Re-fetch all data to ensure full synchronization with DB and triggers
+      await fetchSummary();
     } catch (err) {
       setError(err.message || 'Failed to save team');
       setPendingAssignmentId(null);
@@ -328,6 +338,9 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
 
         await recordAction(`Created new assignment: ${payload.name}`);
         setAssignments(prev => [...prev, data]);
+
+        // Re-fetch all data to ensure full synchronization with DB and triggers
+        await fetchSummary();
       }
       setShowAssignmentForm(false);
     } catch (err) {

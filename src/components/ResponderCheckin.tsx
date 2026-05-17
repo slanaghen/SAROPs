@@ -45,7 +45,6 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
   const [formData, setFormData] = useState({
     name: '',
     email: '',
-    password: '',
     agency: '',
     identifier: '',
     cell_phone: '',
@@ -62,7 +61,6 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
   const [confirmationData, setConfirmationData] = useState<{
     name: string;
     email: string;
-    password?: string;
     agency: string;
     identifier: string;
     cell_phone: string;
@@ -128,10 +126,6 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
       setInternalError('A valid email address is required');
       return false;
     }
-    if (!data.password || data.password.length < 6) {
-      setInternalError('Password must be at least 6 characters');
-      return false;
-    }
     if (!data.agency?.trim()) {
       setInternalError('Agency is required');
       return false;
@@ -191,7 +185,6 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
     const submitted = {
       name: (fd.get('name') as string) || '',
       email: (fd.get('email') as string) || '',
-      password: (fd.get('password') as string) || '',
       agency: (fd.get('agency') as string) || '',
       identifier: (fd.get('identifier') as string) || '',
       cell_phone: formatPhoneNumber((fd.get('cell_phone') as string) || ''),
@@ -239,7 +232,6 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
       setFormData({
         name: '',
         email: '',
-        password: '',
         agency: '',
         identifier: '',
         cell_phone: '',
@@ -331,20 +323,6 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
                 value={formData.email}
                 onChange={handleInputChange}
                 placeholder="name@agency.gov"
-                required
-                disabled={displayLoading}
-              />
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="password">Password *</label>
-              <input
-                id="password"
-                type="password"
-                name="password"
-                value={formData.password}
-                onChange={handleInputChange}
-                placeholder="••••••••"
                 required
                 disabled={displayLoading}
               />

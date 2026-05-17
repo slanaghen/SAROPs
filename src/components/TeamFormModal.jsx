@@ -43,8 +43,9 @@ const TeamFormModal = ({
         {error && <div className="alert alert-error">{error}</div>}
 
         <div className="form-row">
-          <label>Team Name</label>
+          <label htmlFor="team_name">Team Name</label>
           <input 
+            id="team_name"
             value={teamForm.team_name_number || ''} 
             onChange={e => setTeamForm({ ...teamForm, team_name_number: e.target.value })} 
             placeholder="Auto-generated as Team# if blank" 
@@ -52,8 +53,8 @@ const TeamFormModal = ({
         </div>
 
         <div className="form-row">
-          <label>Type</label>
-          <select value={teamForm.type} onChange={e => setTeamForm({ ...teamForm, type: e.target.value })}>
+          <label htmlFor="team_type">Type</label>
+          <select id="team_type" value={teamForm.type} onChange={e => setTeamForm({ ...teamForm, type: e.target.value })}>
             <option>Ground Search</option>
             <option>UAS Search</option>
             <option>Dog Air</option>
@@ -65,8 +66,8 @@ const TeamFormModal = ({
         </div>
 
         <div className="form-row">
-          <label>Status</label>
-          <select value={teamForm.status} onChange={e => setTeamForm({ ...teamForm, status: e.target.value })}>
+          <label htmlFor="team_status">Status</label>
+          <select id="team_status" value={teamForm.status} onChange={e => setTeamForm({ ...teamForm, status: e.target.value })}>
             <option>Staged</option>
             <option>Assigned</option>
             <option>Deployed</option>
@@ -75,8 +76,9 @@ const TeamFormModal = ({
         </div>
 
         <div className="form-row">
-          <label>Leader</label>
+          <label htmlFor="team_leader">Leader</label>
           <select 
+            id="team_leader"
             value={teamForm.leader_responder_id || ''} 
             onChange={e => {
               const leaderId = e.target.value;
@@ -120,8 +122,8 @@ const TeamFormModal = ({
         </div>
 
         <div className="form-row">
-          <label>Equipment (comma separated)</label>
-          <input value={(teamForm.equipment || []).join(', ')} onChange={e => setTeamForm({ ...teamForm, equipment: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })} />
+          <label htmlFor="team_equipment">Equipment (comma separated)</label>
+          <input id="team_equipment" value={(teamForm.equipment || []).join(', ')} onChange={e => setTeamForm({ ...teamForm, equipment: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })} />
         </div>
 
         <div className="modal-actions">

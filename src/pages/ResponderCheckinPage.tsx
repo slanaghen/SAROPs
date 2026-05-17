@@ -30,8 +30,10 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
     incidentData, 
     startIncident, 
     responderName,
+    responderStatus,
     setResponderId,
     setResponderName,
+    setAccessLevel,
     setResponderStatus,
     isActive 
   } = useIncident();
@@ -52,14 +54,14 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
   // Guard: If the user navigates here but is already checked in, send them back
   useEffect(() => {
     // Only guard against accidental navigation if we have a confirmed responder in context
-    if (isActive && responderName && !checkInInProgress && !showTeamSelection && !loading) {
+    if (isActive && responderName && responderStatus !== 'CheckedOut' && !checkInInProgress && !showTeamSelection && !loading) {
       const isStaff = (incidentData && incidentData.name); // Simplified staff check
       const target = isStaff ? '/operations' : '/responder-dashboard';
       
       console.info(`Active session detected, redirecting to ${target}`);
       navigate(target);
     }
-  }, [isActive, responderName, checkInInProgress, showTeamSelection, loading, navigate, incidentData]);
+  }, [isActive, responderName, responderStatus, checkInInProgress, showTeamSelection, loading, navigate, incidentData]);
 
   // Incident selection state (moved from LoginPage)
   const [incidents, setIncidents] = useState<Incident[]>([]);
@@ -72,20 +74,6 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
   const effectiveOpId = (operationalPeriodId && uuidRegex.test(operationalPeriodId)) 
     ? operationalPeriodId 
     : incidentData?.opPeriodId;
-
-  // Check if the current user email has admin rights
-  useEffect(() => {
-    const checkAdminStatus = async () => {
-      if (!responderEmail) return;
-      const { data } = await supabase
-        .from('admin_users')
-        .select('email')
-        .eq('email', responderEmail.toLowerCase())
-        .single();
-      setIsAdminUser(!!data);
-    };
-    checkAdminStatus();
-  }, [responderEmail]);
 
   // Fetch active incidents for the dropdown (moved from LoginPage)
   useEffect(() => {
@@ -138,6 +126,7 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
     // Update context one last time to be sure
     setResponderName(responder.name);
     setResponderStatus(responder.status);
+    if (setAccessLevel) setAccessLevel(responder.access_level);
 
     if (onResponderCheckedIn) {
       onResponderCheckedIn(responder);
@@ -371,7 +360,6 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
       onCheckIn={handleCheckIn}
       isLoading={loading}
       error={error}
-      isAdmin={isAdminUser} // Pass admin status to component
       incidents={incidents} // Pass active incidents
       loadingIncidents={loadingIncidents}
       incidentError={incidentError}
