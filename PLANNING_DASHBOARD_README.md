@@ -153,6 +153,11 @@ CREATE POLICY "Users can view teams"
 ON teams FOR SELECT
 USING (auth.uid() IS NOT NULL);
 
+-- Allow authenticated users to create new teams
+CREATE POLICY "Users can create teams"
+ON teams FOR INSERT
+WITH CHECK (auth.uid() IS NOT NULL);
+
 -- Allow authenticated users to update team assignments
 CREATE POLICY "Users can update assignments"
 ON assignments FOR UPDATE

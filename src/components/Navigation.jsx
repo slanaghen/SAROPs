@@ -22,6 +22,9 @@ const Navigation = () => {
         <Link to="/checkin" className={`nav-tab ${path === '/checkin' ? 'active' : ''}`}>
           Check-In
         </Link>
+        <Link to="/checkout" className={`nav-tab ${path === '/checkout' ? 'active' : ''}`}>
+          Check-Out
+        </Link>
         <Link to="/responder-dashboard" className={`nav-tab ${path === '/responder-dashboard' ? 'active' : ''}`}>
           My Dashboard
         </Link>

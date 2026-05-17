@@ -30,10 +30,33 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
     assignTeamToAssignment,
     createTeam,
     createAssignment,
+    updateAssignment,
+    deleteAssignment,
     updateTeam,
     attachResponderToTeam,
     detachResponderFromTeam,
+    deleteTeam,
   } = usePlanningDashboard(supabase, operationalPeriodId);
+
+  // Helper to calculate the next available Assignment name based on division
+  const getNextAssignmentName = (division) => {
+    if (!assignments || assignments.length === 0) return `${division}A`;
+    
+    const divisionAssignments = assignments.filter(a => a.division === division);
+    const sequenceCodes = divisionAssignments
+      .map(a => {
+        // Look for names starting with the division followed by a single uppercase letter
+        if (a.name && a.name.startsWith(division)) {
+          const suffix = a.name.slice(division.length);
+          return suffix.length === 1 ? suffix.charCodeAt(0) : null;
+        }
+        return null;
+      })
+      .filter(code => code !== null && code >= 65 && code <= 90); // Only A-Z
+
+    const maxCode = sequenceCodes.length > 0 ? Math.max(...sequenceCodes) : 64; // 64 is @, so next is 65 (A)
+    return `${division}${String.fromCharCode(maxCode + 1)}`;
+  };
 
   // Load data when component mounts or when operational period changes
   useEffect(() => {
@@ -91,12 +114,21 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
           teams={teams}
           assignments={assignments}
           responders={responders}
+          defaultNewTeamName=""
+          defaultNewTeamType="Ground Search"
+          defaultNewAssignmentDivision="A"
+          defaultNewAssignmentName={getNextAssignmentName("A")}
+          defaultNewAssignmentType="Ground"
+          defaultNewAssignmentSize={2}
           onTeamAssigned={handleTeamAssigned}
           createTeam={createTeam}
           createAssignment={createAssignment}
+          updateAssignment={updateAssignment}
+          deleteAssignment={deleteAssignment}
           updateTeam={updateTeam}
           attachResponderToTeam={attachResponderToTeam}
           detachResponderFromTeam={detachResponderFromTeam}
+          deleteTeam={deleteTeam}
         />
       )}
     </div>

@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { assignResponderToTeam, removeResponderFromTeam } from '../services/responderService';
+import { useIncident } from '../context/IncidentContext';
 
 /**
  * usePlanningDashboard Hook
@@ -17,6 +18,21 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  const { incidentId, responderName, user } = useIncident();
+  const userName = responderName || user?.email || 'System';
+
+  /**
+   * Helper to automatically log database changes
+   */
+  const recordAction = useCallback(async (action) => {
+    if (!incidentId) return;
+    await supabaseClient.from('action_logs').insert({
+      incident_id: incidentId,
+      action,
+      user_name: userName
+    });
+  }, [supabaseClient, incidentId, userName]);
+
   /**
    * Fetch all data needed for the Planning Dashboard
    */
@@ -30,7 +46,7 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
       // Fetch teams for the operational period
       const { data: teamsData, error: teamsError } = await supabaseClient
         .from('teams')
-        .select('*')
+        .select('*, current_responders:team_responders(responder_id)')
         .eq('op_period_id', operationalPeriodId);
 
       if (teamsError) throw teamsError;
@@ -79,6 +95,12 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
         .eq('assignment_id', assignmentId);
 
       if (updateError) throw updateError;
+
+      const team = teams.find(t => t.team_id === teamId);
+      const assignment = assignments.find(a => a.assignment_id === assignmentId);
+      const teamName = team?.team_name_number || 'Unknown Team';
+      const asnName = assignment?.name || 'Unknown Assignment';
+      await recordAction(`Assigned ${teamName} to ${asnName}`);
 
       // Update local state
       setAssignments(prev =>
@@ -143,6 +165,8 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
 
       if (updateError) throw updateError;
 
+      await recordAction(`Unassigned team from ${assignmentToUnassign.name}`);
+
       // Update local state
       setAssignments(prev =>
         prev.map(a =>
@@ -195,6 +219,9 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
 
       if (error) throw error;
 
+      const team = teams.find(t => t.team_id === teamId);
+      await recordAction(`Updated status of ${team?.team_name_number || 'Team'} to ${newStatus}`);
+
       setTeams(prev =>
         prev.map(t =>
           t.team_id === teamId
@@ -218,10 +245,10 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
     try {
       const payload = {
         op_period_id: teamPayload.op_period_id,
-        team_name_number: teamPayload.team_name_number,
+        team_name_number: teamPayload.team_name_number || '',
         sartopo_color_hex: teamPayload.sartopo_color_hex || '#007bff',
         type: teamPayload.type || 'Other',
-        status: teamPayload.status || 'Draft',
+        status: teamPayload.status || 'Staged',
         leader_responder_id: teamPayload.leader_responder_id || null,
         equipment: teamPayload.equipment || [],
       };
@@ -233,6 +260,9 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
         .single();
 
       if (error) throw error;
+      if (!data) throw new Error('No team data returned from server');
+
+      await recordAction(`Created new team: ${teamPayload.team_name_number}`);
 
       const newTeam = data;
       setTeams(prev => [...prev, newTeam]);
@@ -260,13 +290,27 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
    * Create a new assignment
    */
   const createAssignment = useCallback(async (assignmentPayload) => {
+    if (!operationalPeriodId) {
+      const err = 'Cannot create assignment: No operational period selected.';
+      setError(err);
+      throw new Error(err);
+    }
+
     try {
       const payload = {
-        op_period_id: assignmentPayload.op_period_id,
-        name: assignmentPayload.name,
-        status: assignmentPayload.status || 'Draft',
+        op_period_id: operationalPeriodId,
+        name: assignmentPayload.name || '',
+        status: assignmentPayload.status || 'Planned',
         team_id: assignmentPayload.team_id || null,
+        division: assignmentPayload.division || '',
+        assignment_type: assignmentPayload.assignment_type || '',
+        assignment_size: assignmentPayload.assignment_size ? parseInt(assignmentPayload.assignment_size, 10) : null,
+        tac_channel: assignmentPayload.tac_channel || '',
+        description_narrative: assignmentPayload.description_narrative || '',
+        is_orphaned: false
       };
+
+      console.info('📡 Submitting New Assignment:', payload);
 
       const { data, error } = await supabaseClient
         .from('assignments')
@@ -275,20 +319,80 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
         .single();
 
       if (error) throw error;
+      if (!data) throw new Error('No assignment data returned from server');
 
-      const newAssignment = {
-        ...data,
-        division: assignmentPayload.division || '',
-        assignment_type: assignmentPayload.assignment_type || '',
-        assignment_size: assignmentPayload.assignment_size || '',
-        tac_channel: assignmentPayload.tac_channel || '',
-        description_narrative: assignmentPayload.description_narrative || '',
-      };
+      await recordAction(`Created new assignment: ${assignmentPayload.name}`);
 
-      setAssignments(prev => [...prev, newAssignment]);
-      return newAssignment;
+      // Atomic state update then background refresh
+      setAssignments(prev => [...prev, data]);
+      fetchDashboardData(); 
+      return data;
     } catch (err) {
       const errorMsg = err.message || 'Failed to create assignment';
+      setError(errorMsg);
+      throw err;
+    }
+  }, [supabaseClient, operationalPeriodId, fetchDashboardData]);
+
+  /**
+   * Update an existing assignment
+   */
+  const updateAssignment = useCallback(async (assignmentId, updates) => {
+    try {
+      const payload = {
+        name: updates.name || '',
+        status: updates.status || 'Planned',
+        division: updates.division || '',
+        assignment_type: updates.assignment_type || '',
+        assignment_size: updates.assignment_size ? parseInt(updates.assignment_size, 10) : null,
+        tac_channel: updates.tac_channel || '',
+        description_narrative: updates.description_narrative || '',
+        team_id: updates.team_id || null,
+        is_orphaned: updates.is_orphaned || false
+      };
+
+      console.info('📡 Updating Assignment:', assignmentId, payload);
+
+      const { data, error } = await supabaseClient
+        .from('assignments')
+        .update(payload)
+        .eq('assignment_id', assignmentId)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      await recordAction(`Updated details for assignment: ${payload.name}`);
+
+      // Refresh to ensure any status sync triggers are reflected
+      await fetchDashboardData();
+      return data;
+    } catch (err) {
+      const errorMsg = err.message || 'Failed to update assignment';
+      setError(errorMsg);
+      throw err;
+    }
+  }, [supabaseClient, fetchDashboardData]);
+
+  /**
+   * Delete an assignment record
+   */
+  const deleteAssignment = useCallback(async (assignmentId) => {
+    try {
+      const { error } = await supabaseClient
+        .from('assignments')
+        .delete()
+        .eq('assignment_id', assignmentId);
+
+      if (error) throw error;
+
+      const assignment = assignments.find(a => a.assignment_id === assignmentId);
+      await recordAction(`Deleted Assignment: ${assignment?.name || 'Unknown'}`);
+
+      setAssignments(prev => prev.filter(a => a.assignment_id !== assignmentId));
+      return { success: true };
+    } catch (err) {
+      const errorMsg = err.message || 'Failed to delete assignment';
       setError(errorMsg);
       throw err;
     }
@@ -307,6 +411,9 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
         .single();
 
       if (error) throw error;
+
+      const team = teams.find(t => t.team_id === teamId);
+      await recordAction(`Updated details for ${team?.team_name_number || 'Team'}`);
 
       setTeams(prev => prev.map(t => t.team_id === teamId ? data : t));
       return data;
@@ -348,6 +455,60 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
     }
   }, [supabaseClient, fetchDashboardData]);
 
+  /**
+   * Delete a team and release members back to Staged status
+   */
+  const deleteTeam = useCallback(async (teamId) => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      // 1. Get the members of the team before deleting
+      const { data: members, error: membersError } = await supabaseClient
+        .from('team_responders')
+        .select('responder_id')
+        .eq('team_id', teamId);
+
+      if (membersError) throw membersError;
+      const responderIds = members?.map(m => m.responder_id) || [];
+
+      // 2. Set responders back to Staged status
+      if (responderIds.length > 0) {
+        const { error: respError } = await supabaseClient
+          .from('responders')
+          .update({ status: 'Staged' })
+          .in('responder_id', responderIds);
+
+        if (respError) throw respError;
+      }
+
+      // 3. Delete the team record (cascading deletes team_responders entries)
+      const { error: deleteError } = await supabaseClient
+        .from('teams')
+        .delete()
+        .eq('team_id', teamId);
+
+      if (deleteError) throw deleteError;
+
+      const team = teams.find(t => t.team_id === teamId);
+      await recordAction(`Released/Deleted ${team?.team_name_number || 'Team'}`);
+
+      // 4. Update local state
+      setTeams(prev => prev.filter(t => t.team_id !== teamId));
+      setResponders(prev => prev.map(r => 
+        responderIds.includes(r.responder_id) ? { ...r, status: 'Staged' } : r
+      ));
+
+      return { success: true };
+    } catch (err) {
+      const errorMsg = err.message || 'Failed to release team';
+      setError(errorMsg);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, [supabaseClient]);
+
   return {
     // State
     teams,
@@ -363,6 +524,12 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
     updateTeamStatus,
     createTeam,
     createAssignment,
+    updateTeam,
+    attachResponderToTeam,
+    updateAssignment,
+    deleteAssignment,
+    detachResponderFromTeam,
+    deleteTeam,
 
     // Computed
     stagedTeams: teams.filter(t => t.status === 'Staged'),

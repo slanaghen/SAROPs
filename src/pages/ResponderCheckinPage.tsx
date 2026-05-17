@@ -26,16 +26,15 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
 }) => {
   const navigate = useNavigate();
   const { 
-    responderEmail, 
     incidentId: contextIncidentId, 
     incidentData, 
     startIncident, 
-    setResponderEmail, 
+    responderName,
+    setResponderId,
     setResponderName,
     setResponderStatus,
     isActive 
   } = useIncident();
-  const [isAdminUser, setIsAdminUser] = useState(false);
   const {
     checkedInResponder,
     isCheckedIn,
@@ -53,14 +52,14 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
   // Guard: If the user navigates here but is already checked in, send them back
   useEffect(() => {
     // Only guard against accidental navigation if we have a confirmed responder in context
-    if (isActive && responderEmail && !checkInInProgress && !showTeamSelection && !loading) {
-      const isStaff = (isAdminUser || (incidentData && incidentData.name));
+    if (isActive && responderName && !checkInInProgress && !showTeamSelection && !loading) {
+      const isStaff = (incidentData && incidentData.name); // Simplified staff check
       const target = isStaff ? '/operations' : '/responder-dashboard';
       
       console.info(`Active session detected, redirecting to ${target}`);
       navigate(target);
     }
-  }, [isActive, responderEmail, checkInInProgress, showTeamSelection, loading, navigate, isAdminUser, incidentData]);
+  }, [isActive, responderName, checkInInProgress, showTeamSelection, loading, navigate, incidentData]);
 
   // Incident selection state (moved from LoginPage)
   const [incidents, setIncidents] = useState<Incident[]>([]);
@@ -70,29 +69,9 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
 
   const effectiveIncidentId = incidentId || contextIncidentId;
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-  const effectiveOpId = (operationalPeriodId && uuidRegex.test(operationalPeriodId)) ? operationalPeriodId : incidentData?.opPeriodId;
-
-  /**
-   * Handles navigation after check-in or team assignment is complete
-   */
-  const completeCheckInFlow = (responder: Responder) => {
-    // Ensure we are using the most up-to-date data for the role check
-    const role = (responder.access_level || 'responder').toLowerCase();
-    
-    // Update context one last time to be sure
-    setResponderName(responder.name);
-    setResponderStatus(responder.status);
-
-    if (onResponderCheckedIn) {
-      onResponderCheckedIn(responder);
-    } else {
-      if (role === 'command staff' || role === 'admin' || isAdminUser) {
-        navigate('/operations');
-      } else {
-        navigate('/responder-dashboard');
-      }
-    }
-  };
+  const effectiveOpId = (operationalPeriodId && uuidRegex.test(operationalPeriodId)) 
+    ? operationalPeriodId 
+    : incidentData?.opPeriodId;
 
   // Check if the current user email has admin rights
   useEffect(() => {
@@ -107,27 +86,6 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
     };
     checkAdminStatus();
   }, [responderEmail]);
-
-  // Handle returning from Magic Link
-  useEffect(() => {
-    const resumeCheckIn = async () => {
-      const sessionResponse = await supabase.auth.getSession();
-      const session = sessionResponse?.data?.session;
-      
-      const pendingData = localStorage.getItem('sarops_pending_checkin');
-      
-      if (session && pendingData) {
-        const { responder, incidentId: savedIncId, incidentName } = JSON.parse(pendingData);
-        console.debug('Resuming check-in for:', responder.name);
-        
-        // Pass saved data directly to avoid relying on uninitialized state
-        await handleCheckIn(responder, savedIncId, incidentName);
-        localStorage.removeItem('sarops_pending_checkin');
-      }
-    };
-
-    resumeCheckIn();
-  }, []);
 
   // Fetch active incidents for the dropdown (moved from LoginPage)
   useEffect(() => {
@@ -166,6 +124,35 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
     fetchActiveIncidents();
   }, [isActive, navigate]);
 
+  /**
+   * Handles navigation after check-in or team assignment is complete
+   */
+  const completeCheckInFlow = async (responder: Responder) => {
+    console.group('🏁 Completing Check-In Flow');
+    
+    // Determine role based on the responder object's access_level
+    const role = (responder.access_level || 'responder').toLowerCase();
+
+    console.debug('Check-in complete. Routing as:', role);
+
+    // Update context one last time to be sure
+    setResponderName(responder.name);
+    setResponderStatus(responder.status);
+
+    if (onResponderCheckedIn) {
+      onResponderCheckedIn(responder);
+    } else {
+      if (role === 'command staff' || role === 'admin') {
+        console.log('Navigating to Operations Dashboard');
+        navigate('/operations');
+      } else {
+        console.log('Navigating to Responder Dashboard');
+        navigate('/responder-dashboard');
+      }
+    }
+    console.groupEnd();
+  };
+
   const handleIncidentSelected = (id: string) => {
     setSelectedIncidentId(id);
   };
@@ -175,53 +162,31 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
   /**
    * Handle responder check-in
    */
-  const handleCheckIn = async (responder: Responder, incidentIdOverride?: string, incidentNameOverride?: string) => {
+  const handleCheckIn = async (
+    responder: Responder
+  ) => {
     setCheckInInProgress(true);
 
     try {
-      const sessionResponse = await supabase.auth.getSession();
-      const session = sessionResponse?.data?.session;
-      
-      const targetIncidentId = incidentIdOverride || selectedIncidentId;
+      const targetIncidentId = selectedIncidentId;
       const activeIncident = incidents.find(inc => inc.incident_id === targetIncidentId);
-      const targetIncidentName = incidentNameOverride || activeIncident?.name;
-      
-      // Extract latest operational period data
+      const targetIncidentName = activeIncident?.name;
       const latestOp = (activeIncident as any)?.operational_periods?.[0];
       const targetOpNumber = latestOp?.op_number || '1';
       const targetOpId = latestOp?.op_period_id;
 
-      // If not authenticated, we need to send a Magic Link to establish a session for Admin/Command Staff RLS
-      if (!session) {
-        const { error: authError } = await supabase.auth.signInWithOtp({
-          email: responder.email,
-          options: {
-            emailRedirectTo: window.location.origin,
-          },
-        });
-
-        if (authError) throw authError;
-
-        // Store pending check-in data to resume after they click the link
-        localStorage.setItem('sarops_pending_checkin', JSON.stringify({
-          responder,
-          incidentId: targetIncidentId,
-          incidentName: targetIncidentName
-        }));
-
-        alert(`Authentication required for this email. A Magic Link has been sent to ${responder.email}. Please click it to complete your check-in.`);
-        return;
-      }
-
       await checkIn(responder);
 
       // Set responder email and incident in context after successful check-in
-      setResponderEmail(responder.email);
-      setResponderName(responder.name);
-      setResponderStatus(responder.status);
+      if (setResponderId) setResponderId(responder.responder_id);
+      setResponderName(responder.name); // Update context with responder's name
+      setResponderStatus(responder.status); // Update context with responder's status
       
-      if (targetIncidentId && targetIncidentName && targetOpId) {
-        startIncident(targetIncidentId, targetIncidentName, targetOpNumber, targetOpId);
+      if (targetIncidentId && targetIncidentName) {
+        console.log('✅ Setting active incident context:', { name: targetIncidentName, op: targetOpNumber });
+        startIncident(targetIncidentId, targetIncidentName, targetOpNumber, targetOpId || '');
+      } else {
+        console.warn('⚠️ Could not set active incident context: missing ID or Name', { targetIncidentId, targetIncidentName });
       }
 
       // If operational period provided, show team assignment
@@ -296,7 +261,8 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
       if (historyError) throw historyError;
 
       // Callback
-      completeCheckInFlow(checkedInResponder);
+      const attachedResponder = { ...checkedInResponder, status: 'Attached' as ResponderStatus };
+      completeCheckInFlow(attachedResponder);
 
       // Close team selection
       setShowTeamSelection(false);
@@ -406,12 +372,12 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
       isLoading={loading}
       error={error}
       isAdmin={isAdminUser} // Pass admin status to component
-      initialEmail={responderEmail} // Pass email from context to pre-fill
       incidents={incidents} // Pass active incidents
       loadingIncidents={loadingIncidents}
       incidentError={incidentError}
       onIncidentSelected={handleIncidentSelected}
       onCreateIncident={handleCreateIncident}
+      selectedIncidentId={selectedIncidentId}
     />
   );
 };

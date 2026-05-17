@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { Responder, ResponderStatus } from '../types/sarops-types';
 import '../styles/ResponderCheckin.css';
@@ -21,13 +21,12 @@ interface ResponderCheckinProps {
   isLoading?: boolean;
   error?: string | null;
   successMessage?: string | null;
-  isAdmin?: boolean;
-  initialEmail?: string; // For pre-filling email from login
   incidents?: any[]; // List of active incidents
   loadingIncidents?: boolean;
   incidentError?: string | null;
   onIncidentSelected?: (incidentId: string) => void;
   onCreateIncident?: () => void;
+  selectedIncidentId?: string;
 }
 
 const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
@@ -35,20 +34,20 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
   isLoading = false,
   error: externalError = null,
   successMessage: externalSuccessMessage = null,
-  isAdmin = false,
-  initialEmail = '',
   incidents = [],
   loadingIncidents = false,
   incidentError = null,
   onIncidentSelected,
   onCreateIncident,
+  selectedIncidentId = '',
 }) => {
   // Form state
   const [formData, setFormData] = useState({
     name: '',
+    email: '',
+    password: '',
     agency: '',
     identifier: '',
-    email: '', // New email field
     cell_phone: '',
     special_skills: '',
     is_command_staff: false,
@@ -62,27 +61,20 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
   const [confirmedResponder, setConfirmedResponder] = useState<Responder | null>(null);
   const [confirmationData, setConfirmationData] = useState<{
     name: string;
+    email: string;
+    password?: string;
     agency: string;
     identifier: string;
     cell_phone: string;
-    email: string; // New email field
     special_skills: string;
     is_command_staff: boolean;
+    incident_id?: string;
   } | null>(null);
 
   // Use external error/loading/success if provided, otherwise use internal state
   const displayError = externalError || internalError;
   const displayLoading = isLoading || localLoading;
   const displaySuccessMessage = externalSuccessMessage || successMessage;
-  const [selectedIncidentId, setSelectedIncidentId] = useState('');
-
-  // Pre-fill email if provided
-  useEffect(() => {
-    if (initialEmail && formData.email === '') {
-      setFormData(prev => ({ ...prev, email: initialEmail }));
-    }
-  }, [initialEmail, formData.email]);
-
 
   /**
    * Format phone number as nnn-nnn-nnnn
@@ -132,16 +124,20 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
       setInternalError('Name is required');
       return false;
     }
+    if (!data.email?.trim() || !data.email.includes('@')) {
+      setInternalError('A valid email address is required');
+      return false;
+    }
+    if (!data.password || data.password.length < 6) {
+      setInternalError('Password must be at least 6 characters');
+      return false;
+    }
     if (!data.agency?.trim()) {
       setInternalError('Agency is required');
       return false;
     }
     if (!data.identifier?.trim()) {
       setInternalError('Identifier is required (e.g., badge number, radio call sign)');
-      return false;
-    }
-    if (!data.email?.trim()) {
-      setInternalError('Email address is required');
       return false;
     }
     if (!data.cell_phone?.trim()) {
@@ -162,18 +158,19 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
   /**
    * Create responder object from form data
    */
-  const createResponderObject = (data = formData): Responder => {
+  const createResponderObject = (data = formData, incidentId = selectedIncidentId): Responder => {
     const now = new Date().toISOString();
 
     return {
       responder_id: uuidv4(),
+      incident_id: incidentId,
       name: (data.name || '').trim(),
+      email: (data.email || '').trim().toLowerCase(),
       agency: (data.agency || '').trim(),
       identifier: (data.identifier || '').trim(),
-      email: (data.email || '').trim().toLowerCase(), // Store email
       cell_phone: (data.cell_phone || '').trim(),
       special_skills: (data.special_skills || '').trim() || undefined,
-      access_level: isAdmin ? 'admin' : (data.is_command_staff ? 'command staff' : 'responder'),
+      access_level: data.is_command_staff ? 'command staff' : 'responder', // Admin is now handled by AdminPage auth
       device_id: generateDeviceId(),
       checkin_datetime: now,
       checkout_datetime: null,
@@ -193,12 +190,14 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
     const fd = new FormData(formEl);
     const submitted = {
       name: (fd.get('name') as string) || '',
+      email: (fd.get('email') as string) || '',
+      password: (fd.get('password') as string) || '',
       agency: (fd.get('agency') as string) || '',
       identifier: (fd.get('identifier') as string) || '',
-      email: (fd.get('email') as string) || '', // Get email from form
       cell_phone: formatPhoneNumber((fd.get('cell_phone') as string) || ''),
       special_skills: (fd.get('special_skills') as string) || '',
       is_command_staff: fd.get('is_command_staff') === 'on',
+      incident_id: selectedIncidentId,
     };
 
     // Update controlled state to reflect formatted values and snapshot confirmation data
@@ -210,7 +209,7 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
     }
 
     // Create responder object from submitted values and show confirmation
-    const responder = createResponderObject(submitted); // selectedIncidentId is not part of responder object
+    const responder = createResponderObject(submitted, selectedIncidentId);
     console.debug('ResponderCheckin submit -> responder:', responder);
     setConfirmedResponder(responder);
     setShowConfirmation(true);
@@ -239,12 +238,13 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
       // Reset form
       setFormData({
         name: '',
+        email: '',
+        password: '',
         agency: '',
         identifier: '',
         cell_phone: '',
         special_skills: '',
         is_command_staff: false,
-        email: '',
       });
       setConfirmationData(null);
 
@@ -323,6 +323,34 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
             </div>
 
             <div className="form-group">
+              <label htmlFor="email">Email Address *</label>
+              <input
+                id="email"
+                type="email"
+                name="email"
+                value={formData.email}
+                onChange={handleInputChange}
+                placeholder="name@agency.gov"
+                required
+                disabled={displayLoading}
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="password">Password *</label>
+              <input
+                id="password"
+                type="password"
+                name="password"
+                value={formData.password}
+                onChange={handleInputChange}
+                placeholder="••••••••"
+                required
+                disabled={displayLoading}
+              />
+            </div>
+
+            <div className="form-group">
               <label htmlFor="agency">Agency *</label>
               <input
                 id="agency"
@@ -351,20 +379,6 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
               <small className="form-hint">
                 A unique identifier to distinguish you from other responders
               </small>
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="email">Email Address *</label>
-              <input
-                id="email"
-                type="email"
-                name="email"
-                value={formData.email}
-                onChange={handleInputChange}
-                placeholder="your.name@agency.gov"
-                required
-                disabled={displayLoading}
-              />
             </div>
 
             <div className="form-group">
@@ -421,7 +435,6 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
                   id="incident"
                   value={selectedIncidentId}
                   onChange={(e) => {
-                    setSelectedIncidentId(e.target.value);
                     onIncidentSelected?.(e.target.value);
                   }}
                   disabled={loadingIncidents || displayLoading}
@@ -471,6 +484,18 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
               </div>
 
               <div className="detail-item">
+                <span className="detail-label">Incident:</span>
+                <span className="detail-value">
+                  {incidents.find(i => i.incident_id === selectedIncidentId)?.name || 'None Selected'}
+                </span>
+              </div>
+
+              <div className="detail-item">
+                <span className="detail-label">Email:</span>
+                <span className="detail-value">{displayResponder.email}</span>
+              </div>
+
+              <div className="detail-item">
                 <span className="detail-label">Agency:</span>
                 <span className="detail-value">{displayResponder.agency}</span>
               </div>
@@ -481,19 +506,14 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
               </div>
 
               <div className="detail-item">
-                <span className="detail-label">Email:</span>
-                <span className="detail-value">{displayResponder.email}</span>
-              </div>
-
-              <div className="detail-item">
                 <span className="detail-label">Cell Phone:</span>
                 <span className="detail-value">{displayResponder.cell_phone}</span>
               </div>
 
               <div className="detail-item">
                 <span className="detail-label">Access Level:</span>
-                <span className="detail-value">
-                  {isAdmin ? 'System Admin' : (displayResponder.is_command_staff ? 'Command Staff' : 'Responder')}
+                <span className="detail-value"> {/* Admin status is now determined by AdminPage auth */}
+                  {displayResponder.is_command_staff ? 'Command Staff' : 'Responder'}
                 </span>
               </div>
 
@@ -506,7 +526,7 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
 
               <div className="detail-item">
                 <span className="detail-label">Status:</span>
-                <span className="detail-value status-badge">
+                <span className={`detail-value status-badge ${((confirmedResponder && confirmedResponder.status) || 'Staged').toLowerCase()}`}>
                   {(confirmedResponder && confirmedResponder.status) || 'Staged'}
                 </span>
               </div>

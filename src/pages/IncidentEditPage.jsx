@@ -33,6 +33,7 @@ const IncidentEditPage = () => {
   const [incident, setIncident] = useState({
     name: 'Missing Person Search',
     number: getDefaultIncidentNumber(),
+    sartopo_id: '',
     start_datetime: getCurrentLocalDatetime(),
     end_datetime: '',
     notes: '',
@@ -86,6 +87,7 @@ const IncidentEditPage = () => {
             incident_id: incidentId,
             name: incident.name,
             number: incident.number,
+            sartopo_id: incident.sartopo_id || null,
             start_datetime: incident.start_datetime,
             notes: incident.notes
           });
@@ -175,6 +177,16 @@ const IncidentEditPage = () => {
                 value={incident.number}
                 onChange={(e) => handleIncidentChange('number', e.target.value)}
                 placeholder="Incident Number"
+              />
+            </label>
+
+            <label>
+              SARTopo Map ID
+              <input
+                type="text"
+                value={incident.sartopo_id}
+                onChange={(e) => handleIncidentChange('sartopo_id', e.target.value)}
+                placeholder="e.g. 9ABC"
               />
             </label>
 
@@ -291,6 +303,10 @@ const IncidentEditPage = () => {
             <div>
               <strong>Incident Number:</strong>
               <p>{incident.number || '—'}</p>
+            </div>
+            <div>
+              <strong>SARTopo Map ID:</strong>
+              <p>{incident.sartopo_id || '—'}</p>
             </div>
             <div>
               <strong>Incident Start:</strong>

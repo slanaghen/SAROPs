@@ -26,15 +26,16 @@ export const IncidentProvider = ({ children }) => {
       return (id && uuidRegex.test(id)) ? id : null;
     } catch { return null; }
   });
-
-  const [responderEmail, setResponderEmail] = useState(() => {
+  const [responderId, setResponderId] = useState(() => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (!saved) return null;
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (!saved) return '';
       const parsed = JSON.parse(saved);
-      return parsed && typeof parsed === 'object' ? parsed.responderEmail || '' : '';
-    } catch { return ''; }
+      const rid = parsed?.responderId;
+      return (rid && uuidRegex.test(rid)) ? rid : null;
+    } catch { return null; }
   });
+
   const [responderName, setResponderName] = useState(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
@@ -50,6 +51,11 @@ export const IncidentProvider = ({ children }) => {
       const parsed = JSON.parse(saved);
       return parsed && typeof parsed === 'object' ? parsed.responderStatus || '' : '';
     } catch { return ''; }
+  });
+  const [isAdmin, setIsAdmin] = useState(() => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (!saved) return false;
+    try { return !!JSON.parse(saved).isAdmin; } catch { return false; }
   });
   const [incidentData, setIncidentData] = useState(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -69,12 +75,13 @@ export const IncidentProvider = ({ children }) => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       isActive,
       incidentId,
-      responderEmail,
+      responderId,
       responderName,
       responderStatus,
+      isAdmin,
       incidentData
     }));
-  }, [isActive, incidentId, responderEmail, responderName, responderStatus, incidentData]);
+  }, [isActive, incidentId, responderId, responderName, responderStatus, isAdmin, incidentData]);
 
   const startIncident = (id, name, opNumber, opPeriodId) => {
     setIncidentId(id);
@@ -88,8 +95,9 @@ export const IncidentProvider = ({ children }) => {
 
   const logout = () => {
     setIsActive(false);
+    setIsAdmin(false);
     setIncidentId(null);
-    setResponderEmail('');
+    setResponderId(null);
     setResponderName('');
     setResponderStatus('');
     setIncidentData({ name: '', opNumber: '', opPeriodId: '' });
@@ -100,14 +108,16 @@ export const IncidentProvider = ({ children }) => {
     <IncidentContext.Provider value={{ 
       isActive, 
       incidentId,
-      responderEmail,
+      responderId,
       responderName,
       responderStatus,
       incidentData, 
       startIncident, 
       endIncident,
       logout,
-      setResponderEmail,
+      isAdmin,
+      setIsAdmin,
+      setResponderId,
       setResponderName,
       setResponderStatus
     }}>

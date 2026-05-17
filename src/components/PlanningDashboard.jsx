@@ -1,5 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import '../styles/PlanningDashboard.css';
+import TeamFormModal from './TeamFormModal';
+import AssignmentFormModal from './AssignmentFormModal';
 
 /**
  * PlanningDashboard Component
@@ -16,12 +18,21 @@ const PlanningDashboard = ({
   teams = [],
   assignments = [], 
   responders = [],
+  defaultNewTeamName = '',
+  defaultNewTeamType = 'Ground Search',
+  defaultNewAssignmentDivision = 'A',
+  defaultNewAssignmentName = '',
+  defaultNewAssignmentType = 'Ground',
+  defaultNewAssignmentSize = 2,
   onTeamAssigned,
   createTeam,
   createAssignment,
+  updateAssignment,
+  deleteAssignment,
   updateTeam,
   attachResponderToTeam,
   detachResponderFromTeam,
+  deleteTeam,
 }) => {
   const [selectedTeamId, setSelectedTeamId] = useState(null);
   const [selectedAssignmentId, setSelectedAssignmentId] = useState(null);
@@ -34,6 +45,77 @@ const PlanningDashboard = ({
   const [assignmentForm, setAssignmentForm] = useState({});
   const [showMembersModal, setShowMembersModal] = useState(false);
   const [activeTeam, setActiveTeam] = useState(null);
+  const [draggedItem, setDraggedItem] = useState(null); // { id, type }
+  const [dropTarget, setDropTarget] = useState(null); // { id, type }
+
+  const handleDragStart = (e, id, type) => {
+    setDraggedItem({ id, type });
+    e.dataTransfer.setData('text/plain', id);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragEnd = () => {
+    setDraggedItem(null);
+    setDropTarget(null);
+  };
+
+  const handleDragOver = (e, type) => {
+    if (draggedItem && draggedItem.type !== type) {
+      e.preventDefault(); // Allows the drop event to fire
+    }
+  };
+
+  const handleDragEnter = (e, id, type) => {
+    if (draggedItem && draggedItem.type !== type) {
+      setDropTarget({ id, type });
+    }
+  };
+
+  const handleDrop = async (e, id, type) => {
+    e.preventDefault();
+    if (!draggedItem || draggedItem.type === type) return;
+
+    const teamId = draggedItem.type === 'team' ? draggedItem.id : id;
+    const assignmentId = draggedItem.type === 'assignment' ? draggedItem.id : id;
+
+    const team = teams.find(t => t.team_id === teamId);
+    const assignment = assignments.find(a => a.assignment_id === assignmentId);
+
+    if (team && assignment) {
+      handleDragEnd();
+      // Execute assignment using existing logic
+      setLoading(true);
+      try {
+        if (onTeamAssigned) {
+          await onTeamAssigned({ teamId, assignmentId, team, assignment });
+        }
+        setSuccessMessage(`Team "${team.team_name_number}" assigned to "${assignment.name}"`);
+        setTimeout(() => setSuccessMessage(null), 3000);
+        setSelectedTeamId(null);
+        setSelectedAssignmentId(null);
+      } catch (err) {
+        setError(err.message || 'Failed to assign team');
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
+  const isTeamHighlighted = (teamId) => {
+    if (selectedTeamId === teamId) return true;
+    if (!draggedItem) return false;
+    if (draggedItem.id === teamId && draggedItem.type === 'team' && dropTarget?.type === 'assignment') return true;
+    if (dropTarget?.id === teamId && draggedItem.type === 'assignment') return true;
+    return false;
+  };
+
+  const isAssignmentHighlighted = (assignmentId) => {
+    if (selectedAssignmentId === assignmentId) return true;
+    if (!draggedItem) return false;
+    if (draggedItem.id === assignmentId && draggedItem.type === 'assignment' && dropTarget?.type === 'team') return true;
+    if (dropTarget?.id === assignmentId && draggedItem.type === 'team') return true;
+    return false;
+  };
 
   // Filter teams to only show those with "Staged" status
   const stagedTeams = teams.filter(t => t.status === 'Staged');
@@ -60,7 +142,13 @@ const PlanningDashboard = ({
     return responder ? responder.name : 'Unknown';
   };
 
-  const stagedResponders = responders.filter(r => r.status === 'Staged');
+  // Show responders who are Staged (available) OR already part of the team being edited
+  const stagedResponders = responders.filter(r => {
+    const isStaged = r.status === 'Staged';
+    const isCurrentMember = (teamForm.responder_ids || []).includes(r.responder_id);
+    const isCurrentLeader = teamForm.leader_responder_id === r.responder_id;
+    return isStaged || isCurrentMember || isCurrentLeader;
+  });
 
   // Get team member count
   const getTeamMemberCount = (team) => {
@@ -70,10 +158,10 @@ const PlanningDashboard = ({
   const openNewTeamForm = () => {
     setTeamForm({
       op_period_id: operationalPeriodId,
-      team_name_number: '',
+      team_name_number: defaultNewTeamName,
       sartopo_color_hex: '#007bff',
-      type: 'Other',
-      status: 'Draft',
+      type: defaultNewTeamType,
+      status: 'Staged',
       leader_responder_id: null,
       equipment: [],
       responder_ids: [],
@@ -84,13 +172,20 @@ const PlanningDashboard = ({
   const openNewAssignmentForm = () => {
     setAssignmentForm({
       op_period_id: operationalPeriodId,
-      division: '',
-      name: '',
-      assignment_type: '',
-      assignment_size: '',
+      division: defaultNewAssignmentDivision,
+      name: defaultNewAssignmentName,
+      assignment_type: defaultNewAssignmentType,
+      assignment_size: defaultNewAssignmentSize,
       tac_channel: '',
       description_narrative: '',
-      status: 'Draft',
+      status: 'Planned',
+    });
+    setShowAssignmentForm(true);
+  };
+
+  const openEditAssignmentForm = (assignment) => {
+    setAssignmentForm({
+      ...assignment
     });
     setShowAssignmentForm(true);
   };
@@ -115,10 +210,70 @@ const PlanningDashboard = ({
     });
   };
 
-  const handleSaveTeam = async () => {
+  const handleReleaseTeam = async (team) => {
+    const msg = `Are you sure you want to release "${team.team_name_number}"? This will return all members to Staged status and delete the team record.`;
+    if (!window.confirm(msg)) return;
+
     try {
       setLoading(true);
+      if (deleteTeam) {
+        await deleteTeam(team.team_id);
+        
+        // Clear selection if the released team was selected
+        if (selectedTeamId === team.team_id) {
+          setSelectedTeamId(null);
+        }
+        
+        setSuccessMessage(`Team "${team.team_name_number}" released`);
+        setTimeout(() => setSuccessMessage(null), 3000);
+      }
+    } catch (err) {
+      setError(err.message || 'Failed to release team');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteAssignment = async (assignment) => {
+    if (!window.confirm(`Are you sure you want to delete assignment "${assignment.name}"? This action cannot be undone.`)) return;
+
+    try {
+      setLoading(true);
+      if (deleteAssignment) {
+        await deleteAssignment(assignment.assignment_id);
+        
+        // Clear selection if the deleted assignment was selected
+        if (selectedAssignmentId === assignment.assignment_id) {
+          setSelectedAssignmentId(null);
+        }
+        
+        setSuccessMessage(`Assignment "${assignment.name}" deleted`);
+        setTimeout(() => setSuccessMessage(null), 3000);
+      }
+    } catch (err) {
+      setError(err.message || 'Failed to delete assignment');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSaveTeam = async () => {
+    if (!teamForm.leader_responder_id) {
+      setError('A team leader must be selected in order to save a team.');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      
+      // Ensure leader is included in responder_ids for consistency
+      const currentResponders = teamForm.responder_ids || [];
+      const finalResponderIds = (teamForm.leader_responder_id && !currentResponders.includes(teamForm.leader_responder_id))
+        ? [...currentResponders, teamForm.leader_responder_id]
+        : currentResponders;
+
       if (teamForm.team_id && updateTeam) {
+        // 1. Update core team details
         await updateTeam(teamForm.team_id, {
           team_name_number: teamForm.team_name_number,
           sartopo_color_hex: teamForm.sartopo_color_hex,
@@ -127,31 +282,59 @@ const PlanningDashboard = ({
           leader_responder_id: teamForm.leader_responder_id,
           equipment: teamForm.equipment,
         });
+
+        // 2. Reconcile responder attachments
+        const originalIds = teamForm.current_responders?.map(r => r.responder_id) || [];
+        const toAdd = finalResponderIds.filter(id => !originalIds.includes(id));
+        const toRemove = originalIds.filter(id => !finalResponderIds.includes(id));
+
+        if (toAdd.length > 0 || toRemove.length > 0) {
+          await Promise.all([
+            ...toAdd.map(id => attachResponderToTeam?.(id, teamForm.team_id)),
+            ...toRemove.map(id => detachResponderFromTeam?.(id, teamForm.team_id))
+          ]);
+        }
+
         setSuccessMessage('Team updated');
       } else if (createTeam) {
-        await createTeam(teamForm);
+        await createTeam({ ...teamForm, responder_ids: finalResponderIds });
         setSuccessMessage('Team created');
       }
       setShowTeamForm(false);
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (err) {
-      setError(err.message || 'Failed to save team');
+      const message = err.message || 'Failed to save team';
+      if (message.includes('row-level security')) {
+        setError('Permission denied: You do not have permission to create teams. Please check database RLS policies.');
+      } else {
+        setError(message);
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSaveAssignment = async () => {
+  const handleSaveAssignment = async (formData) => {
     try {
       setLoading(true);
-      if (createAssignment) {
-        await createAssignment(assignmentForm);
-        setSuccessMessage('Assignment created');
+      if (formData.assignment_id && updateAssignment) {
+        await updateAssignment(formData.assignment_id, formData);
+        setSuccessMessage('Assignment updated');
+      } else if (createAssignment) {
+        if (createAssignment) {
+          await createAssignment(formData);
+          setSuccessMessage('Assignment created');
+        }
       }
       setShowAssignmentForm(false);
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (err) {
-      setError(err.message || 'Failed to save assignment');
+      const message = err.message || 'Failed to save assignment';
+      if (message.includes('row-level security')) {
+        setError('Permission denied: You do not have permission to create or update assignments. Please check database RLS policies.');
+      } else {
+        setError(message);
+      }
     } finally {
       setLoading(false);
     }
@@ -177,7 +360,12 @@ const PlanningDashboard = ({
       // update activeTeam reference after refresh by relying on parent state updates
       setTimeout(() => setSuccessMessage(null), 2500);
     } catch (err) {
-      setError(err.message || 'Failed to update team members');
+      const message = err.message || 'Failed to update team members';
+      if (message.includes('row-level security')) {
+        setError('Permission denied: You do not have permission to modify team members. Please check database RLS policies.');
+      } else {
+        setError(message);
+      }
     } finally {
       setLoading(false);
     }
@@ -235,7 +423,7 @@ const PlanningDashboard = ({
   };
 
   return (
-    <div className="planning-dashboard">
+    <div className="planning-dashboard" data-dragging={!!draggedItem}>
       <h1>Planning Dashboard - Team Assignment</h1>
 
       {/* Messages */}
@@ -279,51 +467,50 @@ const PlanningDashboard = ({
               {stagedTeams.map(team => (
                 <div
                   key={team.team_id}
-                  className={`team-card ${selectedTeamId === team.team_id ? 'selected' : ''}`}
+                  className={`team-card ${isTeamHighlighted(team.team_id) ? 'selected' : ''}`}
                   onClick={() => setSelectedTeamId(team.team_id)}
+                  draggable="true"
+                  onDragStart={(e) => handleDragStart(e, team.team_id, 'team')}
+                  onDragEnd={handleDragEnd}
+                  onDragOver={(e) => handleDragOver(e, 'team')}
+                  onDragEnter={(e) => handleDragEnter(e, team.team_id, 'team')}
+                  onDragLeave={() => setDropTarget(null)}
+                  onDrop={(e) => handleDrop(e, team.team_id, 'team')}
                   role="option"
                   aria-selected={selectedTeamId === team.team_id}
                   tabIndex={0}
                 >
-                  <div className="team-header">
+                  <div className="team-header" style={{ gap: '8px', justifyContent: 'flex-start', flexWrap: 'wrap' }}>
                     <div className="team-color-indicator" 
                          style={{ backgroundColor: team.sartopo_color_hex }}
                          title={`Color: ${team.sartopo_color_hex}`}
                     />
-                    <div className="team-name">{team.team_name_number}</div>
+                    <div className="team-name" style={{ marginRight: '4px' }}>{team.team_name_number}</div>
                     <div className={`team-type ${team.type.replace(/\s+/g, '-').toLowerCase()}`}>
                       {team.type}
                     </div>
+                    <span style={{ fontSize: '11px', color: '#64748b' }}>Size: {getTeamMemberCount(team)}</span>
+                    <span style={{ fontSize: '11px', color: '#1e293b', fontWeight: 500 }}>Ldr: {getResponderName(team.leader_responder_id)}</span>
                   </div>
 
-                  <div className="team-details">
-                    <div className="detail-row">
-                      <span className="detail-label">Leader:</span>
-                      <span className="detail-value">
-                        {getResponderName(team.leader_responder_id)}
-                      </span>
-                    </div>
-
-                    <div className="detail-row">
-                      <span className="detail-label">Members:</span>
-                      <span className="detail-value">
-                        {getTeamMemberCount(team)}
-                      </span>
-                    </div>
-
-                    {team.equipment && team.equipment.length > 0 && (
+                  {team.equipment && team.equipment.length > 0 && (
+                    <div className="team-details" style={{ marginTop: '4px' }}>
                       <div className="detail-row">
                         <span className="detail-label">Equipment:</span>
-                        <span className="detail-value">
-                          {team.equipment.join(', ')}
-                        </span>
+                        <span className="detail-value">{team.equipment.join(', ')}</span>
                       </div>
-                    )}
-                  </div>
+                    </div>
+                  )}
 
-                  <div className="team-actions">
+                  <div className="team-actions" style={{ marginTop: '4px' }}>
                     <button className="btn btn-secondary btn-sm" onClick={(e) => { e.stopPropagation(); openEditTeamForm(team); }}>Edit</button>
-                    <button className="btn btn-secondary btn-sm" onClick={(e) => { e.stopPropagation(); openMembersModal(team); }}>Members</button>
+                    <button 
+                      className="btn btn-secondary btn-sm" 
+                      onClick={(e) => { e.stopPropagation(); handleReleaseTeam(team); }}
+                      style={{ color: '#dc2626' }}
+                    >
+                      Release
+                    </button>
                   </div>
                 </div>
               ))}
@@ -349,62 +536,45 @@ const PlanningDashboard = ({
               {availableAssignments.map(assignment => (
                 <div
                   key={assignment.assignment_id}
-                  className={`assignment-card ${selectedAssignmentId === assignment.assignment_id ? 'selected' : ''}`}
+                  className={`assignment-card ${isAssignmentHighlighted(assignment.assignment_id) ? 'selected' : ''}`}
                   onClick={() => setSelectedAssignmentId(assignment.assignment_id)}
+                  draggable="true"
+                  onDragStart={(e) => handleDragStart(e, assignment.assignment_id, 'assignment')}
+                  onDragEnd={handleDragEnd}
+                  onDragOver={(e) => handleDragOver(e, 'assignment')}
+                  onDragEnter={(e) => handleDragEnter(e, assignment.assignment_id, 'assignment')}
+                  onDragLeave={() => setDropTarget(null)}
+                  onDrop={(e) => handleDrop(e, assignment.assignment_id, 'assignment')}
                   role="option"
                   aria-selected={selectedAssignmentId === assignment.assignment_id}
                   tabIndex={0}
                 >
-                  <div className="assignment-header">
-                    <div className="assignment-name">{assignment.name}</div>
+                  <div className="assignment-header" style={{ gap: '8px', justifyContent: 'flex-start', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <div className="assignment-name" style={{ marginRight: '4px' }}>{assignment.name}</div>
+                    {assignment.assignment_type && <div className="team-type" style={{ background: '#f1f5f9', color: '#475569' }}>{assignment.assignment_type}</div>}
+                    <span style={{ fontSize: '11px', color: '#64748b' }}>Size: {assignment.assignment_size}</span>
                     <div className={`assignment-status ${assignment.status.toLowerCase()}`}>
                       {assignment.status}
                     </div>
                   </div>
 
-                  <div className="assignment-details">
-                    <div className="detail-row">
-                      <span className="detail-label">Assignment ID:</span>
-                      <span className="detail-value monospace">
-                        {assignment.assignment_id.substring(0, 8)}...
-                      </span>
+                  {assignment.description_narrative && (
+                    <div className="assignment-details" style={{ marginTop: '4px' }}>
+                      <div style={{ fontSize: '12px', color: '#475569', lineHeight: '1.4' }}>
+                        {assignment.description_narrative}
+                      </div>
                     </div>
+                  )}
 
-                    {assignment.assignment_type && (
-                      <div className="detail-row">
-                        <span className="detail-label">Type:</span>
-                        <span className="detail-value">
-                          {assignment.assignment_type}
-                        </span>
-                      </div>
-                    )}
-
-                    {assignment.division && (
-                      <div className="detail-row">
-                        <span className="detail-label">Division:</span>
-                        <span className="detail-value">
-                          {assignment.division}
-                        </span>
-                      </div>
-                    )}
-
-                    {assignment.tac_channel && (
-                      <div className="detail-row">
-                        <span className="detail-label">TAC Channel:</span>
-                        <span className="detail-value">
-                          {assignment.tac_channel}
-                        </span>
-                      </div>
-                    )}
-
-                    {assignment.sartopo_id && (
-                      <div className="detail-row">
-                        <span className="detail-label">SARTopo ID:</span>
-                        <span className="detail-value monospace">
-                          {assignment.sartopo_id}
-                        </span>
-                      </div>
-                    )}
+                  <div className="team-actions" style={{ marginTop: '6px' }}>
+                    <button className="btn btn-secondary btn-sm" onClick={(e) => { e.stopPropagation(); openEditAssignmentForm(assignment); }}>Edit</button>
+                    <button 
+                      className="btn btn-secondary btn-sm" 
+                      onClick={(e) => { e.stopPropagation(); handleDeleteAssignment(assignment); }}
+                      style={{ color: '#dc2626' }}
+                    >
+                      Delete
+                    </button>
                   </div>
                 </div>
               ))}
@@ -413,163 +583,29 @@ const PlanningDashboard = ({
         </div>
       </div>
 
-      {/* Team Form Modal */}
       {showTeamForm && (
-        <div className="modal-backdrop">
-          <div className="modal">
-            <h3>{teamForm.team_id ? 'Edit Team' : 'New Team'}</h3>
-
-            <div className="form-row">
-              <label>Team Name</label>
-              <input value={teamForm.team_name_number || ''} onChange={e => setTeamForm({ ...teamForm, team_name_number: e.target.value })} />
-            </div>
-
-            <div className="form-row">
-              <label>Type</label>
-              <select value={teamForm.type} onChange={e => setTeamForm({ ...teamForm, type: e.target.value })}>
-                <option>Ground Search</option>
-                <option>UAS Search</option>
-                <option>Dog Air</option>
-                <option>Dog Track</option>
-                <option>Transport</option>
-                <option>Helicopter</option>
-                <option>Other</option>
-              </select>
-            </div>
-
-            <div className="form-row">
-              <label>Status</label>
-              <select value={teamForm.status} onChange={e => setTeamForm({ ...teamForm, status: e.target.value })}>
-                <option>Draft</option>
-                <option>Staged</option>
-                <option>Assigned</option>
-                <option>Deployed</option>
-                <option>Demobilized</option>
-              </select>
-            </div>
-
-            <div className="form-row">
-              <label>Leader</label>
-              <select value={teamForm.leader_responder_id || ''} onChange={e => setTeamForm({ ...teamForm, leader_responder_id: e.target.value || null })}>
-                <option value="">— none —</option>
-                {responders.map(r => (
-                  <option key={r.responder_id} value={r.responder_id}>{r.name}</option>
-                ))}
-              </select>
-            </div>
-
-            {!teamForm.team_id && (
-              <div className="form-row responders-selector">
-                <label>Attach Responders</label>
-                <div className="responders-list">
-                  {stagedResponders.length === 0 ? (
-                    <p className="helper-text">No checked in/staged responders available</p>
-                  ) : (
-                    stagedResponders.map(r => {
-                      const isSelected = (teamForm.responder_ids || []).includes(r.responder_id);
-                      return (
-                        <button
-                          key={r.responder_id}
-                          type="button"
-                          className={`responder-chip ${isSelected ? 'selected' : ''}`}
-                          onClick={() => handleToggleNewTeamResponder(r.responder_id)}
-                        >
-                          <span>{r.name}</span>
-                          <small>{r.agency || ''}</small>
-                        </button>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-            )}
-
-            <div className="form-row">
-              <label>Equipment (comma separated)</label>
-              <input value={(teamForm.equipment || []).join(', ')} onChange={e => setTeamForm({ ...teamForm, equipment: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })} />
-            </div>
-
-            <div className="modal-actions">
-              <button className="btn btn-primary" onClick={handleSaveTeam} disabled={loading}>{loading ? 'Saving...' : 'Save'}</button>
-              <button className="btn btn-secondary" onClick={() => setShowTeamForm(false)}>Cancel</button>
-            </div>
-          </div>
-        </div>
+        <TeamFormModal
+          key={`team-${teamForm.team_id || 'new'}`}
+          isOpen={showTeamForm}
+          onClose={() => setShowTeamForm(false)}
+          onSave={handleSaveTeam}
+          initialData={teamForm}
+          responders={responders}
+          loading={loading}
+          error={error}
+        />
       )}
 
-      {/* Assignment Form Modal */}
       {showAssignmentForm && (
-        <div className="modal-backdrop">
-          <div className="modal">
-            <h3>New Assignment</h3>
-
-            <div className="form-row">
-              <label>Division</label>
-              <input
-                type="text"
-                value={assignmentForm.division}
-                onChange={e => setAssignmentForm({ ...assignmentForm, division: e.target.value })}
-                placeholder="Assignment division"
-              />
-            </div>
-
-            <div className="form-row">
-              <label>Assignment Name</label>
-              <input
-                type="text"
-                value={assignmentForm.name}
-                onChange={e => setAssignmentForm({ ...assignmentForm, name: e.target.value })}
-                placeholder="Assignment name"
-              />
-            </div>
-
-            <div className="form-row">
-              <label>Assignment Type</label>
-              <input
-                type="text"
-                value={assignmentForm.assignment_type}
-                onChange={e => setAssignmentForm({ ...assignmentForm, assignment_type: e.target.value })}
-                placeholder="Assignment type"
-              />
-            </div>
-
-            <div className="form-row">
-              <label>Assignment Size</label>
-              <input
-                type="text"
-                value={assignmentForm.assignment_size}
-                onChange={e => setAssignmentForm({ ...assignmentForm, assignment_size: e.target.value })}
-                placeholder="Assignment size"
-              />
-            </div>
-
-            <div className="form-row">
-              <label>TAC Channel</label>
-              <input
-                type="text"
-                value={assignmentForm.tac_channel}
-                onChange={e => setAssignmentForm({ ...assignmentForm, tac_channel: e.target.value })}
-                placeholder="TAC channel"
-              />
-            </div>
-
-            <div className="form-row">
-              <label>Description Narrative</label>
-              <textarea
-                value={assignmentForm.description_narrative}
-                onChange={e => setAssignmentForm({ ...assignmentForm, description_narrative: e.target.value })}
-                placeholder="Assignment narrative"
-              />
-            </div>
-
-            <div className="modal-actions">
-              <button className="btn btn-primary" onClick={handleSaveAssignment} disabled={loading}>
-                {loading ? 'Saving...' : 'Save Assignment'}
-              </button>
-              <button className="btn btn-secondary" onClick={() => setShowAssignmentForm(false)}>Cancel</button>
-            </div>
-          </div>
-        </div>
+        <AssignmentFormModal
+          key={`asn-${assignmentForm.assignment_id || 'new'}`}
+          isOpen={showAssignmentForm}
+          onClose={() => setShowAssignmentForm(false)}
+          onSave={handleSaveAssignment}
+          initialData={assignmentForm}
+          loading={loading}
+          error={error}
+        />
       )}
 
       {/* Members Modal */}

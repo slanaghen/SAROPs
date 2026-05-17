@@ -305,12 +305,18 @@
 .status-badge {
   display: inline-block;
   padding: 4px 12px;
-  background: #d4edda;
-  color: #155724;
   border-radius: 4px;
   font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
+  background: #e2e8f0;
+  color: #111827;
+}
+
+.status-badge.staged { background: #1e3a8a; color: white; }
+.status-badge.deployed { background: #166534; color: white; }
+.status-badge.completed { background: #64748b; color: white; }
+.status-badge.attached, .status-badge.planned { background: #e2e8f0; color: #111827; }
 }
 
 .privacy-notice {
