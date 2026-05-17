@@ -131,6 +131,8 @@ export const IncidentProvider = ({ children }) => {
       logout,
       isAdmin,
       setIsAdmin,
+      setIncidentId,
+      setIncidentData,
       setResponderId,
       setAccessLevel,
       setResponderName,

@@ -1,6 +1,7 @@
 import { renderHook, waitFor, act } from '@testing-library/react';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import { usePlanningDashboard } from './usePlanningDashboard';
+import { assignResponderToTeam, removeResponderFromTeam } from '../services/responderService';
 
 // Mock dependencies
 vi.mock('../context/IncidentContext', () => ({
@@ -21,16 +22,30 @@ describe('usePlanningDashboard Hook', () => {
   
   // Robust Supabase Mock
   const createMockQuery = (data, error = null) => {
+    let isSingle = false;
     const query = {
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
       in: vi.fn().mockReturnThis(),
+      is: vi.fn().mockReturnThis(),
       insert: vi.fn().mockReturnThis(),
       update: vi.fn().mockReturnThis(),
       delete: vi.fn().mockReturnThis(),
-      single: vi.fn().mockReturnThis(),
+      single: vi.fn().mockImplementation(() => {
+        isSingle = true;
+        return query;
+      }),
+      maybeSingle: vi.fn().mockImplementation(() => {
+        isSingle = true;
+        return query;
+      }),
       order: vi.fn().mockReturnThis(),
-      then: (onFulfilled) => Promise.resolve({ data, error }).then(onFulfilled),
+      then: (onFulfilled, onRejected) => {
+        let resultData = data;
+        if (isSingle && Array.isArray(data)) resultData = data[0];
+        else if (!isSingle && !Array.isArray(data) && data !== null && typeof data === 'object') resultData = [data];
+        return Promise.resolve({ data: resultData, error }).then(onFulfilled, onRejected);
+      },
     };
     return query;
   };
@@ -144,12 +159,98 @@ describe('usePlanningDashboard Hook', () => {
     });
   });
 
-  it('should correctly filter stagedTeams and availableAssignments', () => {
-    const teams = [{ status: 'Staged' }, { status: 'Assigned' }];
-    const assignments = [{ team_id: null, is_orphaned: false }, { team_id: 't1' }, { team_id: null, is_orphaned: true }];
+  it('should update team details successfully', async () => {
+    const existingTeam = { team_id: 't1', team_name_number: 'Team 1' };
+    const updates = { team_name_number: 'Team 1 Revised' };
     
-    // This is tested by the renderHook initialized with data or by mocking the internal state.
-    // Given the hook structure, we verify the filter logic indirectly via fetch success or by 
-    // providing the data in the initial mock.
+    mockSupabase.from.mockImplementation((table) => {
+      if (table === 'teams') return createMockQuery({ ...existingTeam, ...updates });
+      return createMockQuery({});
+    });
+
+    const { result } = renderHook(() => usePlanningDashboard(mockSupabase, opPeriodId));
+
+    await act(async () => {
+      await result.current.updateTeam('t1', updates);
+    });
+
+    expect(mockSupabase.from).toHaveBeenCalledWith('teams');
+  });
+
+  it('should delete a team and update local state', async () => {
+    mockSupabase.from.mockReturnValue(createMockQuery([], null)); // Mock empty member list and success delete
+
+    const { result } = renderHook(() => usePlanningDashboard(mockSupabase, opPeriodId));
+
+    await act(async () => {
+      await result.current.deleteTeam('t1');
+    });
+
+    expect(mockSupabase.from).toHaveBeenCalledWith('teams');
+    expect(result.current.teams).toHaveLength(0);
+  });
+
+  it('should create and update assignments', async () => {
+    const asn = { assignment_id: 'a1', name: 'Area 1' };
+    mockSupabase.from.mockImplementation((table) => {
+      if (table === 'assignments') return createMockQuery(asn);
+      if (table === 'action_logs') return createMockQuery({});
+      return createMockQuery([]);
+    });
+
+    const { result } = renderHook(() => usePlanningDashboard(mockSupabase, opPeriodId));
+
+    await act(async () => {
+      await result.current.createAssignment({ name: 'Area 1' });
+    });
+    
+    expect(result.current.assignments).toContainEqual(asn);
+
+    const updates = { name: 'Area 1 Updated' };
+    mockSupabase.from.mockImplementation((table) => {
+      if (table === 'assignments') return createMockQuery({ ...asn, ...updates });
+      if (table === 'action_logs') return createMockQuery({});
+      return createMockQuery([]);
+    });
+
+    await act(async () => {
+      await result.current.updateAssignment('a1', updates);
+    });
+    expect(mockSupabase.from).toHaveBeenCalledWith('assignments');
+  });
+
+  it('should attach a responder to a team', async () => {
+    const responderId = 'r1';
+    const teamId = 't1';
+    const mockQuery = createMockQuery({});
+    mockSupabase.from.mockReturnValue(mockQuery);
+
+    const { result } = renderHook(() => usePlanningDashboard(mockSupabase, opPeriodId));
+
+    await act(async () => {
+      await result.current.attachResponderToTeam(responderId, teamId);
+    });
+
+    expect(assignResponderToTeam).toHaveBeenCalledWith(mockSupabase, responderId, teamId);
+    expect(mockSupabase.from).toHaveBeenCalledWith('responders');
+    expect(mockQuery.update).toHaveBeenCalledWith({ status: 'Attached' });
+    expect(mockQuery.eq).toHaveBeenCalledWith('responder_id', responderId);
+  });
+
+  it('should detach a responder from a team', async () => {
+    const responderId = 'r1';
+    const teamId = 't1';
+    const mockQuery = createMockQuery({});
+    mockSupabase.from.mockReturnValue(mockQuery);
+
+    const { result } = renderHook(() => usePlanningDashboard(mockSupabase, opPeriodId));
+
+    await act(async () => {
+      await result.current.detachResponderFromTeam(responderId, teamId);
+    });
+
+    expect(removeResponderFromTeam).toHaveBeenCalledWith(mockSupabase, responderId, teamId);
+    expect(mockSupabase.from).toHaveBeenCalledWith('responders');
+    expect(mockQuery.update).toHaveBeenCalledWith({ status: 'Staged' });
   });
 });

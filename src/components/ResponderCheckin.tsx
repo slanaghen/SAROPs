@@ -102,9 +102,17 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
   /**
    * Handle form input changes
    */
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value, type, checked } = e.target;
-    const processedValue = type === 'checkbox' ? checked : (name === 'cell_phone' ? formatPhoneNumber(value) : value);
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const target = e.target;
+    const name = target.name;
+    let processedValue: any;
+
+    if (target instanceof HTMLSelectElement && target.multiple) {
+      processedValue = Array.from(target.selectedOptions).map(opt => opt.value).filter(v => v !== '').join(', ');
+    } else {
+      const { value, type, checked } = target as HTMLInputElement;
+      processedValue = type === 'checkbox' ? checked : (name === 'cell_phone' ? formatPhoneNumber(value) : value);
+    }
 
     setFormData(prev => ({
       ...prev,
@@ -168,7 +176,7 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
       device_id: generateDeviceId(),
       checkin_datetime: now,
       checkout_datetime: null,
-      status: 'Staged' as ResponderStatus,
+      status: (data.is_command_staff ? 'Active' : 'Staged') as ResponderStatus,
     };
   };
 
@@ -188,7 +196,7 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
       agency: (fd.get('agency') as string) || '',
       identifier: (fd.get('identifier') as string) || '',
       cell_phone: formatPhoneNumber((fd.get('cell_phone') as string) || ''),
-      special_skills: (fd.get('special_skills') as string) || '',
+      special_skills: fd.getAll('special_skills').filter(v => v !== '').join(', '),
       is_command_staff: fd.get('is_command_staff') === 'on',
       incident_id: selectedIncidentId,
     };
@@ -378,17 +386,34 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
 
             <div className="form-group">
               <label htmlFor="special_skills">Special Skills / Capabilities</label>
-              <input
+              <select
                 id="special_skills"
-                type="text"
                 name="special_skills"
-                value={formData.special_skills}
+                multiple
+                value={formData.special_skills ? formData.special_skills.split(', ') : []}
                 onChange={handleInputChange}
-                placeholder="e.g., Dog Handler, Diver, Pilot"
+                className="multi-select"
                 disabled={displayLoading}
-              />
+              >
+                <option value="">— Select Capability —</option>
+                <option value="Air Scent Dog">Air Scent Dog</option>
+                <option value="Trail Dog">Trail Dog</option>
+                <option value="UAS">UAS</option>
+                <option value="Vehicle">Vehicle</option>
+                <option value="Snowmobile">Snowmobile</option>
+                <option value="UTV">UTV</option>
+                <option value="Swiftwater">Swiftwater</option>
+                <option value="Dive">Dive</option>
+                <option value="Avalanche">Avalanche</option>
+                <option value="Boat">Boat</option>
+                <option value="Helicopter">Helicopter</option>
+                <option value="Rope Rescue">Rope Rescue</option>
+                <option value="Litter">Litter</option>
+                <option value="Medical">Medical</option>
+                <option value="Other">Other</option>
+              </select>
               <small className="form-hint">
-                Optional: enter your special qualifications or capabilities.
+                Hold Cmd (Mac) or Ctrl (Windows) to select multiple capabilities.
               </small>
             </div>
 

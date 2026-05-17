@@ -6,7 +6,7 @@ import '../styles/IncidentEditPage.css'; // Reusing existing card styles
 
 const CheckOutPage: React.FC = () => {
   const navigate = useNavigate(); //
-  const { responderId, responderName, logout, isActive } = useIncident(); //
+  const { responderId, responderName, responderStatus, logout, isActive } = useIncident(); //
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -16,10 +16,25 @@ const CheckOutPage: React.FC = () => {
       return;
     }
 
+    // Allow both 'Staged' (available field responders) and 'Active' (command staff) to check out
+    const allowedStatuses = ['Staged', 'Active'];
+    if (!allowedStatuses.includes(responderStatus || '')) {
+      setError(`Check-out unsuccessful: Your current status is "${responderStatus}". Only responders in "Staged" or "Active" status can check out. Please ensure you have been released from your team or assignment before clearing.`);
+      return;
+    }
+
     setIsProcessing(true);
     setError(null);
 
     try {
+      // 1. Clear leadership status in teams table to avoid foreign key violation
+      const { error: leaderError } = await supabase
+        .from('teams')
+        .update({ leader_responder_id: null })
+        .eq('leader_responder_id', responderId);
+
+      if (leaderError) throw leaderError;
+
       // Delete the responder record from the database
       const { error: dbError } = await supabase //
         .from('responders') //
@@ -34,7 +49,7 @@ const CheckOutPage: React.FC = () => {
       alert("You have been successfully cleared from the incident.");
       navigate('/checkin'); //
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Check-out failed';
+      const message = err instanceof Error ? err.message : (error?.message || 'Check-out failed');
       console.error('Check-out error:', err);
       setError(message);
     } finally {

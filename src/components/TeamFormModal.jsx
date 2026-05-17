@@ -55,12 +55,16 @@ const TeamFormModal = ({
         <div className="form-row">
           <label htmlFor="team_type">Type</label>
           <select id="team_type" value={teamForm.type} onChange={e => setTeamForm({ ...teamForm, type: e.target.value })}>
+            <option>Hasty</option>
             <option>Ground Search</option>
-            <option>UAS Search</option>
-            <option>Dog Air</option>
-            <option>Dog Track</option>
-            <option>Transport</option>
+            <option>Vehicle Search</option>
+            <option>Aerial Search</option>
+            <option>Water Search</option>
+            <option>Tracking</option>
+            <option>Dog</option>
+            <option>Avalanche</option>
             <option>Helicopter</option>
+            <option>Medical</option>
             <option>Other</option>
           </select>
         </div>
@@ -91,7 +95,7 @@ const TeamFormModal = ({
             }}
           >
             <option value="" disabled>Select a leader...</option>
-            {responders.map(r => (
+            {availableResponders.map(r => (
               <option key={r.responder_id} value={r.responder_id}>{r.name}</option>
             ))}
           </select>

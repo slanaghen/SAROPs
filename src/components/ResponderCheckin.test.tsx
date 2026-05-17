@@ -25,7 +25,7 @@ describe('ResponderCheckin confirmation screen', () => {
       target: { value: '1231234567' },
     });
     fireEvent.change(screen.getByLabelText(/Special Skills/i), {
-      target: { value: 'test skill' },
+      target: { value: 'Medical' },
     });
 
     fireEvent.click(screen.getByRole('button', { name: /Continue to Confirmation/i }));
@@ -33,7 +33,7 @@ describe('ResponderCheckin confirmation screen', () => {
     expect(await screen.findByText(/Confirm Your Information/i)).toBeTruthy();
     expect(screen.getAllByText('asdf').length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText('123-123-4567')).toBeTruthy();
-    expect(screen.getByText('test skill')).toBeTruthy();
+    expect(screen.getByText('Medical')).toBeTruthy();
 
     const css = readFileSync(join(process.cwd(), 'src/styles/ResponderCheckin.css'), 'utf-8');
     expect(css).toContain('.detail-label');

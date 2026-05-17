@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { useIncident } from '../context/IncidentContext';
 import '../styles/OperationsDashboard.css';
@@ -36,47 +36,47 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   const [draggedItem, setDraggedItem] = useState(null); // { id, type }
   const [dropTarget, setDropTarget] = useState(null); // { id, type }
 
-  useEffect(() => {
-    const fetchSummary = async () => {
-      if (!operationalPeriodId) return;
+  const fetchSummary = useCallback(async () => {
+    if (!operationalPeriodId) return;
 
-      setLoading(true);
-      setError(null);
+    setLoading(true);
+    setError(null);
 
-      try {
-        const [assignmentRes, teamRes, responderRes] = await Promise.all([
-          supabase
-            .from('assignments')
-            .select('assignment_id,name,status,team_id,op_period_id,assignment_type,division,assignment_size,tac_channel,description_narrative')
-            .eq('op_period_id', operationalPeriodId),
-          supabase
-            .from('teams')
-            .select('team_id,team_name_number,type,leader_responder_id,op_period_id,status,equipment,sartopo_color_hex')
-            .eq('op_period_id', operationalPeriodId),
-          supabase.from('responders').select('*')
-        ]);
+    try {
+      const [assignmentRes, teamRes, responderRes] = await Promise.all([
+        supabase
+          .from('assignments')
+          .select('assignment_id,name,status,team_id,op_period_id,assignment_type,division,assignment_size,tac_channel,description_narrative')
+          .eq('op_period_id', operationalPeriodId),
+        supabase
+          .from('teams')
+          .select('team_id,team_name_number,type,leader_responder_id,op_period_id,status,equipment,sartopo_color_hex')
+          .eq('op_period_id', operationalPeriodId),
+        supabase.from('responders').select('*')
+      ]);
 
-        const { data: assignmentData, error: assignmentError } = assignmentRes;
-        const { data: teamData, error: teamError } = teamRes;
-        const { data: responderData, error: responderError } = responderRes;
+      const { data: assignmentData, error: assignmentError } = assignmentRes;
+      const { data: teamData, error: teamError } = teamRes;
+      const { data: responderData, error: responderError } = responderRes;
 
-        if (assignmentError) throw assignmentError;
-        if (teamError) throw teamError;
-        if (responderError) throw responderError;
+      if (assignmentError) throw assignmentError;
+      if (teamError) throw teamError;
+      if (responderError) throw responderError;
 
-        setAssignments(assignmentData || []);
-        setTeams(teamData || []);
-        setResponders(responderData || []);
-      } catch (opsFetchErr) {
-        setError(opsFetchErr?.message || 'Failed to load operations summary');
-        console.error('OperationsDashboard fetch error:', opsFetchErr);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchSummary();
+      setAssignments(assignmentData || []);
+      setTeams(teamData || []);
+      setResponders(responderData || []);
+    } catch (opsFetchErr) {
+      setError(opsFetchErr?.message || 'Failed to load operations summary');
+      console.error('OperationsDashboard fetch error:', opsFetchErr);
+    } finally {
+      setLoading(false);
+    }
   }, [operationalPeriodId]);
+
+  useEffect(() => {
+    fetchSummary();
+  }, [operationalPeriodId, fetchSummary]);
 
   const recordAction = async (action) => {
     if (!incidentId) return;
@@ -155,7 +155,10 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     if (!draggedItem || draggedItem.type === targetType) return;
 
     const teamId = draggedItem.type === 'team' ? draggedItem.id : targetId;
-    const assignmentId = draggedItem.type === 'assignment' ? draggedItem.id : targetId;
+    const rawAssignmentId = draggedItem.type === 'assignment' ? draggedItem.id : targetId;
+
+    // Ensure we use the raw UUID by removing the 'asn-' prefix used for row keys
+    const assignmentId = rawAssignmentId.startsWith('asn-') ? rawAssignmentId.slice(4) : rawAssignmentId;
 
     // Find existing names for the confirmation/success message
     const team = teams.find(t => t.team_id === teamId);
@@ -351,6 +354,58 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     }
   };
 
+  const handleUnassignTeam = async (assignmentId, teamId, assignmentName, teamName) => {
+    if (!window.confirm(`Are you sure you want to unassign "${teamName || 'the team'}" from "${assignmentName || 'this assignment'}"?`)) return;
+
+    try {
+      setLoading(true);
+      setError(null);
+
+      // 1. Update Database
+      const { error: asnError } = await supabase
+        .from('assignments')
+        .update({ team_id: null, status: 'Planned' })
+        .eq('assignment_id', assignmentId);
+      
+      if (asnError) throw asnError;
+
+      if (teamId && teamId !== '') {
+        const { error: teamError } = await supabase
+          .from('teams')
+          .update({ status: 'Staged' })
+          .eq('team_id', teamId);
+        if (teamError) throw teamError;
+      }
+
+      // 2. Log Action
+      await recordAction(`Unassigned ${teamName || 'Team'} from ${assignmentName || 'Assignment'}`);
+
+      // 3. Refresh UI
+      await fetchSummary();
+    } catch (err) {
+      setError(err.message || 'Failed to unassign team');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteAssignment = async (assignmentId, assignmentName) => {
+    if (!window.confirm(`Are you sure you want to delete assignment "${assignmentName}"? This action cannot be undone.`)) return;
+
+    try {
+      setLoading(true);
+      const { error } = await supabase.from('assignments').delete().eq('assignment_id', assignmentId);
+      if (error) throw error;
+
+      await recordAction(`Deleted Assignment: ${assignmentName}`);
+      await fetchSummary();
+    } catch (err) {
+      setError(err.message || 'Failed to delete assignment');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleReleaseTeam = async (teamId, teamName) => {
     const msg = `Are you sure you want to release "${teamName}"? This will return all members to Staged status and delete the team record.`;
     if (!window.confirm(msg)) return;
@@ -386,8 +441,10 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
 
       if (deleteError) throw deleteError;
 
-      // 4. Update local state
-      setTeams(prev => prev.filter(t => t.team_id !== teamId));
+      await recordAction(`Released Team: ${teamName}`);
+
+      // 4. Refresh UI
+      await fetchSummary();
     } catch (err) {
       setError(err.message || 'Failed to release team');
       console.error('Release team error:', err);
@@ -416,6 +473,16 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     return teamLookup;
   }, [teams]);
 
+  const assignmentById = useMemo(() => {
+    const lookup = {};
+    for (const a of assignments) {
+      if (a?.assignment_id) {
+        lookup[a.assignment_id] = a;
+      }
+    }
+    return lookup;
+  }, [assignments]);
+
   const rows = useMemo(() => {
     // Pre-calculate sets to avoid nested lookups in map
     const assignmentRows = (assignments || []).map(asnItem => {
@@ -423,6 +490,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
 
       return {
         id: `asn-${asnItem.assignment_id}`, // Prefixed ID ensures no collision after unassign
+        assignmentId: asnItem.assignment_id,
         assignmentName: asnItem.name,
         assignmentType: asnItem.assignment_type || '—',
         assignmentStatus: asnItem.status,
@@ -604,6 +672,10 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
                         onDragEnter={!row.hasBoth ? (e) => handleDragEnter(e, row.id, 'assignment') : undefined}
                         onDragLeave={!row.hasBoth ? () => setDropTarget(null) : undefined}
                         onDrop={!row.hasBoth ? (e) => handleDrop(e, row.id, 'assignment') : undefined}
+                        onClick={() => {
+                          const rawAsnId = row.id.startsWith('asn-') ? row.id.slice(4) : null;
+                          if (rawAsnId) openEditAssignmentForm(assignmentById[rawAsnId]);
+                        }}
                       >
                         {row.assignmentName}
                       </div>
@@ -640,6 +712,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
                         onDragEnter={!row.hasBoth ? (e) => handleDragEnter(e, row.teamId, 'team') : undefined}
                         onDragLeave={!row.hasBoth ? () => setDropTarget(null) : undefined}
                         onDrop={!row.hasBoth ? (e) => handleDrop(e, row.teamId, 'team') : undefined}
+                        onClick={() => openEditTeamForm(teamById[row.teamId])}
                       >
                         {row.teamName}
                       </div>
@@ -659,21 +732,15 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
                         if (action === 'edit-team') {
                           openEditTeamForm(teamById[row.teamId]);
                         } else if (action === 'edit-assignment') {
-                          const asn = assignments.find(a => a.assignment_id === rawId);
-                          if (asn) {
-                            setAssignmentForm(asn);
-                            setShowAssignmentForm(true);
-                          }
+                          openEditAssignmentForm(assignmentById[rawId]);
                         } else if (action === 'unassign') {
                           handleUnassignTeam(rawId, row.teamId, row.assignmentName, row.teamName);
                         } else if (action === 'edit') {
                           if (row.teamId) openEditTeamForm(teamById[row.teamId]);
-                          else {
-                            const asn = assignments.find(a => a.assignment_id === rawId);
-                            if (asn) setAssignmentForm(asn), setShowAssignmentForm(true);
-                          }
+                          else openEditAssignmentForm(assignmentById[rawId]);
                         } else if (action === 'new-team') {
-                          setPendingAssignmentId(rawId);
+                          // Link new team to current assignment if it exists in this row
+                          setPendingAssignmentId(row.id.startsWith('asn-') ? rawId : null);
                           setTeamForm({
                             op_period_id: operationalPeriodId,
                             team_name_number: '',
@@ -685,7 +752,8 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
                           });
                           setShowTeamForm(true);
                         } else if (action === 'new-assignment') {
-                          setPendingTeamId(row.teamId);
+                          // Link new assignment to current team if it exists in this row
+                          setPendingTeamId(row.teamId || null);
                           setAssignmentForm({
                             op_period_id: operationalPeriodId,
                             name: '',
@@ -708,20 +776,18 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
                           <option value="edit-team">Edit Team</option>
                           <option value="edit-assignment">Edit Assignment</option>
                           <option value="unassign">Unassign Team</option>
+                          <option value="new-team">New Team</option>
+                          <option value="new-assignment">New Assignment</option>
                         </>
                       ) : (
                         <>
                           <option value="edit">Edit</option>
+                          <option value="new-team">New Team</option>
+                          <option value="new-assignment">New Assignment</option>
                           {row.teamId ? (
-                            <>
-                              <option value="new-assignment">New Assignment</option>
-                              <option value="release">Release Team</option>
-                            </>
+                            <option value="release">Release Team</option>
                           ) : (
-                            <>
-                              <option value="new-team">New Team</option>
-                              <option value="delete">Delete Assignment</option>
-                            </>
+                            <option value="delete">Delete Assignment</option>
                           )}
                         </>
                       )}

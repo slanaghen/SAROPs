@@ -550,8 +550,8 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
     deleteTeam,
 
     // Computed
-    stagedTeams: teams.filter(t => t.status === 'Staged'),
-    availableAssignments: assignments.filter(a => !a.team_id && !a.is_orphaned),
+    stagedTeams: (Array.isArray(teams) ? teams : []).filter(t => t?.status === 'Staged'),
+    availableAssignments: (Array.isArray(assignments) ? assignments : []).filter(a => !a?.team_id && !a?.is_orphaned),
   };
 };
 

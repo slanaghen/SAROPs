@@ -225,6 +225,11 @@ article {
   color: white;
 }
 
+.status-indicator.active {
+  background: #059669; /* Active Green */
+  color: white;
+}
+
 .status-indicator.attached,
 .status-indicator.planned {
   background: #e2e8f0; /* Light Gray */

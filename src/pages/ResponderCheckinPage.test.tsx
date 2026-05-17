@@ -1,6 +1,6 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, cleanup } from '@testing-library/react';
 import * as matchers from '@testing-library/jest-dom/matchers';
-import { vi, describe, it, expect, beforeEach } from 'vitest';
+import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { BrowserRouter } from 'react-router-dom';
 import ResponderCheckinPage from './ResponderCheckinPage';
 import { useIncident } from '../context/IncidentContext';
@@ -43,6 +43,10 @@ vi.mock('../context/IncidentContext', () => ({
 describe('ResponderCheckinPage Routing', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    cleanup();
   });
 
   it('should redirect active command staff to operations', async () => {

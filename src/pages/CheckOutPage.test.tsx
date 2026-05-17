@@ -40,6 +40,7 @@ describe('CheckOutPage', () => {
     vi.mocked(useIncident).mockReturnValue({
       isActive: false,
       responderId: null,
+      responderStatus: '',
       logout: mockLogout,
     } as any);
 
@@ -52,19 +53,21 @@ describe('CheckOutPage', () => {
     expect(screen.getByText(/No Active Session/i)).toBeInTheDocument();
   });
 
-  it('calls delete and logout when confirmation is clicked', async () => {
+  it('allows check-out for command staff with "Active" status', async () => {
     vi.mocked(useIncident).mockReturnValue({
       isActive: true,
-      responderId: 'res-123',
-      responderName: 'Steve',
+      responderId: 'staff-123',
+      responderName: 'Commander Steve',
+      responderStatus: 'Active',
       logout: mockLogout,
     } as any);
 
-    const mockDeleteChain = {
+    const mockQueryChain = {
+      update: vi.fn().mockReturnThis(),
       delete: vi.fn().mockReturnThis(),
       eq: vi.fn().mockResolvedValue({ error: null })
     };
-    (supabase.from as any).mockReturnValue(mockDeleteChain);
+    (supabase.from as any).mockReturnValue(mockQueryChain);
 
     render(
       <BrowserRouter>
@@ -75,6 +78,37 @@ describe('CheckOutPage', () => {
     fireEvent.click(screen.getByText(/Confirm Check-Out/i));
 
     await waitFor(() => {
+      expect(mockLogout).toHaveBeenCalled();
+      expect(mockNavigate).toHaveBeenCalledWith('/checkin');
+    });
+  });
+
+  it('calls delete and logout when confirmation is clicked', async () => {
+    vi.mocked(useIncident).mockReturnValue({
+      isActive: true,
+      responderId: 'res-123',
+      responderName: 'Steve',
+      responderStatus: 'Staged',
+      logout: mockLogout,
+    } as any);
+
+    const mockQueryChain = {
+      update: vi.fn().mockReturnThis(),
+      delete: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockResolvedValue({ error: null })
+    };
+    (supabase.from as any).mockReturnValue(mockQueryChain);
+
+    render(
+      <BrowserRouter>
+        <CheckOutPage />
+      </BrowserRouter>
+    );
+
+    fireEvent.click(screen.getByText(/Confirm Check-Out/i));
+
+    await waitFor(() => {
+      expect(supabase.from).toHaveBeenCalledWith('teams');
       expect(supabase.from).toHaveBeenCalledWith('responders');
       expect(mockLogout).toHaveBeenCalled();
       expect(mockNavigate).toHaveBeenCalledWith('/checkin');

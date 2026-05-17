@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase'; // Assuming this is the centralized Supabase client
 import { useIncident } from '../context/IncidentContext';
 import useResponderTeamAndAssignment from '../hooks/useResponderTeamAndAssignment'; // The new hook
@@ -11,8 +11,14 @@ import '../styles/ResponderDashboard.css'; // New CSS file for styling
  * and the assignment information for the assignment the responder's team is assigned to.
  */
 const ResponderDashboardPage = ({ responderId: propId }) => {
-  const { responderId: contextId, setResponderStatus } = useIncident();
+  const { responderId: contextId, incidentId, incidentData, setResponderStatus } = useIncident();
   const [responderId, setResponderId] = useState(propId || contextId);
+  const [responders, setResponders] = useState([]);
+  const [narratives, setNarratives] = useState({
+    incidentNotes: '',
+    opObjective: '',
+    saNarrative: ''
+  });
 
   useEffect(() => {
     if (!responderId && contextId) {
@@ -20,7 +26,54 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     }
   }, [propId, contextId, responderId]);
 
+  useEffect(() => {
+    const fetchResponders = async () => {
+      if (!incidentId) return;
+      const { data } = await supabase
+        .from('responders')
+        .select('responder_id, name')
+        .eq('incident_id', incidentId);
+      if (data) {
+        setResponders(data);
+      }
+    };
+    fetchResponders();
+  }, [incidentId]);
+
+  useEffect(() => {
+    const fetchIncidentDetails = async () => {
+      if (!incidentId || !incidentData?.opPeriodId) return;
+
+      try {
+        const [incRes, opRes] = await Promise.all([
+          supabase.from('incidents').select('notes').eq('incident_id', incidentId).maybeSingle(),
+          supabase.from('operational_periods').select('situation_narrative, situational_awareness_narrative').eq('op_period_id', incidentData.opPeriodId).maybeSingle()
+        ]);
+
+        if (incRes.data || opRes.data) {
+          setNarratives({
+            incidentNotes: incRes.data?.notes || '',
+            opObjective: opRes.data?.situation_narrative || '',
+            saNarrative: opRes.data?.situational_awareness_narrative || ''
+          });
+        }
+      } catch (err) {
+        console.error('Error fetching narratives:', err);
+      }
+    };
+
+    fetchIncidentDetails();
+  }, [incidentId, incidentData?.opPeriodId]);
+
   const { team, assignment, loading, error, refetch } = useResponderTeamAndAssignment(supabase, responderId);
+
+  const leaderById = useMemo(() => {
+    const lookup = {};
+    responders.forEach(r => {
+      lookup[r.responder_id] = r.name;
+    });
+    return lookup;
+  }, [responders]);
 
   // Sync context status with database reality found via the dashboard data
   useEffect(() => {
@@ -62,6 +115,15 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     <div className="responder-dashboard-page">
       <h1>Responder Dashboard</h1>
 
+      {(narratives.incidentNotes || narratives.opObjective || narratives.saNarrative) && (
+        <div className="dashboard-section narratives-info">
+          <h2>Mission Overview</h2>
+          {narratives.incidentNotes && <p><strong>Incident Narrative:</strong> {narratives.incidentNotes}</p>}
+          {narratives.opObjective && <p><strong>OP Objective:</strong> {narratives.opObjective}</p>}
+          {narratives.saNarrative && <p><strong>Situational Awareness:</strong> {narratives.saNarrative}</p>}
+        </div>
+      )}
+
       {!team && !assignment && (
         <div className="dashboard-section empty-state">
           <p>You are currently not attached to a team or your team is not assigned to an assignment.</p>
@@ -79,9 +141,8 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
               {team.status}
             </span>
           </p>
-          {team.leader_responder_id && <p><strong>Leader ID:</strong> {team.leader_responder_id}</p>}
+          {team.leader_responder_id && <p><strong>Leader Name:</strong> {leaderById[team.leader_responder_id] || 'Unknown'}</p>}
           {team.equipment && team.equipment.length > 0 && <p><strong>Equipment:</strong> {team.equipment.join(', ')}</p>}
-          {team.sartopo_color_hex && <p><strong>Color:</strong> <span style={{ backgroundColor: team.sartopo_color_hex, padding: '2px 8px', borderRadius: '4px', color: 'white' }}>{team.sartopo_color_hex}</span></p>}
         </div>
       )}
 

@@ -77,7 +77,33 @@ const IncidentEditPage = () => {
       const opPeriodId = uuidv4();
 
       if (isActive && isExistingIdValid) {
-        // Handle Update logic here if needed
+        // 1. Update Incident in Supabase
+        const { error: incError } = await supabase
+          .from('incidents')
+          .update({
+            name: incident.name,
+            number: incident.number,
+            sartopo_id: incident.sartopo_id || null,
+            start_datetime: incident.start_datetime,
+            notes: incident.notes
+          })
+          .eq('incident_id', incidentId);
+
+        if (incError) throw incError;
+
+        // 2. Update current Operational Period in Supabase
+        const { error: opError } = await supabase
+          .from('operational_periods')
+          .update({
+            op_number: operationalPeriod.op_number,
+            start_datetime: operationalPeriod.start_datetime,
+            situation_narrative: operationalPeriod.situation_narrative,
+            situational_awareness_narrative: operationalPeriod.situational_awareness_narrative
+          })
+          .eq('op_period_id', incidentData?.opPeriodId);
+
+        if (opError) throw opError;
+
         startIncident(incidentId, incident.name, operationalPeriod.op_number, incidentData?.opPeriodId);
       } else {
         // 1. Create Incident in Supabase

@@ -6,7 +6,7 @@ import '../styles/IncidentEditPage.css'; // Reusing form styles for consistency
 
 const AdminPage = () => {
   const navigate = useNavigate();
-  const { isAdmin, setIsAdmin } = useIncident();
+  const { isAdmin, setIsAdmin, incidentId, responderId, endIncident, logout } = useIncident();
   const [admins, setAdmins] = useState([]);
   const [allIncidents, setAllIncidents] = useState([]);
   const [allResponders, setAllResponders] = useState([]);
@@ -112,6 +112,7 @@ const AdminPage = () => {
 
   const handleAddAdmin = async (e) => {
     e.preventDefault();
+    setLoading(true);
     setError(null);
     setSuccess(null);
 
@@ -139,6 +140,8 @@ const AdminPage = () => {
     } catch (err) {
       setError(err.code === '23505' ? 'This email is already an admin.' : (err.message || 'Failed to add administrator'));
       console.error('Admin management error:', err);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -155,6 +158,12 @@ const AdminPage = () => {
         .eq('responder_id', id);
 
       if (updateError) throw updateError;
+
+      // Update context if we checked out our own current responder session
+      if (id === responderId) {
+        logout();
+      }
+
       setSuccess('Responder checked out.');
       fetchAllResponders();
     } catch (err) {
@@ -172,6 +181,12 @@ const AdminPage = () => {
         .eq('responder_id', id);
 
       if (deleteError) throw deleteError;
+
+      // Update context if we deleted our own current responder session
+      if (id === responderId) {
+        logout();
+      }
+
       setSuccess('Responder record deleted.');
       fetchAllResponders();
     } catch (err) {
@@ -189,6 +204,12 @@ const AdminPage = () => {
         .eq('incident_id', id);
 
       if (updateError) throw updateError;
+
+      // Update context if we ended the current active incident
+      if (id === incidentId) {
+        endIncident();
+      }
+
       setSuccess('Incident ended successfully.');
       fetchAllIncidents();
     } catch (err) {
@@ -207,6 +228,12 @@ const AdminPage = () => {
         .eq('incident_id', id);
 
       if (deleteError) throw deleteError;
+
+      // Update context if we deleted the current active incident
+      if (id === incidentId) {
+        logout();
+      }
+
       setSuccess('Incident deleted.');
       fetchAllIncidents();
     } catch (err) {

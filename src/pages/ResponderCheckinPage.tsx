@@ -178,8 +178,10 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
         console.warn('⚠️ Could not set active incident context: missing ID or Name', { targetIncidentId, targetIncidentName });
       }
 
-      // If operational period provided, show team assignment
-      if (effectiveOpId && uuidRegex.test(effectiveOpId) && supabase) {
+      // If operational period provided and NOT command staff, show team assignment
+      const isStaff = responder.access_level?.toLowerCase() === 'command staff';
+
+      if (!isStaff && effectiveOpId && uuidRegex.test(effectiveOpId) && supabase) {
         // Fetch available teams
         const { data: teamsData, error: teamsError } = await supabase
           .from('teams')

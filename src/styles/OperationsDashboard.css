@@ -204,7 +204,7 @@
 }
 
 .chip.locked {
-  cursor: default;
+  cursor: pointer;
   opacity: 0.8;
 }
 

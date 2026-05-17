@@ -76,7 +76,8 @@
   letter-spacing: 0.5px;
 }
 
-.form-group input {
+.form-group input,
+.form-group select {
   width: 100%;
   padding: 12px 16px;
   font-size: 16px;
@@ -87,16 +88,23 @@
   font-family: inherit;
 }
 
-.form-group input:focus {
+.form-group input:focus,
+.form-group select:focus {
   outline: none;
   border-color: #667eea;
   box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
 }
 
-.form-group input:disabled {
+.form-group input:disabled,
+.form-group select:disabled {
   background-color: #f5f5f5;
   color: #999;
   cursor: not-allowed;
+}
+
+.form-group select.multi-select {
+  height: auto;
+  min-height: 140px;
 }
 
 .form-hint {
@@ -315,6 +323,7 @@
 
 .status-badge.staged { background: #1e3a8a; color: white; }
 .status-badge.deployed { background: #166534; color: white; }
+.status-badge.active { background: #059669; color: white; }
 .status-badge.completed { background: #64748b; color: white; }
 .status-badge.attached, .status-badge.planned { background: #e2e8f0; color: #111827; }
 }
