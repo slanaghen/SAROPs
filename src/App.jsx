@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from './lib/supabase';
 import { useIncident } from './context/IncidentContext';
@@ -42,7 +42,67 @@ function App() {
     };
   }, []);
 
-  const { isActive, isAdmin, incidentData, responderName, responderStatus, accessLevel, logout } = useIncident();
+  const { 
+    isActive, 
+    isAdmin, 
+    incidentData, 
+    responderName, 
+    responderStatus, 
+    accessLevel, 
+    currentTeamStatus,
+    currentAssignmentStatus,
+    logout 
+  } = useIncident();
+
+  // Request notification permission on first load if checked in
+  useEffect(() => {
+    if (isActive && "Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+  }, [isActive]);
+
+  // Audio and browser notification for status changes (responder, team, assignment)
+  const prevStatusRef = useRef(responderStatus);
+  const prevTeamStatusRef = useRef(currentTeamStatus);
+  const prevAssignmentStatusRef = useRef(currentAssignmentStatus);
+
+  useEffect(() => {
+    const triggerNotification = (title, body) => {
+      // 1. Play Sound
+      if (typeof Audio !== 'undefined') {
+        try {
+          // Using a clear notification sound
+          const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+          audio.play().catch(() => console.debug('Audio blocked: interaction required'));
+        } catch (e) {
+          console.debug('Audio playback failed');
+        }
+      }
+      // 2. Browser Notification (if permitted)
+      if ("Notification" in window && Notification.permission === "granted") {
+        new Notification(title, {
+          body: body,
+          icon: logo,
+          tag: 'status-change'
+        });
+      }
+    };
+
+    if (isActive) {
+      if (prevStatusRef.current && responderStatus && prevStatusRef.current !== responderStatus) {
+        triggerNotification("SAROps: Your Status Changed", `Your operational status has changed to: ${responderStatus}`);
+      }
+      if (prevTeamStatusRef.current && currentTeamStatus && prevTeamStatusRef.current !== currentTeamStatus) {
+        triggerNotification("SAROps: Team Status Changed", `Your team's status has changed to: ${currentTeamStatus}`);
+      }
+      if (prevAssignmentStatusRef.current && currentAssignmentStatus && prevAssignmentStatusRef.current !== currentAssignmentStatus) {
+        triggerNotification("SAROps: Assignment Status Changed", `Your team's assignment status has changed to: ${currentAssignmentStatus}`);
+      }
+    }
+    prevStatusRef.current = responderStatus;
+    prevTeamStatusRef.current = currentTeamStatus;
+    prevAssignmentStatusRef.current = currentAssignmentStatus;
+  }, [responderStatus, isActive]);
 
   // Navigation Guard: Redirect to check-in if trying to access operational pages without a session
   useEffect(() => {
@@ -105,7 +165,7 @@ function App() {
                   <Link to="/operations" onClick={() => setMenuOpen(false)}>Operations</Link>
                   <Link to="/planning" onClick={() => setMenuOpen(false)}>Planning</Link>
                   <Link to="/checkin" onClick={() => setMenuOpen(false)}>Check-in</Link>
-                  <Link to="/incident-edit" onClick={() => setMenuOpen(false)}>Incident Editor</Link>
+                  <Link to="/incident-edit" onClick={() => setMenuOpen(false)}>Incident</Link>
                   <Link to="/admin" onClick={() => setMenuOpen(false)}>Administration</Link>
                   <Link to="/action-log" onClick={() => setMenuOpen(false)}>Action Log</Link>
                   <div className="dropdown-divider"></div>

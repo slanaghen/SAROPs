@@ -220,7 +220,8 @@ article {
   color: white;
 }
 
-.status-indicator.completed {
+.status-indicator.completed,
+.status-indicator.disbanded {
   background: #64748b; /* Gray */
   color: white;
 }
@@ -228,6 +229,13 @@ article {
 .status-indicator.active {
   background: #059669; /* Active Green */
   color: white;
+}
+
+.status-indicator.checkedout,
+.status-indicator.incomplete,
+.status-indicator.ended {
+  background: #000000;
+  color: #ffffff;
 }
 
 .status-indicator.attached,

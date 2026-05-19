@@ -89,7 +89,7 @@
 /* Dashboard Container */
 .dashboard-container {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
   gap: 24px;
   margin-bottom: 24px;
 }
@@ -131,7 +131,8 @@
 }
 
 .team-card,
-.assignment-card {
+.assignment-card,
+.responder-card {
   padding: 16px;
   border: 2px solid #e0e0e0;
   border-radius: 6px;
@@ -141,17 +142,64 @@
 }
 
 .team-card:hover,
-.assignment-card:hover {
+.assignment-card:hover,
+.responder-card:hover {
   border-color: #0066cc;
   background: #f5f9ff;
   box-shadow: 0 2px 8px rgba(0, 102, 204, 0.1);
 }
 
 .team-card.selected,
-.assignment-card.selected {
+.assignment-card.selected,
+.responder-card.selected {
   border-color: #0066cc;
   background: #e6f2ff;
   box-shadow: 0 2px 12px rgba(0, 102, 204, 0.2);
+}
+
+.clickable-name {
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  transition: all 0.2s ease;
+}
+
+.clickable-name:hover {
+  text-decoration-color: currentColor;
+  color: #0066cc;
+}
+
+/* Responder Card Specifics */
+.responder-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.responder-id-badge {
+  font-size: 11px;
+  background: #f1f5f9;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #64748b;
+  font-family: monospace;
+}
+
+.responder-agency-meta {
+  font-size: 12px;
+  color: #64748b;
+  margin-bottom: 8px;
+}
+
+.responder-skills-badge {
+  font-size: 11px;
+  display: inline-block;
+  padding: 2px 8px;
+  background: #fef3c7;
+  color: #92400e;
+  border-radius: 999px;
+  font-weight: 500;
 }
 
 /* Team Card */

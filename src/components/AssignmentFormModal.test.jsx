@@ -21,7 +21,10 @@ describe('AssignmentFormModal', () => {
       assignment_size: 2,
       tac_channel: 'TAC 1',
       description_narrative: 'Test narrative',
-      status: 'Planned'
+      status: 'Planned',
+      poa: 50,
+      pod: 0,
+      debrief_narrative: ''
     }
   };
 
@@ -46,10 +49,14 @@ describe('AssignmentFormModal', () => {
     render(<AssignmentFormModal {...defaultProps} />);
     
     fireEvent.change(screen.getByLabelText(/Division/i), { target: { value: 'B' } });
+    fireEvent.change(screen.getByLabelText(/POA/i), { target: { value: '75' } });
+    fireEvent.change(screen.getByLabelText(/Debrief Narrative/i), { target: { value: 'Found tracks' } });
     fireEvent.click(screen.getByText('Save Assignment'));
 
     expect(defaultProps.onSave).toHaveBeenCalledWith(expect.objectContaining({
-      division: 'B'
+      division: 'B',
+      poa: '75',
+      debrief_narrative: 'Found tracks'
     }));
   });
 

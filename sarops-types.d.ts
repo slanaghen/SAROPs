@@ -1,9 +1,9 @@
 // sarops-types.d.ts
 
-export type AssignmentStatus = 'Draft' | 'Planned' | 'Assigned' | 'Deployed' | 'Completed';
-export type TeamStatus = 'Draft' | 'Staged' | 'Assigned' | 'Deployed' | 'Demobilized';
+export type AssignmentStatus = 'Planned' | 'Assigned' | 'Deployed' | 'Completed' | 'Incomplete';
+export type TeamStatus = 'Staged' | 'Assigned' | 'Deployed' | 'Disbanded';
 export type TeamType = 'Ground Search' | 'UAS Search' | 'Dog Air' | 'Dog Track' | 'Transport' | 'Helicopter' | 'Other';
-export type ResponderStatus = 'Staged' | 'Attached' | 'Assigned' | 'Briefed' | 'Deployed' | 'Debriefed' | 'CheckedOut';
+export type ResponderStatus = 'Staged' | 'Attached' | 'Assigned' | 'Deployed';
 
 export interface Incident {
   incident_id: string; // UUID Primary Key
@@ -11,8 +11,6 @@ export interface Incident {
   number: string;
   start_datetime: string; // ISO Timestamp
   end_datetime: string | null;
-  operational_periods: string[]; // Array of OperationalPeriod_ID
-  clues: string[]; // Array of Clue_ID (Stored at Incident level)
 }
 
 export interface OperationalPeriod {
@@ -23,8 +21,6 @@ export interface OperationalPeriod {
   end_datetime: string; // Locked Snapshot when OP ends
   situation_narrative: string;
   situational_awareness_narrative: string;
-  teams: string[]; // Array of Team_ID active in this OP
-  assignments: string[]; // Array of Assignment_ID active in this OP
 }
 
 export interface Assignment {
@@ -35,6 +31,9 @@ export interface Assignment {
   status: AssignmentStatus;
   is_orphaned: boolean; // True if deleted in SARTopo, preserved until explicitly purged
   team_id: string | null; // Foreign Key to Team
+  poa?: number;
+  pod?: number;
+  debrief_narrative?: string;
 }
 
 export interface Team {
@@ -44,7 +43,7 @@ export interface Team {
   sartopo_color_hex: string; // Pulled dynamically from SARTopo
   type: TeamType;
   status: TeamStatus; // Cascades status changes down to attached Responders
-  leader_responder_id: string; // Foreign Key to Responder
+  leader_responder_id: string | null; // Foreign Key to Responder
   current_responders: string[]; // Array of Responder_ID for active dashboard use
   equipment: string[]; // Free-text array for general gear
 }

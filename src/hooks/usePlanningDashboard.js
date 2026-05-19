@@ -15,6 +15,7 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
   const [teams, setTeams] = useState([]);
   const [assignments, setAssignments] = useState([]);
   const [responders, setResponders] = useState([]);
+  const [opPeriod, setOpPeriod] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -43,31 +44,22 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
     setError(null);
 
     try {
-      // Fetch teams for the operational period
-      const { data: teamsData, error: teamsError } = await supabaseClient
-        .from('teams')
-        .select('*, current_responders:team_responders(responder_id)')
-        .eq('op_period_id', operationalPeriodId);
+      const [teamsRes, assignmentsRes, respondersRes, opRes] = await Promise.all([
+        supabaseClient.from('teams').select('*, current_responders:team_responders(responder_id)').eq('op_period_id', operationalPeriodId),
+        supabaseClient.from('assignments').select('*').eq('op_period_id', operationalPeriodId),
+        supabaseClient.from('responders').select('*'),
+        supabaseClient.from('operational_periods').select('*').eq('op_period_id', operationalPeriodId).maybeSingle()
+      ]);
 
-      if (teamsError) throw teamsError;
-      setTeams(teamsData || []);
+      if (teamsRes.error) throw teamsRes.error;
+      if (assignmentsRes.error) throw assignmentsRes.error;
+      if (respondersRes.error) throw respondersRes.error;
+      if (opRes.error) throw opRes.error;
 
-      // Fetch assignments for the operational period
-      const { data: assignmentsData, error: assignmentsError } = await supabaseClient
-        .from('assignments')
-        .select('*')
-        .eq('op_period_id', operationalPeriodId);
-
-      if (assignmentsError) throw assignmentsError;
-      setAssignments(assignmentsData || []);
-
-      // Fetch responders (for team leaders, etc.)
-      const { data: respondersData, error: respondersError } = await supabaseClient
-        .from('responders')
-        .select('*');
-
-      if (respondersError) throw respondersError;
-      setResponders(respondersData || []);
+      setTeams(teamsRes.data || []);
+      setAssignments(assignmentsRes.data || []);
+      setResponders(respondersRes.data || []);
+      setOpPeriod(opRes.data || null);
     } catch (err) {
       setError(err.message || 'Failed to fetch dashboard data');
       console.error('Dashboard fetch error:', err);
@@ -75,6 +67,76 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
       setLoading(false);
     }
   }, [operationalPeriodId, supabaseClient]);
+
+  /**
+   * Centralized Status Transition Logic
+   * Handles the complex cascade from Assignment to Team to Responders
+   */
+  const updateResourceStatus = useCallback(async (assignmentId, teamId, newStatus) => {
+    try {
+      let finalTeamStatus = newStatus;
+      let unlinkRequired = false;
+      const now = new Date().toISOString();
+
+      // 1. Handle Terminal States
+      if (['Completed', 'Incomplete'].includes(newStatus)) {
+        finalTeamStatus = 'Disbanded';
+        unlinkRequired = true;
+      } else if (newStatus === 'Planned') {
+        finalTeamStatus = 'Staged';
+        unlinkRequired = true;
+      }
+
+      // 2. Update Assignment
+      const { error: asnError } = await supabaseClient
+        .from('assignments')
+        .update({ status: newStatus, team_id: unlinkRequired ? null : teamId })
+        .eq('assignment_id', assignmentId);
+      if (asnError) throw asnError;
+
+      // 3. Update Team and Responders if a team is involved
+      if (teamId) {
+        // Update Team Record
+        const { error: teamError } = await supabaseClient
+          .from('teams')
+          .update({ status: finalTeamStatus, last_par_check: now })
+          .eq('team_id', teamId);
+        if (teamError) throw teamError;
+
+        // Fetch members for cascade
+        const { data: members } = await supabaseClient
+          .from('team_responders')
+          .select('responder_id')
+          .eq('team_id', teamId);
+        
+        const memberIds = members?.map(m => m.responder_id) || [];
+        
+        if (memberIds.length > 0) {
+          if (finalTeamStatus === 'Disbanded') {
+            // Release to Staged and close history
+            await Promise.all([
+              supabaseClient.from('responders').update({ status: 'Staged' }).in('responder_id', memberIds),
+              supabaseClient.from('responder_team_history')
+                .update({ detached_datetime: now })
+                .eq('team_id', teamId)
+                .is('detached_datetime', null)
+            ]);
+          } else if (['Assigned', 'Deployed'].includes(finalTeamStatus)) {
+            // Cascade active status
+            await supabaseClient.from('responders').update({ status: finalTeamStatus }).in('responder_id', memberIds);
+          }
+        }
+      }
+
+      await recordAction(`Transitioned Assignment ${assignmentId} to ${newStatus}`);
+      await fetchDashboardData();
+      return { success: true };
+    } catch (err) {
+      const errorMsg = err.message || 'Failed to update resource status';
+      setError(errorMsg);
+      throw err;
+    }
+  }, [supabaseClient, fetchDashboardData, recordAction]);
 
   /**
    * Assign a team to an assignment
@@ -114,10 +176,22 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
       // Update team status to "Assigned"
       const { error: teamError } = await supabaseClient
         .from('teams')
-        .update({ status: 'Assigned' })
+        .update({ 
+          status: 'Assigned',
+          last_par_check: new Date().toISOString()
+        })
         .eq('team_id', teamId);
 
       if (teamError) throw teamError;
+
+      // Update all team members' status to "Assigned"
+      const { data: members } = await supabaseClient
+        .from('team_responders')
+        .select('responder_id')
+        .eq('team_id', teamId);
+      if (members?.length) {
+        await supabaseClient.from('responders').update({ status: 'Assigned' }).in('responder_id', members.map(m => m.responder_id));
+      }
 
       setTeams(prev =>
         prev.map(t =>
@@ -180,7 +254,10 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
       if (assignmentToUnassign.team_id) {
         const { error: teamError } = await supabaseClient
           .from('teams')
-          .update({ status: 'Staged' })
+          .update({ 
+            status: 'Staged',
+            last_par_check: new Date().toISOString()
+          })
           .eq('team_id', assignmentToUnassign.team_id);
 
         if (teamError) throw teamError;
@@ -214,7 +291,10 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
     try {
       const { error } = await supabaseClient
         .from('teams')
-        .update({ status: newStatus })
+        .update({ 
+          status: newStatus,
+          last_par_check: new Date().toISOString()
+        })
         .eq('team_id', teamId);
 
       if (error) throw error;
@@ -246,7 +326,6 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
       const payload = {
         op_period_id: teamPayload.op_period_id,
         team_name_number: teamPayload.team_name_number || '',
-        sartopo_color_hex: teamPayload.sartopo_color_hex || '#007bff',
         type: teamPayload.type || 'Other',
         status: teamPayload.status || 'Staged',
         leader_responder_id: teamPayload.leader_responder_id || null,
@@ -311,6 +390,9 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
         assignment_size: assignmentPayload.assignment_size ? parseInt(assignmentPayload.assignment_size, 10) : null,
         tac_channel: assignmentPayload.tac_channel || '',
         description_narrative: assignmentPayload.description_narrative || '',
+        poa: assignmentPayload.poa ? parseInt(assignmentPayload.poa, 10) : null,
+        pod: assignmentPayload.pod ? parseInt(assignmentPayload.pod, 10) : null,
+        debrief_narrative: assignmentPayload.debrief_narrative || '',
         is_orphaned: false
       };
 
@@ -351,6 +433,9 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
         assignment_size: updates.assignment_size ? parseInt(updates.assignment_size, 10) : null,
         tac_channel: updates.tac_channel || '',
         description_narrative: updates.description_narrative || '',
+        poa: updates.poa ? parseInt(updates.poa, 10) : null,
+        pod: updates.pod ? parseInt(updates.pod, 10) : null,
+        debrief_narrative: updates.debrief_narrative || '',
         team_id: updates.team_id || null,
         is_orphaned: updates.is_orphaned || false
       };
@@ -367,6 +452,63 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
       if (error) throw error;
 
       await recordAction(`Updated details for assignment: ${payload.name}`);
+
+      // Synchronize linked team status and reset PAR timer if status changed
+      if (updates.team_id) {
+        let teamStatus = payload.status;
+        let unlinkRequired = false;
+
+        if (teamStatus === 'Completed' || teamStatus === 'Incomplete') {
+          teamStatus = 'Disbanded';
+          unlinkRequired = true;
+        } else if (teamStatus === 'Planned') {
+          teamStatus = 'Staged';
+          unlinkRequired = true;
+        }
+
+        // Check if status actually changed or if we just want to ensure timer resets on save
+        const { error: teamError } = await supabaseClient
+          .from('teams')
+          .update({ 
+            status: teamStatus,
+            last_par_check: new Date().toISOString()
+          })
+          .eq('team_id', updates.team_id);
+
+        if (teamError) throw teamError;
+
+        // Cascade status to team members
+        if (teamStatus === 'Assigned' || teamStatus === 'Deployed') {
+          const { data: members } = await supabaseClient
+            .from('team_responders')
+            .select('responder_id')
+            .eq('team_id', updates.team_id);
+          if (members?.length) {
+            await supabaseClient.from('responders').update({ status: teamStatus }).in('responder_id', members.map(m => m.responder_id));
+          }
+        } else if (teamStatus === 'Disbanded') {
+          const { data: members } = await supabaseClient
+            .from('team_responders')
+            .select('responder_id')
+            .eq('team_id', updates.team_id);
+          if (members?.length) {
+            const memberIds = members.map(m => m.responder_id);
+            await supabaseClient.from('responders').update({ status: 'Staged' }).in('responder_id', memberIds);
+            await supabaseClient.from('responder_team_history')
+              .update({ detached_datetime: new Date().toISOString() })
+              .eq('team_id', updates.team_id)
+              .is('detached_datetime', null);
+          }
+        }
+
+        // If assignment is finished, remove the link so the team is truly free for next task
+        if (unlinkRequired) {
+          await supabaseClient
+            .from('assignments')
+            .update({ team_id: null })
+            .eq('assignment_id', assignmentId);
+        }
+      }
 
       // Refresh to ensure any status sync triggers are reflected
       await fetchDashboardData();
@@ -401,6 +543,64 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
       throw err;
     }
   }, [supabaseClient]);
+
+  /**
+   * Detach a team: releases responders back to Staged status
+   * but keeps the team record and historical membership.
+   */
+  const detachTeam = useCallback(async (teamId) => {
+    if (!teamId) throw new Error('Team ID is required');
+
+    try {
+      setLoading(true);
+      setError(null);
+
+      // 1. Get current members
+      const { data: members, error: membersError } = await supabaseClient
+        .from('team_responders')
+        .select('responder_id')
+        .eq('team_id', teamId);
+
+      if (membersError) throw membersError;
+      const responderIds = members?.map(m => m.responder_id) || [];
+
+      // 2. Release responders and update history
+      if (responderIds.length > 0) {
+        await supabaseClient
+          .from('responders')
+          .update({ status: 'Staged' })
+          .in('responder_id', responderIds);
+
+        await supabaseClient
+          .from('responder_team_history')
+          .update({ detached_datetime: new Date().toISOString() })
+          .eq('team_id', teamId)
+          .is('detached_datetime', null);
+      }
+
+      // 3. Update team status
+      const { error: teamError } = await supabaseClient
+        .from('teams')
+        .update({ 
+          status: 'Disbanded',
+          last_par_check: new Date().toISOString()
+        })
+        .eq('team_id', teamId);
+
+      if (teamError) throw teamError;
+
+      const team = teams.find(t => t.team_id === teamId);
+      await recordAction(`Disbanded ${team?.team_name_number || 'Team'}`);
+      await fetchDashboardData();
+
+      return { success: true };
+    } catch (err) {
+      setError(err.message || 'Failed to disband team');
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, [supabaseClient, teams, fetchDashboardData, recordAction]);
 
   /**
    * Update an existing team
@@ -527,13 +727,82 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
     }
   }, [supabaseClient]);
 
+  /**
+   * Update responder details
+   */
+  const updateResponder = useCallback(async (responderId, updates) => {
+    try {
+      const { data, error } = await supabaseClient
+        .from('responders')
+        .update(updates)
+        .eq('responder_id', responderId)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      await recordAction(`Updated details for responder: ${updates.name || 'Responder'}`);
+      setResponders(prev => prev.map(r => r.responder_id === responderId ? data : r));
+      return data;
+    } catch (err) {
+      setError(err.message || 'Failed to update responder');
+      throw err;
+    }
+  }, [supabaseClient, recordAction]);
+
+  /**
+   * Mark a responder as checked out
+   */
+  const checkOutResponder = useCallback(async (responderId, name) => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      // 0. Remove from all team associations to maintain clean state
+      await supabaseClient
+        .from('team_responders')
+        .delete()
+        .eq('responder_id', responderId);
+
+      // 1. Clear leadership to prevent FK violations
+      await supabaseClient
+        .from('teams')
+        .update({ leader_responder_id: null })
+        .eq('leader_responder_id', responderId);
+
+      // 2. Update status and timestamp
+      const { data, error } = await supabaseClient
+        .from('responders')
+        .update({
+          checkout_datetime: new Date().toISOString()
+        })
+        .eq('responder_id', responderId)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      await recordAction(`Checked out responder: ${name}`);
+      setResponders(prev => prev.map(r => r.responder_id === responderId ? data : r));
+      return data;
+    } catch (err) {
+      setError(err.message || 'Failed to check out responder');
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, [supabaseClient, recordAction]);
+
   return {
     // State
     teams,
     assignments,
     responders,
+    opPeriod,
     loading,
     error,
+    setError,
+    setLoading,
 
     // Methods
     fetchDashboardData,
@@ -541,7 +810,11 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
     unassignTeam,
     updateTeamStatus,
     createTeam,
+    updateResponder,
+    checkOutResponder,
     createAssignment,
+    updateResourceStatus,
+    detachTeam,
     updateTeam,
     attachResponderToTeam,
     updateAssignment,
@@ -552,6 +825,7 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
     // Computed
     stagedTeams: (Array.isArray(teams) ? teams : []).filter(t => t?.status === 'Staged'),
     availableAssignments: (Array.isArray(assignments) ? assignments : []).filter(a => !a?.team_id && !a?.is_orphaned),
+    availableResponders: (Array.isArray(responders) ? responders : []).filter(r => r?.status === 'Staged'),
   };
 };
 

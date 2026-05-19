@@ -1,4 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import BaseModal from './BaseModal';
+import { supabase } from '../lib/supabase';
+import { useIncident } from '../context/IncidentContext';
 
 /**
  * Shared Modal for creating and editing Teams.
@@ -12,9 +15,64 @@ const TeamFormModal = ({
   loading = false,
   error = null
 }) => {
-  const [teamForm, setTeamForm] = useState(initialData);
+  const { responderName, user } = useIncident();
+  const staffName = responderName || user?.email || 'Operations';
 
-  if (!isOpen) return null;
+  const [teamForm, setTeamForm] = useState({
+    ...initialData,
+    equipment: Array.isArray(initialData.equipment) ? initialData.equipment.join(', ') : (initialData.equipment || '')
+  });
+
+  const [messages, setMessages] = useState([]);
+  const [messageText, setMessageText] = useState('');
+
+  const fetchMessages = useCallback(async () => {
+    if (!teamForm.team_id) return;
+    const { data } = await supabase
+      .from('team_messages')
+      .select('*')
+      .eq('team_id', teamForm.team_id)
+      .order('created_at', { ascending: true });
+    if (data) setMessages(data);
+  }, [teamForm.team_id]);
+
+  useEffect(() => {
+    if (!isOpen || !teamForm.team_id) return;
+    fetchMessages();
+    
+    const channel = supabase
+      .channel(`staff-team-msgs-${teamForm.team_id}`)
+      .on('postgres_changes', { 
+        event: 'INSERT', 
+        schema: 'public', 
+        table: 'team_messages', 
+        filter: `team_id=eq.${teamForm.team_id}` 
+      }, payload => setMessages(prev => {
+        // Prevent duplicate if the local insert response arrived first
+        if (prev.some(m => m.id === payload.new.id)) return prev;
+        return [...prev, payload.new];
+      }))
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [isOpen, teamForm.team_id, fetchMessages]);
+
+  const handleSendMessage = async (e) => {
+    e.preventDefault();
+    if (!messageText.trim() || !teamForm.team_id) return;
+    const { data, error: sendErr } = await supabase.from('team_messages').insert({
+      team_id: teamForm.team_id,
+      sender_name: staffName,
+      message_text: messageText.trim()
+    })
+    .select()
+    .single();
+
+    if (data && !sendErr) {
+      setMessages(prev => prev.some(m => m.id === data.id) ? prev : [...prev, data]);
+      setMessageText('');
+    }
+  };
 
   // Show responders who are Staged (available) OR already part of the team being edited
   const availableResponders = responders.filter(r => {
@@ -35,12 +93,27 @@ const TeamFormModal = ({
     });
   };
 
+  const handleSave = () => {
+    // Convert equipment string back to array for the API
+    const equipmentArray = typeof teamForm.equipment === 'string'
+      ? teamForm.equipment.split(',').map(s => s.trim()).filter(Boolean)
+      : (Array.isArray(teamForm.equipment) ? teamForm.equipment : []);
+
+    onSave({
+      ...teamForm,
+      equipment: equipmentArray
+    });
+  };
+
   return (
-    <div className="modal-backdrop">
-      <div className="modal">
-        <h3>{teamForm.team_id ? 'Edit Team' : 'New Team'}</h3>
-        
-        {error && <div className="alert alert-error">{error}</div>}
+    <BaseModal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={teamForm.team_id ? 'Edit Team' : 'New Team'}
+      loading={loading}
+      actions={<button className="btn btn-primary" onClick={handleSave} disabled={loading}>{loading ? 'Saving...' : 'Save'}</button>}
+    >
+        {error && <div className="alert alert-error" style={{ marginBottom: '16px' }}>{error}</div>}
 
         <div className="form-row">
           <label htmlFor="team_name">Team Name</label>
@@ -75,7 +148,7 @@ const TeamFormModal = ({
             <option>Staged</option>
             <option>Assigned</option>
             <option>Deployed</option>
-            <option>Demobilized</option>
+            <option>Disbanded</option>
           </select>
         </div>
 
@@ -126,16 +199,44 @@ const TeamFormModal = ({
         </div>
 
         <div className="form-row">
-          <label htmlFor="team_equipment">Equipment (comma separated)</label>
-          <input id="team_equipment" value={(teamForm.equipment || []).join(', ')} onChange={e => setTeamForm({ ...teamForm, equipment: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })} />
+          <label htmlFor="team_equipment">Equipment</label>
+          <input 
+            id="team_equipment" 
+            value={teamForm.equipment || ''} 
+            onChange={e => setTeamForm({ ...teamForm, equipment: e.target.value })} 
+            placeholder="e.g. Radios, GPS, First Aid Kit"
+          />
         </div>
 
-        <div className="modal-actions">
-          <button className="btn btn-primary" onClick={() => onSave(teamForm)} disabled={loading}>{loading ? 'Saving...' : 'Save'}</button>
-          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
-        </div>
-      </div>
-    </div>
+        {teamForm.team_id && (
+          <div className="form-row" style={{ borderTop: '1px solid #eee', paddingTop: '16px', marginTop: '16px' }}>
+            <label>Team Communications</label>
+            <div className="messages-log" style={{ maxHeight: '150px', overflowY: 'auto', marginBottom: '10px', background: '#f8fafc', padding: '10px', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
+              {messages.length === 0 ? <p style={{ color: '#94a3b8', fontSize: '12px' }}>No messages found.</p> : (
+                messages.map((m, i) => (
+                  <div key={m.id || i} style={{ marginBottom: '8px', paddingBottom: '4px', borderBottom: '1px solid #f1f5f9', fontSize: '12px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
+                      <strong style={{ color: m.sender_name === staffName ? '#0066cc' : '#475569' }}>{m.sender_name}</strong>
+                      <span style={{ fontSize: '10px', color: '#94a3b8' }}>{m.created_at ? new Date(m.created_at).toLocaleTimeString() : '...'}</span>
+                    </div>
+                    <span>{m.message_text}</span>
+                  </div>
+                ))
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <input 
+                type="text" 
+                value={messageText} 
+                onChange={(e) => setMessageText(e.target.value)} 
+                placeholder="Message team leader..." 
+                style={{ flex: 1 }}
+              />
+              <button type="button" className="btn btn-secondary btn-sm" onClick={handleSendMessage}>Send</button>
+            </div>
+          </div>
+        )}
+    </BaseModal>
   );
 };
 

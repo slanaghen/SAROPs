@@ -1,7 +1,7 @@
-import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor, act } from '@testing-library/react';
 import * as matchers from '@testing-library/jest-dom/matchers';
 import { vi, describe, it, expect, afterEach, beforeEach } from 'vitest';
-import { MemoryRouter } from 'react-router-dom';
+import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import IncidentEditPage from './IncidentEditPage';
 import { useIncident } from '../context/IncidentContext';
 
@@ -40,12 +40,24 @@ describe('IncidentEditPage', () => {
   });
 
   it('renders the form with default values', () => {
-    render(<MemoryRouter><IncidentEditPage /></MemoryRouter>);
+    const router = createMemoryRouter([
+      {
+        path: "/",
+        element: <IncidentEditPage />,
+      },
+    ]);
+    render(<RouterProvider router={router} />);
     expect(screen.getByDisplayValue('Missing Person Search')).toBeInTheDocument();
   });
 
   it('updates form fields on change', () => {
-    render(<MemoryRouter><IncidentEditPage /></MemoryRouter>);
+    const router = createMemoryRouter([
+      {
+        path: "/",
+        element: <IncidentEditPage />,
+      },
+    ]);
+    render(<RouterProvider router={router} />);
     const nameInput = screen.getByLabelText(/Incident Name/i);
     
     fireEvent.change(nameInput, { target: { value: 'Wildfire Response' } });
@@ -62,7 +74,13 @@ describe('IncidentEditPage', () => {
       endIncident: vi.fn(),
     });
     
-    render(<MemoryRouter><IncidentEditPage /></MemoryRouter>);
+    const router = createMemoryRouter([
+      {
+        path: "/",
+        element: <IncidentEditPage />,
+      },
+    ]);
+    render(<RouterProvider router={router} />);
     expect(screen.getByText(/End Incident/i)).toBeInTheDocument();
   });
 
@@ -70,7 +88,13 @@ describe('IncidentEditPage', () => {
     const chain = createMockChain();
     mockFrom.mockReturnValue(chain);
 
-    render(<MemoryRouter><IncidentEditPage /></MemoryRouter>);
+    const router = createMemoryRouter([
+      {
+        path: "/",
+        element: <IncidentEditPage />,
+      },
+    ]);
+    render(<RouterProvider router={router} />);
     fireEvent.submit(screen.getByRole('button', { name: /Start Incident Tracking/i }));
 
     await waitFor(() => {
@@ -93,7 +117,13 @@ describe('IncidentEditPage', () => {
       endIncident: vi.fn(),
     });
     
-    render(<MemoryRouter><IncidentEditPage /></MemoryRouter>);
+    const router = createMemoryRouter([
+      {
+        path: "/",
+        element: <IncidentEditPage />,
+      },
+    ]);
+    render(<RouterProvider router={router} />);
     
     const nameInput = screen.getByLabelText(/Incident Name/i);
     fireEvent.change(nameInput, { target: { value: 'Updated Mission Name' } });
@@ -106,5 +136,68 @@ describe('IncidentEditPage', () => {
         name: 'Updated Mission Name'
       }));
     });
+  });
+
+  it('should prompt for cleanup and perform bulk updates when ending an incident with active resources', async () => {
+    const chain = createMockChain();
+    mockFrom.mockReturnValue(chain);
+    window.confirm = vi.fn().mockReturnValue(true);
+
+    vi.mocked(useIncident).mockReturnValue({ 
+      isActive: true, 
+      incidentId: 'inc-123',
+      incidentData: { opPeriodId: 'op-123' },
+      endIncident: vi.fn(),
+    });
+
+    // Mock active assignments and responders response
+    mockFrom.mockImplementation((table) => {
+      if (table === 'assignments') return { ...chain, select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), in: vi.fn().mockResolvedValue({ data: [{ status: 'Deployed' }] }) };
+      if (table === 'responders') return { ...chain, select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), is: vi.fn().mockResolvedValue({ data: [{ id: 'r1' }] }) };
+      return chain;
+    });
+
+    const router = createMemoryRouter([{ path: "/", element: <IncidentEditPage /> }]);
+    render(<RouterProvider router={router} />);
+
+    fireEvent.click(screen.getByText(/End Incident/i));
+
+    await waitFor(() => {
+      expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('1 active assignments and 1 responders'));
+      expect(mockFrom).toHaveBeenCalledWith('teams'); // Disband teams step
+      expect(chain.update).toHaveBeenCalledWith(expect.objectContaining({ status: 'Disbanded' }));
+    });
+  });
+
+  it('blocks navigation when the form is dirty and offers to stay', async () => {
+    vi.mocked(useIncident).mockReturnValue({
+      isActive: true,
+      incidentId: 'inc-123',
+      incidentData: { opPeriodId: 'op-123' },
+    });
+
+    const router = createMemoryRouter([
+      { path: "/", element: <IncidentEditPage /> },
+      { path: "/checkin", element: <div>Check-in Page</div> },
+      { path: "/admin", element: <div>Admin Page</div> }
+    ]);
+    
+    render(<RouterProvider router={router} />);
+    
+    // Make the form dirty
+    const nameInput = screen.getByLabelText(/Incident Name/i);
+    fireEvent.change(nameInput, { target: { value: 'Dirty Change' } });
+    
+    // Try to navigate away
+    act(() => { router.navigate('/checkin'); });
+    act(() => { router.navigate('/admin'); });
+
+    // Verify blocker modal is visible
+    expect(screen.getByText(/Unsaved Changes/i)).toBeInTheDocument();
+    
+    // Test "Stay" button
+    fireEvent.click(screen.getByText('Stay'));
+    expect(screen.queryByText(/Unsaved Changes/i)).not.toBeInTheDocument();
+    expect(router.state.location.pathname).toBe('/');
   });
 });

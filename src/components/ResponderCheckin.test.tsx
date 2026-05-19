@@ -12,9 +12,6 @@ describe('ResponderCheckin confirmation screen', () => {
     fireEvent.change(screen.getByLabelText(/Full Name/i), {
       target: { value: 'asdf' },
     });
-    fireEvent.change(screen.getByLabelText(/Email Address/i), {
-      target: { value: 'test@example.com' },
-    });
     fireEvent.change(screen.getByLabelText(/Agency/i), {
       target: { value: 'asdf' },
     });

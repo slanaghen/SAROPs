@@ -53,12 +53,13 @@ describe('CheckOutPage', () => {
     expect(screen.getByText(/No Active Session/i)).toBeInTheDocument();
   });
 
-  it('allows check-out for command staff with "Active" status', async () => {
+  it('allows check-out for command staff with "Assigned" status', async () => {
     vi.mocked(useIncident).mockReturnValue({
       isActive: true,
       responderId: 'staff-123',
       responderName: 'Commander Steve',
-      responderStatus: 'Active',
+      responderStatus: 'Assigned',
+      accessLevel: 'command staff',
       logout: mockLogout,
     } as any);
 

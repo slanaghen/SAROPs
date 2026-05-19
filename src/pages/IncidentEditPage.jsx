@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useMemo } from 'react';
+import { useNavigate, useBlocker } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { supabase } from '../lib/supabase';
 import { useIncident } from '../context/IncidentContext';
@@ -27,33 +27,103 @@ const getDefaultIncidentNumber = () => {
   return `${year}-${month}-${day}-${hours}${minutes}`;
 };
 
+const defaultIncident = {
+  name: 'Missing Person Search',
+  number: getDefaultIncidentNumber(),
+  sartopo_id: '',
+  start_datetime: getCurrentLocalDatetime(),
+  end_datetime: '',
+  notes: '',
+};
+
+const defaultOperationalPeriod = {
+  op_number: '1',
+  start_datetime: getCurrentLocalDatetime(),
+  end_datetime: '',
+  situation_narrative: 'Perform reflex tasking, establish search assignments and deploy search teams.',
+  par_check_interval: 60,
+  situational_awareness_narrative: '',
+};
+
 const IncidentEditPage = () => {
   const navigate = useNavigate();
   const [isSaving, setIsSaving] = useState(false);
-  const [incident, setIncident] = useState({
-    name: 'Missing Person Search',
-    number: getDefaultIncidentNumber(),
-    sartopo_id: '',
-    start_datetime: getCurrentLocalDatetime(),
-    end_datetime: '',
-    notes: '',
-  });
+  const [incident, setIncident] = useState(defaultIncident);
+  const [initialIncident, setInitialIncident] = useState(defaultIncident);
 
-  const [operationalPeriod, setOperationalPeriod] = useState({
-    op_number: '1',
-    start_datetime: getCurrentLocalDatetime(),
-    end_datetime: '',
-    situation_narrative: 'Perform reflex tasking, establish search assignments and deploy search teams.',
-    situational_awareness_narrative: '',
-  });
+  const [operationalPeriod, setOperationalPeriod] = useState(defaultOperationalPeriod);
+  const [initialOpPeriod, setInitialOpPeriod] = useState(defaultOperationalPeriod);
 
   const { isActive, incidentId: contextIncidentId, incidentData, startIncident, endIncident } = useIncident();
   const [isLocalSaved, setIsLocalSaved] = useState(false);
 
-  // Keep local saved state in sync with global active status for the UI preview
+  // Load existing data if an incident is already active
   useEffect(() => {
-    if (isActive) setIsLocalSaved(true);
-  }, [isActive]);
+    const loadExistingData = async () => {
+      if (!isActive || !contextIncidentId || !incidentData?.opPeriodId) return;
+
+      setIsLocalSaved(true);
+      
+      try {
+        // Fetch Incident Details
+        const { data: incData, error: incError } = await supabase
+          .from('incidents')
+          .select('*')
+          .eq('incident_id', contextIncidentId)
+          .maybeSingle();
+
+        if (incError) throw incError;
+        if (incData) {
+          const fetchedInc = {
+            name: incData.name,
+            number: incData.number,
+            sartopo_id: incData.sartopo_id || '',
+            start_datetime: incData.start_datetime ? incData.start_datetime.slice(0, 16) : getCurrentLocalDatetime(),
+            end_datetime: incData.end_datetime ? incData.end_datetime.slice(0, 16) : '',
+            notes: incData.notes || '',
+          };
+          setIncident(fetchedInc);
+          setInitialIncident(fetchedInc);
+        }
+
+        // Fetch current Operational Period
+        const { data: opData, error: opError } = await supabase
+          .from('operational_periods')
+          .select('*')
+          .eq('op_period_id', incidentData.opPeriodId)
+          .maybeSingle();
+
+        if (opError) throw opError;
+        if (opData) {
+          const fetchedOp = {
+            op_number: String(opData.op_number),
+            start_datetime: opData.start_datetime ? opData.start_datetime.slice(0, 16) : getCurrentLocalDatetime(),
+            end_datetime: opData.end_datetime ? opData.end_datetime.slice(0, 16) : '',
+            situation_narrative: opData.situation_narrative || '',
+            par_check_interval: opData.par_check_interval !== undefined ? opData.par_check_interval : 60,
+            situational_awareness_narrative: opData.situational_awareness_narrative || '',
+          };
+          setOperationalPeriod(fetchedOp);
+          setInitialOpPeriod(fetchedOp);
+        }
+      } catch (err) {
+        console.error('Error loading incident data:', err);
+      }
+    };
+
+    loadExistingData();
+  }, [isActive, contextIncidentId, incidentData?.opPeriodId]);
+
+  // Detect if any changes have been made to the form
+  const isDirty = useMemo(() => {
+    return JSON.stringify(incident) !== JSON.stringify(initialIncident) ||
+           JSON.stringify(operationalPeriod) !== JSON.stringify(initialOpPeriod);
+  }, [incident, initialIncident, operationalPeriod, initialOpPeriod]);
+
+  // Navigation guard for unsaved changes
+  const blocker = useBlocker(
+    ({ nextLocation }) => isDirty && !isSaving && nextLocation.pathname !== "/checkin"
+  );
 
   const handleIncidentChange = (field, value) => {
     setIncident(prev => ({ ...prev, [field]: value }));
@@ -63,8 +133,7 @@ const IncidentEditPage = () => {
     setOperationalPeriod(prev => ({ ...prev, [field]: value }));
   };
 
-  const handleSubmit = async (event) => {
-    event.preventDefault();
+  const saveData = async () => {
     setIsSaving(true);
 
     try {
@@ -75,6 +144,9 @@ const IncidentEditPage = () => {
       
       const incidentId = isExistingIdValid ? contextIncidentId : uuidv4();
       const opPeriodId = uuidv4();
+
+      const parsedPar = parseInt(operationalPeriod.par_check_interval, 10);
+      const finalParInterval = isNaN(parsedPar) ? 60 : parsedPar;
 
       if (isActive && isExistingIdValid) {
         // 1. Update Incident in Supabase
@@ -98,7 +170,8 @@ const IncidentEditPage = () => {
             op_number: operationalPeriod.op_number,
             start_datetime: operationalPeriod.start_datetime,
             situation_narrative: operationalPeriod.situation_narrative,
-            situational_awareness_narrative: operationalPeriod.situational_awareness_narrative
+            situational_awareness_narrative: operationalPeriod.situational_awareness_narrative,
+            par_check_interval: finalParInterval
           })
           .eq('op_period_id', incidentData?.opPeriodId);
 
@@ -129,7 +202,8 @@ const IncidentEditPage = () => {
             op_number: operationalPeriod.op_number,
             start_datetime: operationalPeriod.start_datetime,
             situation_narrative: operationalPeriod.situation_narrative,
-            situational_awareness_narrative: operationalPeriod.situational_awareness_narrative
+            situational_awareness_narrative: operationalPeriod.situational_awareness_narrative,
+            par_check_interval: finalParInterval
           });
 
         if (opError) throw opError;
@@ -138,43 +212,120 @@ const IncidentEditPage = () => {
         startIncident(incidentId, incident.name, operationalPeriod.op_number, opPeriodId);
       }
 
+      setInitialIncident(incident);
+      setInitialOpPeriod(operationalPeriod);
       setIsLocalSaved(true);
-      console.log('Incident tracking started/updated');
-      
-      // 4. Navigate back to checkin
-      navigate('/checkin');
+      return true;
     } catch (err) {
-      // Supabase errors are objects, not always instances of Error
       const message = err.message || (err instanceof Error ? err.message : 'Unknown database error');
       console.error('Failed to save incident:', err);
       alert(`Error starting incident tracking: ${message}`);
+      return false;
     } finally {
       setIsSaving(false);
     }
   };
 
-  const handleEndIncident = () => {
-    const now = getCurrentLocalDatetime();
+  const handleSubmit = async (event) => {
+    if (event) event.preventDefault();
+    const success = await saveData();
+    if (success) {
+      navigate('/checkin');
+    }
+  };
 
-    setIncident(prev => ({
-      ...prev,
-      end_datetime: prev.end_datetime || now,
-    }));
+  const handleEndIncident = async () => {
+    if (!contextIncidentId || !incidentData?.opPeriodId) return;
 
-    setOperationalPeriod(prev => ({
-      ...prev,
-      end_datetime: prev.end_datetime || now,
-    }));
+    try {
+      setIsSaving(true);
+      
+      // 1. Fetch counts of active assignments and responders to determine if cleanup is needed
+      const [asnRes, resRes] = await Promise.all([
+        supabase.from('assignments')
+          .select('assignment_id, status')
+          .eq('op_period_id', incidentData.opPeriodId)
+          .in('status', ['Assigned', 'Deployed']),
+        supabase.from('responders')
+          .select('responder_id')
+          .eq('incident_id', contextIncidentId)
+          .is('checkout_datetime', null)
+      ]);
 
-    setIsLocalSaved(true);
-    endIncident();
+      const activeAssignments = asnRes.data || [];
+      const activeResponders = resRes.data || [];
+
+      // 2. Display confirmation and perform automated actions if resources are still active
+      if (activeAssignments.length > 0 || activeResponders.length > 0) {
+        const deployedCount = activeAssignments.filter(a => a.status === 'Deployed').length;
+        const assignedCount = activeAssignments.filter(a => a.status === 'Assigned').length;
+
+        const confirmMsg = `The incident has ${activeAssignments.length} active assignments and ${activeResponders.length} responders still checked in.\n\n` +
+          `Would you like to automatically take the following actions?\n` +
+          `- Mark ${deployedCount} Deployed assignments as Incomplete\n` +
+          `- Mark ${assignedCount} Assigned assignments as Planned\n` +
+          `- Disband all teams in this operational period\n` +
+          `- Check out all remaining responders\n` +
+          `- Close the operational period and end incident tracking`;
+        
+        if (!window.confirm(confirmMsg)) {
+          setIsSaving(false);
+          return;
+        }
+
+        const now = new Date().toISOString();
+        
+        // Automated Assignment Cleanup
+        if (deployedCount > 0) {
+          await supabase.from('assignments')
+            .update({ status: 'Incomplete', team_id: null })
+            .eq('op_period_id', incidentData.opPeriodId)
+            .eq('status', 'Deployed');
+        }
+
+        if (assignedCount > 0) {
+          await supabase.from('assignments')
+            .update({ status: 'Planned', team_id: null })
+            .eq('op_period_id', incidentData.opPeriodId)
+            .eq('status', 'Assigned');
+        }
+
+        // Disband all teams in this OP as they are released
+        await supabase.from('teams')
+          .update({ status: 'Disbanded', last_par_check: now })
+          .eq('op_period_id', incidentData.opPeriodId);
+
+        // Check out all remaining responders
+        if (activeResponders.length > 0) {
+          await supabase.from('responders')
+            .update({ status: 'Staged', checkout_datetime: now })
+            .eq('incident_id', contextIncidentId)
+            .is('checkout_datetime', null);
+        }
+      }
+
+      // 3. Final closure of the operational period and incident records
+      const endTimestamp = new Date().toISOString();
+      await Promise.all([
+        supabase.from('operational_periods').update({ end_datetime: endTimestamp }).eq('op_period_id', incidentData.opPeriodId),
+        supabase.from('incidents').update({ end_datetime: endTimestamp }).eq('incident_id', contextIncidentId)
+      ]);
+
+      endIncident(); // Reset global context state
+      navigate('/checkin');
+    } catch (err) {
+      console.error('Error ending incident:', err);
+      alert('Failed to end incident: ' + (err.message || 'Database error'));
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
     <div className="incident-edit-page">
       <div className="page-header">
         <div>
-          <h1>Incident Editor</h1>
+          <h1>Incident</h1>
           <p className="subtitle">
             Enter incident details and operational period information in one place.
           </p>
@@ -278,6 +429,30 @@ const IncidentEditPage = () => {
                 />
               </label>
             )}
+            
+            <div className="par-config-row" style={{ display: 'flex', alignItems: 'flex-end', gap: '12px', marginBottom: '16px' }}>
+              <label style={{ flex: 1, marginBottom: 0 }}>
+                PAR/Status Check Interval (minutes)
+                <input
+                  type="number"
+                  value={operationalPeriod.par_check_interval}
+                  onChange={(e) => handleOperationalPeriodChange('par_check_interval', e.target.value)}
+                  placeholder="e.g. 60"
+                  disabled={operationalPeriod.par_check_interval === 0}
+                  min="0"
+                />
+              </label>
+              <button 
+                type="button" 
+                className={`btn ${operationalPeriod.par_check_interval === 0 ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ height: '38px', whiteSpace: 'nowrap' }}
+                onClick={() => {
+                  handleOperationalPeriodChange('par_check_interval', operationalPeriod.par_check_interval === 0 ? 60 : 0);
+                }}
+              >
+                {operationalPeriod.par_check_interval === 0 ? 'Enable PAR' : 'Disable PAR'}
+              </button>
+            </div>
 
             <label>
               Operational Period Objective
@@ -300,16 +475,17 @@ const IncidentEditPage = () => {
         </div>
 
         <div className="form-actions">
-          <button type="submit" className="btn btn-primary">
-            {isSaving ? 'Saving...' : (isActive ? 'Update Incident Information' : 'Start Incident Tracking')}
+          <button type="submit" className="btn btn-primary" disabled={isSaving || !isDirty}>
+            {isSaving ? 'Saving...' : (isActive && isLocalSaved ? 'Update Incident Information' : 'Start Incident Tracking')}
           </button>
           {isActive && (
             <button
               type="button"
               className="btn btn-secondary"
               onClick={handleEndIncident}
+              disabled={isSaving}
             >
-              End Incident
+              {isSaving ? 'Closing Incident...' : 'End Incident'}
             </button>
           )}
           {isLocalSaved && (
@@ -353,6 +529,36 @@ const IncidentEditPage = () => {
             <div>
               <strong>OP End:</strong>
               <p>{operationalPeriod.end_datetime || '—'}</p>
+            </div>
+            <div>
+              <strong>PAR Interval:</strong>
+              <p>{operationalPeriod.par_check_interval === 0 ? 'Disabled' : `${operationalPeriod.par_check_interval || '60'} minutes`}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {blocker.state === 'blocked' && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, width: '100%', height: '100%',
+          backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center',
+          justifyContent: 'center', zIndex: 1000
+        }}>
+          <div style={{
+            background: 'white', padding: '24px', borderRadius: '8px',
+            maxWidth: '450px', width: '90%', textAlign: 'center', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)'
+          }}>
+            <h3 style={{ marginTop: 0 }}>Unsaved Changes</h3>
+            <p style={{ color: '#4b5563', lineHeight: '1.5' }}>
+              You have made changes to the incident details. Would you like to commit these changes before leaving, or cancel the changes?
+            </p>
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', marginTop: '24px' }}>
+              <button className="btn btn-primary" onClick={async () => {
+                const success = await saveData();
+                if (success) blocker.proceed();
+              }}>Commit Changes</button>
+              <button className="btn btn-secondary" onClick={() => blocker.proceed()}>Cancel Changes</button>
+              <button className="btn btn-secondary" onClick={() => blocker.reset()}>Stay</button>
             </div>
           </div>
         </div>

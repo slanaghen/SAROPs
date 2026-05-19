@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import '../styles/PlanningDashboard.css';
 import TeamFormModal from './TeamFormModal';
 import AssignmentFormModal from './AssignmentFormModal';
+import ResponderFormModal from './ResponderFormModal';
 
 /**
  * PlanningDashboard Component
@@ -30,19 +31,21 @@ const PlanningDashboard = ({
   updateAssignment,
   deleteAssignment,
   updateTeam,
+  updateResponder,
+  checkOutResponder,
   attachResponderToTeam,
   detachResponderFromTeam,
   deleteTeam,
 }) => {
-  const [selectedTeamId, setSelectedTeamId] = useState(null);
-  const [selectedAssignmentId, setSelectedAssignmentId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [successMessage, setSuccessMessage] = useState(null);
   const [showTeamForm, setShowTeamForm] = useState(false);
   const [showAssignmentForm, setShowAssignmentForm] = useState(false);
+  const [showResponderForm, setShowResponderForm] = useState(false);
   const [teamForm, setTeamForm] = useState({});
   const [assignmentForm, setAssignmentForm] = useState({});
+  const [responderForm, setResponderForm] = useState({});
   const [showMembersModal, setShowMembersModal] = useState(false);
   const [activeTeam, setActiveTeam] = useState(null);
   const [draggedItem, setDraggedItem] = useState(null); // { id, type }
@@ -75,50 +78,85 @@ const PlanningDashboard = ({
     e.preventDefault();
     if (!draggedItem || draggedItem.type === type) return;
 
-    const teamId = draggedItem.type === 'team' ? draggedItem.id : id;
-    const assignmentId = draggedItem.type === 'assignment' ? draggedItem.id : id;
+    // Team <-> Assignment logic
+    if ((draggedItem.type === 'team' && type === 'assignment') || (draggedItem.type === 'assignment' && type === 'team')) {
+      const teamId = draggedItem.type === 'team' ? draggedItem.id : id;
+      const assignmentId = draggedItem.type === 'assignment' ? draggedItem.id : id;
+      const team = teams.find(t => t.team_id === teamId);
+      const assignment = assignments.find(a => a.assignment_id === assignmentId);
 
-    const team = teams.find(t => t.team_id === teamId);
-    const assignment = assignments.find(a => a.assignment_id === assignmentId);
-
-    if (team && assignment) {
-      handleDragEnd();
-      // Execute assignment using existing logic
-      setLoading(true);
-      try {
-        if (onTeamAssigned) {
-          await onTeamAssigned({ teamId, assignmentId, team, assignment });
+      if (team && assignment) {
+        handleDragEnd();
+        setLoading(true);
+        try {
+          if (onTeamAssigned) {
+            await onTeamAssigned({ teamId, assignmentId, team, assignment });
+          }
+          setSuccessMessage(`Team "${team.team_name_number}" assigned to "${assignment.name}"`);
+          setTimeout(() => setSuccessMessage(null), 3000);
+        } catch (err) {
+          setError(err.message || 'Failed to assign team');
+        } finally {
+          setLoading(false);
         }
-        setSuccessMessage(`Team "${team.team_name_number}" assigned to "${assignment.name}"`);
-        setTimeout(() => setSuccessMessage(null), 3000);
-        setSelectedTeamId(null);
-        setSelectedAssignmentId(null);
-      } catch (err) {
-        setError(err.message || 'Failed to assign team');
-      } finally {
-        setLoading(false);
+      }
+    } 
+    // Responder <-> Team logic
+    else if ((draggedItem.type === 'responder' && type === 'team') || (draggedItem.type === 'team' && type === 'responder')) {
+      const responderId = draggedItem.type === 'responder' ? draggedItem.id : id;
+      const teamId = draggedItem.type === 'team' ? draggedItem.id : id;
+      const responder = responders.find(r => r.responder_id === responderId);
+      const team = teams.find(t => t.team_id === teamId);
+
+      if (responder && team) {
+        handleDragEnd();
+        setLoading(true);
+        try {
+          if (attachResponderToTeam) {
+            await attachResponderToTeam(responderId, teamId);
+            setSuccessMessage(`Responder "${responder.name}" attached to team "${team.team_name_number}"`);
+            setTimeout(() => setSuccessMessage(null), 3000);
+          }
+        } catch (err) {
+          setError(err.message || 'Failed to attach responder to team');
+        } finally {
+          setLoading(false);
+        }
       }
     }
   };
 
   const isTeamHighlighted = (teamId) => {
-    if (selectedTeamId === teamId) return true;
     if (!draggedItem) return false;
-    if (draggedItem.id === teamId && draggedItem.type === 'team' && dropTarget?.type === 'assignment') return true;
-    if (dropTarget?.id === teamId && draggedItem.type === 'assignment') return true;
+    
+    // Highlight if dragging team over assignment, or if dragging assignment/responder over this team
+    if (draggedItem.id === teamId && draggedItem.type === 'team' && (dropTarget?.type === 'assignment')) return true;
+    if (dropTarget?.id === teamId && (draggedItem.type === 'assignment' || draggedItem.type === 'responder')) return true;
+    
     return false;
   };
 
   const isAssignmentHighlighted = (assignmentId) => {
-    if (selectedAssignmentId === assignmentId) return true;
     if (!draggedItem) return false;
+    // Highlighting for symmetry (team dragged over assignment)
     if (draggedItem.id === assignmentId && draggedItem.type === 'assignment' && dropTarget?.type === 'team') return true;
     if (dropTarget?.id === assignmentId && draggedItem.type === 'team') return true;
     return false;
   };
 
+  const isResponderHighlighted = (responderId) => {
+    if (!draggedItem) return false;
+    // Highlight if we are dragging a responder over a team or vice versa
+    if (draggedItem.id === responderId && draggedItem.type === 'responder' && dropTarget?.type === 'team') return true;
+    if (dropTarget?.id === responderId && draggedItem.type === 'team') return true;
+    return false;
+  };
+
   // Filter teams to only show those with "Staged" status
   const stagedTeams = teams.filter(t => t.status === 'Staged');
+
+  // Available responders for the panel (Staged)
+  const availableRespondersList = responders.filter(r => r.status === 'Staged');
 
   // Filter assignments to show unassigned or available assignments
   const availableAssignments = assignments.filter(asn => {
@@ -127,14 +165,6 @@ const PlanningDashboard = ({
            isUnassigned && 
            !asn.is_orphaned;
   });
-
-  // Get the currently selected team details
-  const selectedTeam = stagedTeams.find(t => t.team_id === selectedTeamId);
-
-  // Get the currently selected assignment details
-  const selectedAssignment = availableAssignments.find(
-    a => a.assignment_id === selectedAssignmentId
-  );
 
   // Get responder details for the team leader
   const getResponderName = (responderId) => {
@@ -159,7 +189,6 @@ const PlanningDashboard = ({
     setTeamForm({
       op_period_id: operationalPeriodId,
       team_name_number: defaultNewTeamName,
-      sartopo_color_hex: '#007bff',
       type: defaultNewTeamType,
       status: 'Staged',
       leader_responder_id: null,
@@ -184,6 +213,7 @@ const PlanningDashboard = ({
   };
 
   const openEditAssignmentForm = (assignment) => {
+    console.log('📝 Opening Assignment Editor for:', assignment.name);
     setAssignmentForm({
       ...assignment
     });
@@ -191,12 +221,19 @@ const PlanningDashboard = ({
   };
 
   const openEditTeamForm = (team) => {
+    console.log('📝 Opening Team Editor for:', team.team_name_number);
     setTeamForm({
       ...team,
       equipment: team.equipment || [],
       responder_ids: team.current_responders?.map(r => r.responder_id) || [],
     });
     setShowTeamForm(true);
+  };
+
+  const openEditResponderForm = (responder) => {
+    console.log('📝 Opening Responder Editor for:', responder.name);
+    setResponderForm({ ...responder });
+    setShowResponderForm(true);
   };
 
   const handleToggleNewTeamResponder = (responderId) => {
@@ -219,11 +256,6 @@ const PlanningDashboard = ({
       if (deleteTeam) {
         await deleteTeam(team.team_id);
         
-        // Clear selection if the released team was selected
-        if (selectedTeamId === team.team_id) {
-          setSelectedTeamId(null);
-        }
-        
         setSuccessMessage(`Team "${team.team_name_number}" released`);
         setTimeout(() => setSuccessMessage(null), 3000);
       }
@@ -241,11 +273,6 @@ const PlanningDashboard = ({
       setLoading(true);
       if (deleteAssignment) {
         await deleteAssignment(assignment.assignment_id);
-        
-        // Clear selection if the deleted assignment was selected
-        if (selectedAssignmentId === assignment.assignment_id) {
-          setSelectedAssignmentId(null);
-        }
         
         setSuccessMessage(`Assignment "${assignment.name}" deleted`);
         setTimeout(() => setSuccessMessage(null), 3000);
@@ -276,7 +303,6 @@ const PlanningDashboard = ({
         // 1. Update core team details
         await updateTeam(formData.team_id, {
           team_name_number: formData.team_name_number,
-          sartopo_color_hex: formData.sartopo_color_hex,
           type: formData.type,
           status: formData.status,
           leader_responder_id: formData.leader_responder_id,
@@ -340,6 +366,40 @@ const PlanningDashboard = ({
     }
   };
 
+  const handleSaveResponder = async (formData) => {
+    try {
+      setLoading(true);
+      if (updateResponder) {
+        await updateResponder(formData.responder_id, formData);
+        setSuccessMessage('Responder updated');
+      }
+      setShowResponderForm(false);
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err) {
+      setError(err.message || 'Failed to update responder');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCheckOutResponder = async (responder) => {
+    if (!window.confirm(`Are you sure you want to check out ${responder.name}?`)) return;
+    
+    try {
+      setLoading(true);
+      if (checkOutResponder) {
+        await checkOutResponder(responder.responder_id, responder.name);
+        setSuccessMessage('Responder checked out');
+      }
+      setShowResponderForm(false);
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err) {
+      setError(err.message || 'Failed to check out responder');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const openMembersModal = (team) => {
     setActiveTeam(team);
     setShowMembersModal(true);
@@ -371,60 +431,9 @@ const PlanningDashboard = ({
     }
   };
 
-  /**
-   * Handle team-to-assignment mapping
-   */
-  const handleAssignTeam = async () => {
-    if (!selectedTeamId || !selectedAssignmentId) {
-      setError('Please select both a team and an assignment');
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-    setSuccessMessage(null);
-
-    try {
-      // Call the onTeamAssigned callback with mapping details
-      if (onTeamAssigned) {
-        await onTeamAssigned({
-          teamId: selectedTeamId,
-          assignmentId: selectedAssignmentId,
-          team: selectedTeam,
-          assignment: selectedAssignment
-        });
-      }
-
-      // Clear selections and show success message
-      setSelectedTeamId(null);
-      setSelectedAssignmentId(null);
-      setSuccessMessage(
-        `Team "${selectedTeam.team_name_number}" assigned to "${selectedAssignment.name}"`
-      );
-
-      // Clear success message after 3 seconds
-      setTimeout(() => setSuccessMessage(null), 3000);
-    } catch (err) {
-      setError(err.message || 'Failed to assign team to assignment');
-      console.error('Assignment error:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  /**
-   * Reset selection and clear messages
-   */
-  const handleReset = () => {
-    setSelectedTeamId(null);
-    setSelectedAssignmentId(null);
-    setError(null);
-    setSuccessMessage(null);
-  };
-
   return (
     <div className="planning-dashboard" data-dragging={!!draggedItem}>
-      <h1>Planning Dashboard - Team Assignment</h1>
+      <h1>Planning Dashboard</h1>
 
       {/* Messages */}
       {error && (
@@ -449,6 +458,47 @@ const PlanningDashboard = ({
       )}
 
       <div className="dashboard-container">
+        {/* Available Responders Section */}
+        <div className="section responders-section">
+          <div className="section-header">
+            <h2>Available Responders ({availableRespondersList.length})</h2>
+          </div>
+
+          {availableRespondersList.length === 0 ? (
+            <div className="empty-state">
+              <p>No available responders in staging</p>
+            </div>
+          ) : (
+            <div className="responder-list">
+              {availableRespondersList.map(responder => (
+                <div
+                  key={responder.responder_id}
+                  className={`responder-card ${isResponderHighlighted(responder.responder_id) ? 'selected' : ''} ${draggedItem?.id === responder.responder_id ? 'dragging' : ''}`}
+                  draggable="true"
+                  onClick={() => openEditResponderForm(responder)}
+                  onDragStart={(e) => handleDragStart(e, responder.responder_id, 'responder')}
+                  onDragEnd={handleDragEnd}
+                  onDragOver={(e) => handleDragOver(e, 'responder')}
+                  onDragEnter={(e) => handleDragEnter(e, responder.responder_id, 'responder')}
+                  onDragLeave={() => setDropTarget(null)}
+                  onDrop={(e) => handleDrop(e, responder.responder_id, 'responder')}
+                  role="option"
+                  tabIndex={0}
+                >
+                  <div className="responder-header">
+                    <div className="responder-name clickable-name">{responder.name}</div>
+                    <div className="responder-id-badge">{responder.identifier}</div>
+                  </div>
+                  <div className="responder-agency-meta">{responder.agency}</div>
+                  {responder.special_skills && (
+                    <div className="responder-skills-badge">{responder.special_skills}</div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         {/* Staged Teams Section */}
         <div className="section teams-section">
           <div className="section-header">
@@ -468,7 +518,7 @@ const PlanningDashboard = ({
                 <div
                   key={team.team_id}
                   className={`team-card ${isTeamHighlighted(team.team_id) ? 'selected' : ''}`}
-                  onClick={() => setSelectedTeamId(team.team_id)}
+                  onClick={() => openEditTeamForm(team)}
                   draggable="true"
                   onDragStart={(e) => handleDragStart(e, team.team_id, 'team')}
                   onDragEnd={handleDragEnd}
@@ -477,15 +527,10 @@ const PlanningDashboard = ({
                   onDragLeave={() => setDropTarget(null)}
                   onDrop={(e) => handleDrop(e, team.team_id, 'team')}
                   role="option"
-                  aria-selected={selectedTeamId === team.team_id}
                   tabIndex={0}
                 >
                   <div className="team-header" style={{ gap: '8px', justifyContent: 'flex-start', flexWrap: 'wrap' }}>
-                    <div className="team-color-indicator" 
-                         style={{ backgroundColor: team.sartopo_color_hex }}
-                         title={`Color: ${team.sartopo_color_hex}`}
-                    />
-                    <div className="team-name" style={{ marginRight: '4px' }}>{team.team_name_number}</div>
+                    <div className="team-name clickable-name" style={{ marginRight: '4px' }}>{team.team_name_number}</div>
                     <div className={`team-type ${team.type.replace(/\s+/g, '-').toLowerCase()}`}>
                       {team.type}
                     </div>
@@ -537,7 +582,7 @@ const PlanningDashboard = ({
                 <div
                   key={assignment.assignment_id}
                   className={`assignment-card ${isAssignmentHighlighted(assignment.assignment_id) ? 'selected' : ''}`}
-                  onClick={() => setSelectedAssignmentId(assignment.assignment_id)}
+                  onClick={() => openEditAssignmentForm(assignment)}
                   draggable="true"
                   onDragStart={(e) => handleDragStart(e, assignment.assignment_id, 'assignment')}
                   onDragEnd={handleDragEnd}
@@ -546,11 +591,10 @@ const PlanningDashboard = ({
                   onDragLeave={() => setDropTarget(null)}
                   onDrop={(e) => handleDrop(e, assignment.assignment_id, 'assignment')}
                   role="option"
-                  aria-selected={selectedAssignmentId === assignment.assignment_id}
                   tabIndex={0}
                 >
                   <div className="assignment-header" style={{ gap: '8px', justifyContent: 'flex-start', alignItems: 'center', flexWrap: 'wrap' }}>
-                    <div className="assignment-name" style={{ marginRight: '4px' }}>{assignment.name}</div>
+                    <div className="assignment-name clickable-name" style={{ marginRight: '4px' }}>{assignment.name}</div>
                     {assignment.assignment_type && <div className="team-type" style={{ background: '#f1f5f9', color: '#475569' }}>{assignment.assignment_type}</div>}
                     <span style={{ fontSize: '11px', color: '#64748b' }}>Size: {assignment.assignment_size}</span>
                     <div className={`assignment-status ${assignment.status.toLowerCase()}`}>
@@ -608,6 +652,19 @@ const PlanningDashboard = ({
         />
       )}
 
+      {showResponderForm && (
+        <ResponderFormModal
+          key={`res-${responderForm.responder_id || 'new'}`}
+          isOpen={showResponderForm}
+          onClose={() => setShowResponderForm(false)}
+          onSave={handleSaveResponder}
+          onCheckOut={handleCheckOutResponder}
+          initialData={responderForm}
+          loading={loading}
+          error={error}
+        />
+      )}
+
       {/* Members Modal */}
       {showMembersModal && activeTeam && (
         <div className="modal-backdrop">
@@ -641,44 +698,6 @@ const PlanningDashboard = ({
           </div>
         </div>
       )}
-
-      {/* Selection Summary and Action Buttons */}
-      <div className="action-panel">
-        <div className="selection-summary">
-          <div className="summary-item">
-            <span className="summary-label">Selected Team:</span>
-            <span className="summary-value">
-              {selectedTeam ? selectedTeam.team_name_number : '—'}
-            </span>
-          </div>
-
-          <div className="summary-item">
-            <span className="summary-label">Selected Assignment:</span>
-            <span className="summary-value">
-              {selectedAssignment ? selectedAssignment.name : '—'}
-            </span>
-          </div>
-        </div>
-
-        <div className="action-buttons">
-          <button
-            className="btn btn-primary"
-            onClick={handleAssignTeam}
-            disabled={!selectedTeamId || !selectedAssignmentId || loading}
-            aria-busy={loading}
-          >
-            {loading ? 'Assigning...' : 'Assign Team to Assignment'}
-          </button>
-
-          <button
-            className="btn btn-secondary"
-            onClick={handleReset}
-            disabled={loading}
-          >
-            Clear Selection
-          </button>
-        </div>
-      </div>
     </div>
   );
 };

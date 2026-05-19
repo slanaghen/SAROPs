@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import PlanningDashboard from '../components/PlanningDashboard';
 import { usePlanningDashboard } from '../hooks/usePlanningDashboard';
@@ -32,6 +32,8 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
     createAssignment,
     updateAssignment,
     deleteAssignment,
+    updateResponder,
+    checkOutResponder,
     updateTeam,
     attachResponderToTeam,
     detachResponderFromTeam,
@@ -81,6 +83,19 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
     }
   };
 
+  /**
+   * Calculate operations statistics based on current data
+   * Same logic as Operations Dashboard for consistency
+   */
+  const stats = useMemo(() => ({
+    deployed: assignments.filter(a => a.status === 'Deployed').length,
+    planned: assignments.filter(a => a.status === 'Planned').length,
+    stagedTeams: teams.filter(t => t.status === 'Staged').length,
+    stagedResponders: responders.filter(r => r.status === 'Staged').length,
+    completed: assignments.filter(a => a.status === 'Completed').length,
+    incomplete: assignments.filter(a => a.status === 'Incomplete').length,
+  }), [assignments, teams, responders]);
+
   if (!operationalPeriodId) {
     return (
       <div style={{ padding: '24px', textAlign: 'center' }}>
@@ -109,27 +124,51 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
       )}
 
       {!loading && (
-        <PlanningDashboard
-          operationalPeriodId={operationalPeriodId}
-          teams={teams}
-          assignments={assignments}
-          responders={responders}
-          defaultNewTeamName=""
-          defaultNewTeamType="Ground Search"
-          defaultNewAssignmentDivision="A"
-          defaultNewAssignmentName={getNextAssignmentName("A")}
-          defaultNewAssignmentType="Ground"
-          defaultNewAssignmentSize={2}
-          onTeamAssigned={handleTeamAssigned}
-          createTeam={createTeam}
-          createAssignment={createAssignment}
-          updateAssignment={updateAssignment}
-          deleteAssignment={deleteAssignment}
-          updateTeam={updateTeam}
-          attachResponderToTeam={attachResponderToTeam}
-          detachResponderFromTeam={detachResponderFromTeam}
-          deleteTeam={deleteTeam}
-        />
+        <>
+          <PlanningDashboard
+            operationalPeriodId={operationalPeriodId}
+            teams={teams}
+            assignments={assignments}
+            responders={responders}
+            defaultNewTeamName=""
+            defaultNewTeamType="Ground Search"
+            defaultNewAssignmentDivision="A"
+            defaultNewAssignmentName={getNextAssignmentName("A")}
+            defaultNewAssignmentType="Ground"
+            defaultNewAssignmentSize={2}
+            onTeamAssigned={handleTeamAssigned}
+            createTeam={createTeam}
+            createAssignment={createAssignment}
+            updateAssignment={updateAssignment}
+            deleteAssignment={deleteAssignment}
+            updateResponder={updateResponder}
+            checkOutResponder={checkOutResponder}
+            updateTeam={updateTeam}
+            attachResponderToTeam={attachResponderToTeam}
+            detachResponderFromTeam={detachResponderFromTeam}
+            deleteTeam={deleteTeam}
+          />
+
+          <div className="operations-stats-footer" style={{ 
+            marginTop: '24px',
+            display: 'flex',
+            gap: '32px',
+            flexWrap: 'wrap',
+            padding: '16px',
+            background: '#ffffff',
+            borderRadius: '12px',
+            border: '1px solid #e2e8f0',
+            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)'
+          }}
+          >
+            <div style={{ fontSize: '13px' }}><strong>Assignments/Teams Deployed:</strong> {stats.deployed}</div>
+            <div style={{ fontSize: '13px' }}><strong>Assignments planned:</strong> {stats.planned}</div>
+            <div style={{ fontSize: '13px' }}><strong>Teams staged:</strong> {stats.stagedTeams}</div>
+            <div style={{ fontSize: '13px' }}><strong>Responders staged:</strong> {stats.stagedResponders}</div>
+            <div style={{ fontSize: '13px' }}><strong>Assignments completed:</strong> {stats.completed}</div>
+            <div style={{ fontSize: '13px' }}><strong>Assignments incomplete:</strong> {stats.incomplete}</div>
+          </div>
+        </>
       )}
     </div>
   );

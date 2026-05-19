@@ -325,6 +325,7 @@
 .status-badge.deployed { background: #166534; color: white; }
 .status-badge.active { background: #059669; color: white; }
 .status-badge.completed { background: #64748b; color: white; }
+.status-badge.checkedout { background: #000000; color: #ffffff; }
 .status-badge.attached, .status-badge.planned { background: #e2e8f0; color: #111827; }
 }
 

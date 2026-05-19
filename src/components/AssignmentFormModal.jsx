@@ -89,6 +89,45 @@ const AssignmentFormModal = ({
           <small className="form-hint" style={{ textAlign: 'right' }}>{(assignmentForm.description_narrative || '').length}/500</small>
         </div>
 
+        <div style={{ display: 'flex', gap: '12px' }}>
+          <div className="form-row" style={{ flex: 1 }}>
+            <label htmlFor="asn_poa">POA (%)</label>
+            <input
+              id="asn_poa"
+              type="number"
+              min="0"
+              max="100"
+              value={assignmentForm.poa || ''}
+              onChange={e => setAssignmentForm({ ...assignmentForm, poa: e.target.value })}
+              placeholder="0-100"
+            />
+          </div>
+          <div className="form-row" style={{ flex: 1 }}>
+            <label htmlFor="asn_pod">POD (%)</label>
+            <input
+              id="asn_pod"
+              type="number"
+              min="0"
+              max="100"
+              value={assignmentForm.pod || ''}
+              onChange={e => setAssignmentForm({ ...assignmentForm, pod: e.target.value })}
+              placeholder="0-100"
+            />
+          </div>
+        </div>
+
+        <div className="form-row">
+          <label htmlFor="asn_debrief">Debrief Narrative</label>
+          <textarea
+            id="asn_debrief"
+            value={assignmentForm.debrief_narrative || ''}
+            onChange={e => setAssignmentForm({ ...assignmentForm, debrief_narrative: e.target.value.slice(0, 1000) })}
+            placeholder="Search results and findings..."
+            style={{ minHeight: '80px' }}
+          />
+          <small className="form-hint" style={{ textAlign: 'right' }}>{(assignmentForm.debrief_narrative || '').length}/1000</small>
+        </div>
+
         <div className="modal-actions">
           <button className="btn btn-primary" onClick={() => onSave(assignmentForm)} disabled={loading}>
             {loading ? 'Saving...' : 'Save Assignment'}

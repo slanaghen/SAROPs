@@ -29,7 +29,7 @@ const Navigation = () => {
           My Dashboard
         </Link>
         <Link to="/incident-edit" className={`nav-tab ${path === '/incident-edit' ? 'active' : ''}`}>
-          Incident Editor
+          Incident
         </Link>
         <Link to="/admin" className={`nav-tab ${path === '/admin' ? 'active' : ''}`}>
           Admin

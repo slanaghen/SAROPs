@@ -23,6 +23,7 @@ vi.mock('../lib/supabase', () => ({
       update: vi.fn().mockReturnThis(),
       single: vi.fn().mockReturnThis(),
       in: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockReturnThis(),
       then: (onFulfilled) => Promise.resolve({ data: [], error: null }).then(onFulfilled),
     })),
     rpc: vi.fn(() => Promise.resolve({ data: null, error: null })),
@@ -84,9 +85,72 @@ describe('AdminPage Authentication Gate', () => {
 
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
 
+    // Expand sections to see the data
+    fireEvent.click(screen.getByText(/Incident Management/i));
+    fireEvent.click(screen.getByText(/Current Administrators/i));
+
     expect(await screen.findByText('Lost Hiker')).toBeInTheDocument();
     expect(await screen.findByText('AdminUser')).toBeInTheDocument(); // Check for admin user
-    expect(screen.getByText('Responder Management')).toBeInTheDocument();
+    expect(screen.getByText(/Responder Management/i)).toBeInTheDocument();
+  });
+
+  it('should toggle visibility of management sections and show correct counts', async () => {
+    vi.mocked(useIncident).mockReturnValue({ isAdmin: true });
+    supabase.from.mockImplementation(() => {
+      const query = {
+        select: vi.fn().mockReturnThis(),
+        order: vi.fn().mockReturnThis(),
+        then: (onFulfilled, onRejected) =>
+          Promise.resolve({ data: [{ responder_id: 'r1', name: 'Res 1', status: 'Staged' }], error: null })
+            .then(onFulfilled, onRejected),
+      };
+      return query;
+    });
+
+    render(<BrowserRouter><AdminPage /></BrowserRouter>);
+
+    const header = await screen.findByText(/Responder Management \(1\)/i);
+    expect(screen.queryByText('Res 1')).not.toBeInTheDocument(); // Collapsed by default
+
+    fireEvent.click(header);
+    expect(await screen.findByText('Res 1')).toBeInTheDocument(); // Expanded
+
+    fireEvent.click(header);
+    expect(screen.queryByText('Res 1')).not.toBeInTheDocument(); // Collapsed again
+  });
+
+  it('should disband a team and release responders', async () => {
+    vi.mocked(useIncident).mockReturnValue({ isAdmin: true });
+    window.confirm = vi.fn().mockReturnValue(true);
+    const mockTeam = { team_id: 't1', team_name_number: 'Team Alpha', status: 'Staged' };
+    const mockMember = { responder_id: 'r1' };
+    
+    supabase.from.mockImplementation((table) => {
+      const query = {
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        order: vi.fn().mockReturnThis(),
+        in: vi.fn().mockReturnThis(),
+        is: vi.fn().mockReturnThis(),
+        update: vi.fn().mockReturnThis(),
+        then: (onFulfilled, onRejected) => {
+          let data = [];
+          if (table === 'teams') data = [mockTeam];
+          if (table === 'team_responders') data = [mockMember];
+          return Promise.resolve({ data, error: null }).then(onFulfilled, onRejected);
+        },
+      };
+      return query;
+    });
+
+    render(<BrowserRouter><AdminPage /></BrowserRouter>);
+    fireEvent.click(screen.getByText(/Team Management/i));
+
+    const disbandBtn = await screen.findByRole('button', { name: /Disband/i });
+    fireEvent.click(disbandBtn);
+
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('Disband team "Team Alpha"'));
+    expect(supabase.from).toHaveBeenCalledWith('responders'); // Verify cascade to responders
   });
 
   it('prompts for confirmation before deleting an incident', async () => {
@@ -117,6 +181,9 @@ describe('AdminPage Authentication Gate', () => {
 
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
 
+    // Expand section to access the delete button
+    fireEvent.click(screen.getByText(/Incident Management/i));
+
     await screen.findByText('Ended Incident');
     const deleteBtn = screen.getByRole('button', { name: /Delete/i });
     fireEvent.click(deleteBtn);
@@ -145,6 +212,9 @@ describe('AdminPage Authentication Gate', () => {
     });
 
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
+
+    // Expand section to see the add form results in the list later
+    fireEvent.click(screen.getByText(/Current Administrators/i));
 
     fireEvent.change(screen.getByPlaceholderText('CommandCenter1'), { target: { value: 'NewAdmin' } });
     fireEvent.change(screen.getByPlaceholderText('admin@agency.gov'), { target: { value: 'new@admin.com' } });
@@ -184,6 +254,9 @@ describe('AdminPage Authentication Gate', () => {
 
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
 
+    // Expand section to access the admin list and buttons
+    fireEvent.click(screen.getByText(/Current Administrators/i));
+
     await screen.findByText('ExistingAdmin');
     fireEvent.click(screen.getByRole('button', { name: /Change Password/i }));
 
@@ -198,34 +271,38 @@ describe('AdminPage Authentication Gate', () => {
     vi.mocked(useIncident).mockReturnValue({ isAdmin: true, logout: vi.fn(), responderId: 'res-123' });
     window.confirm = vi.fn().mockReturnValue(true);
 
-    const mockResponder = { responder_id: 'res-123', name: 'Test Responder', status: 'Staged', checkin_datetime: new Date().toISOString() };
+    const mockResponder = { responder_id: 'res-123', name: 'Test Responder', status: 'Staged', checkin_datetime: new Date().toISOString(), checkout_datetime: null };
     
     const mockUpdate = vi.fn().mockReturnThis();
     const mockEq = vi.fn().mockResolvedValue({ error: null });
 
     supabase.from.mockImplementation((table) => {
-      if (table === 'responders') return {
+      const query = {
         select: vi.fn().mockReturnThis(),
         order: vi.fn().mockReturnThis(),
         update: mockUpdate,
         eq: mockEq,
-        then: (onFulfilled) => Promise.resolve({ data: [mockResponder], error: null }).then(onFulfilled),
+        delete: vi.fn().mockReturnThis(),
+        then: (onFulfilled) => {
+          const data = table === 'responders' ? [mockResponder] : [];
+          return Promise.resolve({ data, error: null }).then(onFulfilled);
+        }
       };
-      if (table === 'teams') return { // Mock teams to prevent leader_responder_id error
-        update: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockResolvedValue({ error: null }),
-      };
-      return { select: vi.fn().mockReturnThis(), order: vi.fn().mockResolvedValue({ data: [], error: null }) };
+      return query;
     });
 
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
+
+    // Expand section to see the responder list
+    fireEvent.click(screen.getByText(/Responder Management/i));
 
     await screen.findByText('Test Responder');
     fireEvent.click(screen.getByRole('button', { name: /Check Out/i }));
 
     await waitFor(() => {
       expect(window.confirm).toHaveBeenCalled();
-      expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ status: 'CheckedOut' }));
+      // Application now records checkout via timestamp, not status string
+      expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ checkout_datetime: expect.any(String) }));
       expect(mockEq).toHaveBeenCalledWith('responder_id', 'res-123');
     });
   });

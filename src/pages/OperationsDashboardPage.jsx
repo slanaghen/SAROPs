@@ -3,22 +3,27 @@ import { supabase } from '../lib/supabase';
 import { useIncident } from '../context/IncidentContext';
 import '../styles/OperationsDashboard.css';
 import '../styles/PlanningDashboard.css'; // Reusing form styles
+import { usePlanningDashboard } from '../hooks/usePlanningDashboard';
 import TeamFormModal from '../components/TeamFormModal';
 import AssignmentFormModal from '../components/AssignmentFormModal';
+import BaseModal from '../components/BaseModal';
 
 const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   const { incidentData, incidentId, responderName, user } = useIncident();
   const operationalPeriodId = propOpId || incidentData?.opPeriodId;
 
-  const [assignments, setAssignments] = useState([]);
-  const [teams, setTeams] = useState([]);
-  const [responders, setResponders] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const {
+    teams, assignments, responders, opPeriod, loading, error, setError, setLoading,
+    fetchDashboardData, updateResourceStatus, assignTeamToAssignment, unassignTeam,
+    deleteAssignment, deleteTeam, detachTeam: disbandTeam, updateTeam, updateAssignment,
+    attachResponderToTeam, detachResponderFromTeam
+  } = usePlanningDashboard(supabase, operationalPeriodId);
+
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
   const [filters, setFilters] = useState({
     assignmentName: '',
     assignmentType: '',
+    tacChannel: '',
     assignmentStatus: '',
     teamName: '',
     teamType: '',
@@ -34,49 +39,50 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   const [pendingTeamId, setPendingTeamId] = useState(null);
 
   const [draggedItem, setDraggedItem] = useState(null); // { id, type }
+  const [viewMode, setViewMode] = useState('All'); // Options: 'All', 'Operations', 'Planning'
   const [dropTarget, setDropTarget] = useState(null); // { id, type }
+  const [assigningRow, setAssigningRow] = useState(null); // Stores the row object being manually assigned
+  const [selectedAssignTarget, setSelectedAssignTarget] = useState('');
+  const [showBroadcastModal, setShowBroadcastModal] = useState(false);
+  const [broadcastMessage, setBroadcastMessage] = useState('');
+  const [currentTime, setCurrentTime] = useState(Date.now());
 
-  const fetchSummary = useCallback(async () => {
-    if (!operationalPeriodId) return;
+  const parInterval = opPeriod?.par_check_interval || 0;
 
-    setLoading(true);
-    setError(null);
+  // Keep a live clock for timer displays and overdue calculations
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(Date.now()), 15000);
+    return () => clearInterval(timer);
+  }, []);
 
-    try {
-      const [assignmentRes, teamRes, responderRes] = await Promise.all([
-        supabase
-          .from('assignments')
-          .select('assignment_id,name,status,team_id,op_period_id,assignment_type,division,assignment_size,tac_channel,description_narrative')
-          .eq('op_period_id', operationalPeriodId),
-        supabase
-          .from('teams')
-          .select('team_id,team_name_number,type,leader_responder_id,op_period_id,status,equipment,sartopo_color_hex')
-          .eq('op_period_id', operationalPeriodId),
-        supabase.from('responders').select('*')
-      ]);
+  const formatTimeSince = (timestamp, createdAt) => {
+    if (!timestamp && !createdAt) return '—';
+    const lastCheckMs = timestamp ? new Date(timestamp).getTime() : new Date(createdAt).getTime();
+    const diffMs = currentTime - lastCheckMs;
+    const totalMinutes = Math.floor(diffMs / 60000);
 
-      const { data: assignmentData, error: assignmentError } = assignmentRes;
-      const { data: teamData, error: teamError } = teamRes;
-      const { data: responderData, error: responderError } = responderRes;
+    if (!timestamp) return 'Never';
+    if (totalMinutes < 1) return 'just now';
+    if (totalMinutes < 60) return `${totalMinutes}m ago`;
+    
+    const hours = Math.floor(totalMinutes / 60);
+    const mins = totalMinutes % 60;
+    return `${hours}h ${mins}m ago`;
+  };
 
-      if (assignmentError) throw assignmentError;
-      if (teamError) throw teamError;
-      if (responderError) throw responderError;
-
-      setAssignments(assignmentData || []);
-      setTeams(teamData || []);
-      setResponders(responderData || []);
-    } catch (opsFetchErr) {
-      setError(opsFetchErr?.message || 'Failed to load operations summary');
-      console.error('OperationsDashboard fetch error:', opsFetchErr);
-    } finally {
-      setLoading(false);
-    }
-  }, [operationalPeriodId]);
+  /**
+   * Helper to safely extract UUID from prefixed row IDs (asn-xxx or team-xxx)
+   */
+  const getRawUuid = (rowId) => {
+    if (!rowId) return null;
+    if (rowId.startsWith('asn-')) return rowId.slice(4);
+    if (rowId.startsWith('team-')) return rowId.slice(5);
+    return rowId;
+  };
 
   useEffect(() => {
-    fetchSummary();
-  }, [operationalPeriodId, fetchSummary]);
+    fetchDashboardData();
+  }, [operationalPeriodId, fetchDashboardData]);
 
   const recordAction = async (action) => {
     if (!incidentId) return;
@@ -88,46 +94,118 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   };
 
   const handleStatusUpdate = async (assignmentId, teamId, newStatus) => {
+    if (newStatus === 'Completed' && teamId) {
+      const keepStaged = window.confirm("Assignment Complete. Keep team together (Staged)?\n\n- OK: Keep Staged (available for tasks)\n- Cancel: DISBAND Team (release members)");
+      if (keepStaged) {
+        return updateResourceStatus(assignmentId, teamId, 'Planned');
+      }
+    }
+    await updateResourceStatus(assignmentId, teamId, newStatus);
+  };
+
+  /**
+   * Manually reset the PAR timer for a team.
+   * Used when status checks are received via radio.
+   */
+  const handleResetPar = async (teamId, teamName) => {
+    if (!teamId) return;
+
     try {
+      setLoading(true);
       setError(null);
 
-      // 1. Update Assignment Status in Database
-      const { error: asnError } = await supabase
-        .from('assignments')
-        .update({ status: newStatus })
-        .eq('assignment_id', assignmentId);
+      const { error: resetErr } = await supabase
+        .from('teams')
+        .update({ 
+          last_par_check: new Date().toISOString(),
+          par_status: 'OK' 
+        })
+        .eq('team_id', teamId);
 
-      if (asnError) throw asnError;
+      if (resetErr) throw resetErr;
 
-      // 2. Sync Team Status if applicable
-      if (teamId && teamId !== '') {
-        let teamStatus = newStatus;
-        if (newStatus === 'Completed' || newStatus === 'Planned') teamStatus = 'Staged';
-        
-        const { error: teamError } = await supabase
-          .from('teams')
-          .update({ status: teamStatus })
-          .eq('team_id', teamId);
+      await recordAction(`Manual PAR reset for ${teamName || 'Team'}`);
+      await fetchDashboardData();
+    } catch (err) {
+      setError(err.message || 'Failed to reset PAR');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-        if (teamError) throw teamError;
-        
-        const assignment = assignments.find(a => a.assignment_id === assignmentId);
-        await recordAction(`Updated status of ${assignment?.name || 'Assignment'} to ${newStatus}`);
+  /**
+   * Manually detach a staged team
+   */
+  const handleDisbandTeam = async (teamId, teamName) => {
+    if (!window.confirm(`Disband "${teamName}"? Members will be released back to staging, but the team record will remain for logs.`)) return;
 
-        setTeams(prevTeams => 
-          prevTeams.map(t => 
-            t.team_id === teamId ? { ...t, status: teamStatus } : t
-          )
-        );
+    try {
+      setLoading(true);
+      const { data: members } = await supabase.from('team_responders').select('responder_id').eq('team_id', teamId);
+      const rIds = members?.map(m => m.responder_id) || [];
+      
+      if (rIds.length > 0) {
+        await supabase.from('responders').update({ status: 'Staged' }).in('responder_id', rIds);
+        await supabase.from('responder_team_history').update({ detached_datetime: new Date().toISOString() }).eq('team_id', teamId).is('detached_datetime', null);
       }
 
-      setAssignments(prevAsns => 
-        prevAsns.map(a => 
-          a.assignment_id === assignmentId ? { ...a, status: newStatus } : a
-        )
-      );
-    } catch (updateErr) {
-      setError(updateErr?.message || 'Failed to update status');
+      await supabase.from('teams').update({ status: 'Disbanded', last_par_check: new Date().toISOString() }).eq('team_id', teamId);
+      await recordAction(`Disbanded team: ${teamName}`);
+      await fetchDashboardData();
+    } catch (err) {
+      setError(err.message || 'Failed to disband team');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /**
+   * Sends a broadcast message to all teams in the operational period.
+   */
+  const handleSendBroadcast = async () => {
+    if (!broadcastMessage.trim() || teams.length === 0) return;
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const messagesToInsert = teams.map(t => ({
+        team_id: t.team_id,
+        sender_name: responderName || user?.email || 'Operations',
+        message_text: `[BROADCAST]: ${broadcastMessage.trim()}`
+      }));
+
+      const { error: broadcastErr } = await supabase
+        .from('team_messages')
+        .insert(messagesToInsert);
+
+      if (broadcastErr) throw broadcastErr;
+
+      await recordAction(`Sent broadcast message to ${teams.length} teams`);
+      setBroadcastMessage('');
+      setShowBroadcastModal(false);
+    } catch (err) {
+      setError(err.message || 'Failed to send broadcast message');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /**
+   * Manually link a team and assignment via the action menu
+   */
+  const handlePerformLink = async (assignmentId, teamId) => {
+    try {
+      await assignTeamToAssignment(teamId, assignmentId);
+      
+      const team = teamById[teamId];
+      const assignment = assignmentById[getRawUuid(assignmentId)];
+      const teamName = team?.team_name_number || 'Unknown Team';
+      const asnName = assignment?.name || 'Unknown Assignment';
+      
+      await recordAction(`Assigned ${teamName} to ${asnName} via manual menu action`);
+    } catch (err) {
+      // Error is handled by hook
     }
   };
 
@@ -156,47 +234,21 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
 
     const teamId = draggedItem.type === 'team' ? draggedItem.id : targetId;
     const rawAssignmentId = draggedItem.type === 'assignment' ? draggedItem.id : targetId;
-
-    // Ensure we use the raw UUID by removing the 'asn-' prefix used for row keys
-    const assignmentId = rawAssignmentId.startsWith('asn-') ? rawAssignmentId.slice(4) : rawAssignmentId;
-
-    // Find existing names for the confirmation/success message
-    const team = teams.find(t => t.team_id === teamId);
-    const assignment = assignments.find(a => a.assignment_id === assignmentId);
-
-    if (!team || !assignment) return;
+    const assignmentId = getRawUuid(rawAssignmentId);
 
     try {
-      setLoading(true);
-      
-      // Update Database
-      const updates = [
-        supabase.from('assignments').update({ team_id: teamId, status: 'Assigned' }).eq('assignment_id', assignmentId),
-        supabase.from('teams').update({ status: 'Assigned' }).eq('team_id', teamId)
-      ];
+      await assignTeamToAssignment(teamId, assignmentId);
 
-      const results = await Promise.all(updates);
-      const errors = results.filter(r => r.error).map(r => r.error.message);
-      if (errors.length > 0) throw new Error(errors.join(', '));
-
-      // Update Local State Functional
-      setAssignments(prev => prev.map(a => a.assignment_id === assignmentId ? { ...a, team_id: teamId, status: 'Assigned' } : a));
-      setTeams(prev => prev.map(t => t.team_id === teamId ? { ...t, status: 'Assigned' } : t));
-
-      setDraggedItem(null);
-      setDropTarget(null);
-
+      const team = teamById[teamId];
+      const assignment = assignmentById[assignmentId];
       const teamName = team?.team_name_number || 'Unknown Team';
       const asnName = assignment?.name || 'Unknown Assignment';
+      
+      setDraggedItem(null);
+      setDropTarget(null);
       await recordAction(`Assigned ${teamName} to ${asnName} via drag and drop`);
-
-      // Re-fetch all data to ensure full synchronization with DB and triggers
-      await fetchSummary();
     } catch (err) {
-      setError(err.message || 'Failed to link resources');
-      console.error('Drop link error:', err);
-    } finally {
-      setLoading(false);
+       // Error is handled by hook
     }
   };
 
@@ -215,102 +267,51 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     }
   };
 
+  const openEditAssignmentForm = (assignment) => {
+    if (!assignment) return;
+    setAssignmentForm(assignment);
+    setShowAssignmentForm(true);
+  };
+
   const handleSaveTeam = async (formData) => {
     try {
-      setLoading(true);
-      setError(null);
-      const isUpdate = !!formData.team_id;
-      const currentResponders = formData.responder_ids || [];
-      const finalIds = (formData.leader_responder_id && !currentResponders.includes(formData.leader_responder_id))
-        ? [...currentResponders, formData.leader_responder_id] : currentResponders;
-
       const payload = {
-        op_period_id: operationalPeriodId,
         team_name_number: formData.team_name_number || '',
         type: formData.type || 'Other',
         status: formData.status || 'Staged',
         leader_responder_id: formData.leader_responder_id || null,
-        equipment: formData.equipment || [],
-        sartopo_color_hex: formData.sartopo_color_hex || '#007bff'
+        equipment: formData.equipment || []
       };
 
-      let saved;
-      if (isUpdate) {
-        const { data, error: upErr } = await supabase.from('teams').update(payload).eq('team_id', formData.team_id).select().single();
-        if (upErr) throw upErr;
-        saved = data;
+      if (formData.team_id) {
+        await updateTeam(formData.team_id, payload);
         
-        // Membership reconciliation logic
-        const { data: currentMembers } = await supabase.from('team_responders').select('responder_id').eq('team_id', formData.team_id);
-        const originalIds = currentMembers?.map(r => r.responder_id) || [];
+        // Reconciliation
+        const finalIds = formData.responder_ids || [];
+        const originalIds = teamById[formData.team_id]?.current_responders?.map(r => r.responder_id) || [];
         const toAdd = finalIds.filter(id => !originalIds.includes(id));
         const toRemove = originalIds.filter(id => !finalIds.includes(id));
 
-        if (toAdd.length > 0) {
-          await supabase.from('team_responders').insert(toAdd.map(rid => ({ team_id: formData.team_id, responder_id: rid })));
-          await supabase.from('responders').update({ status: 'Attached' }).in('responder_id', toAdd);
-          setResponders(prev => prev.map(r => toAdd.includes(r.responder_id) ? { ...r, status: 'Attached' } : r));
-        }
-        if (toRemove.length > 0) {
-          await supabase.from('team_responders').delete().eq('team_id', formData.team_id).in('responder_id', toRemove);
-          await supabase.from('responders').update({ status: 'Staged' }).in('responder_id', toRemove);
-          setResponders(prev => prev.map(r => toRemove.includes(r.responder_id) ? { ...r, status: 'Staged' } : r));
-        }
-        setTeams(prev => prev.map(t => t.team_id === saved.team_id ? saved : t));
+        await Promise.all([
+          ...toAdd.map(id => attachResponderToTeam(id, formData.team_id)),
+          ...toRemove.map(id => detachResponderFromTeam(id, formData.team_id))
+        ]);
       } else {
-        setPendingAssignmentId(null); // Clear immediately to avoid reuse
-        const { data, error: insErr } = await supabase.from('teams').insert(payload).select().single();
-        if (insErr) throw insErr;
-        saved = data;
-        if (finalIds.length > 0) {
-          await supabase.from('team_responders').insert(finalIds.map(rid => ({ team_id: saved.team_id, responder_id: rid })));
-          await supabase.from('responders').update({ status: 'Attached' }).in('responder_id', finalIds);
-          setResponders(prev => prev.map(r => finalIds.includes(r.responder_id) ? { ...r, status: 'Attached' } : r));
-        }
-
-        // If created from an assignment row, link them
-        if (pendingAssignmentId) {
-          const { error: linkErr } = await supabase
-            .from('assignments')
-            .update({ team_id: saved.team_id, status: 'Assigned' })
-            .eq('assignment_id', pendingAssignmentId);
-          
-          if (!linkErr) {
-            setAssignments(prev => prev.map(a => 
-              a.assignment_id === pendingAssignmentId 
-                ? { ...a, team_id: saved.team_id, status: 'Assigned' } 
-                : a
-            ));
-            // Update the team we just created to Assigned as well
-            saved.status = 'Assigned';
-          }
-          setPendingAssignmentId(null);
-        }
-
-        setTeams(prev => [...prev, saved]);
+        const newTeam = await createTeam({ ...payload, op_period_id: operationalPeriodId, responder_ids: formData.responder_ids });
+        if (pendingAssignmentId) await assignTeamToAssignment(newTeam.team_id, pendingAssignmentId);
       }
-      setShowTeamForm(false);
 
-      // Re-fetch all data to ensure full synchronization with DB and triggers
-      await fetchSummary();
-    } catch (err) {
-      setError(err.message || 'Failed to save team');
       setPendingAssignmentId(null);
-    } finally {
-      setLoading(false);
+      setShowTeamForm(false);
+    } catch (err) {
+      setPendingAssignmentId(null);
     }
   };
 
   const handleSaveAssignment = async (formData) => {
+    const targetTeamId = !!formData.assignment_id ? formData.team_id : (pendingTeamId || null);
+    
     try {
-      setLoading(true);
-      setError(null);
-      const isUpdate = !!formData.assignment_id;
-      
-      // Determine the correct team ID: 
-      // If creation with link, use pending. If update, preserve existing.
-      const targetTeamId = isUpdate ? formData.team_id : (pendingTeamId || null);
-
       const payload = {
         op_period_id: operationalPeriodId,
         name: formData.name || '',
@@ -320,37 +321,23 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
         assignment_size: formData.assignment_size ? parseInt(formData.assignment_size, 10) : null,
         tac_channel: formData.tac_channel || '',
         description_narrative: formData.description_narrative || '',
+        poa: formData.poa ? parseInt(formData.poa, 10) : null,
+        pod: formData.pod ? parseInt(formData.pod, 10) : null,
+        debrief_narrative: formData.debrief_narrative || '',
         team_id: targetTeamId,
         is_orphaned: formData.is_orphaned || false
       };
 
-      if (isUpdate) {
-        const { data, error } = await supabase.from('assignments').update(payload).eq('assignment_id', formData.assignment_id).select().single();
-        if (error) throw error;
-        setAssignments(prev => prev.map(a => a.assignment_id === data.assignment_id ? data : a));
+      if (formData.assignment_id) {
+        await updateAssignment(formData.assignment_id, payload);
       } else {
-        setPendingTeamId(null); // Clear immediately to avoid reuse
-        const { data, error } = await supabase.from('assignments').insert(payload).select().single();
-        if (error) throw error;
-        if (!data) throw new Error('No data returned from server');
-
-        if (targetTeamId) {
-          await supabase.from('teams').update({ status: 'Assigned' }).eq('team_id', targetTeamId);
-          setTeams(prev => prev.map(t => t.team_id === targetTeamId ? { ...t, status: 'Assigned' } : t));
-        }
-
-        await recordAction(`Created new assignment: ${payload.name}`);
-        setAssignments(prev => [...prev, data]);
-
-        // Re-fetch all data to ensure full synchronization with DB and triggers
-        await fetchSummary();
+        await createAssignment(payload);
       }
+
+      setPendingTeamId(null);
       setShowAssignmentForm(false);
     } catch (err) {
-      setError(err.message || 'Failed to save assignment');
       setPendingTeamId(null);
-    } finally { 
-      setLoading(false); 
     }
   };
 
@@ -358,34 +345,10 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     if (!window.confirm(`Are you sure you want to unassign "${teamName || 'the team'}" from "${assignmentName || 'this assignment'}"?`)) return;
 
     try {
-      setLoading(true);
-      setError(null);
-
-      // 1. Update Database
-      const { error: asnError } = await supabase
-        .from('assignments')
-        .update({ team_id: null, status: 'Planned' })
-        .eq('assignment_id', assignmentId);
-      
-      if (asnError) throw asnError;
-
-      if (teamId && teamId !== '') {
-        const { error: teamError } = await supabase
-          .from('teams')
-          .update({ status: 'Staged' })
-          .eq('team_id', teamId);
-        if (teamError) throw teamError;
-      }
-
-      // 2. Log Action
+      await unassignTeam(assignmentId);
       await recordAction(`Unassigned ${teamName || 'Team'} from ${assignmentName || 'Assignment'}`);
-
-      // 3. Refresh UI
-      await fetchSummary();
     } catch (err) {
-      setError(err.message || 'Failed to unassign team');
-    } finally {
-      setLoading(false);
+       // Error handled by hook
     }
   };
 
@@ -393,16 +356,10 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     if (!window.confirm(`Are you sure you want to delete assignment "${assignmentName}"? This action cannot be undone.`)) return;
 
     try {
-      setLoading(true);
-      const { error } = await supabase.from('assignments').delete().eq('assignment_id', assignmentId);
-      if (error) throw error;
-
+      await deleteAssignment(assignmentId);
       await recordAction(`Deleted Assignment: ${assignmentName}`);
-      await fetchSummary();
     } catch (err) {
-      setError(err.message || 'Failed to delete assignment');
-    } finally {
-      setLoading(false);
+       // Error handled by hook
     }
   };
 
@@ -411,45 +368,10 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     if (!window.confirm(msg)) return;
 
     try {
-      setLoading(true);
-      setError(null);
-
-      // 1. Get the members of the team before deleting
-      const { data: members, error: membersError } = await supabase
-        .from('team_responders')
-        .select('responder_id')
-        .eq('team_id', teamId);
-
-      if (membersError) throw membersError;
-      const responderIds = members?.map(m => m.responder_id) || [];
-
-      // 2. Set responders back to Staged status
-      if (responderIds.length > 0) {
-        const { error: respError } = await supabase
-          .from('responders')
-          .update({ status: 'Staged' })
-          .in('responder_id', responderIds);
-
-        if (respError) throw respError;
-      }
-
-      // 3. Delete the team record
-      const { error: deleteError } = await supabase
-        .from('teams')
-        .delete()
-        .eq('team_id', teamId);
-
-      if (deleteError) throw deleteError;
-
+      await deleteTeam(teamId);
       await recordAction(`Released Team: ${teamName}`);
-
-      // 4. Refresh UI
-      await fetchSummary();
     } catch (err) {
-      setError(err.message || 'Failed to release team');
-      console.error('Release team error:', err);
-    } finally {
-      setLoading(false);
+       // Error handled by hook
     }
   };
 
@@ -490,6 +412,16 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
 
       return {
         id: `asn-${asnItem.assignment_id}`, // Prefixed ID ensures no collision after unassign
+        isParOverdue: matchingTeam && matchingTeam.status !== 'Staged' && parInterval > 0 && (() => {
+          const lastCheck = matchingTeam.last_par_check 
+            ? new Date(matchingTeam.last_par_check).getTime() 
+            : new Date(matchingTeam.created_at || Date.now()).getTime();
+          const minutesSince = (currentTime - lastCheck) / 60000;
+          // Overdue if past interval + 3 minute grace period
+          return minutesSince > (parInterval + 3);
+        })(),
+        timeSincePar: matchingTeam ? formatTimeSince(matchingTeam.last_par_check, matchingTeam.created_at) : '',
+        tacChannel: asnItem.tac_channel || '—',
         assignmentId: asnItem.assignment_id,
         assignmentName: asnItem.name,
         assignmentType: asnItem.assignment_type || '—',
@@ -497,6 +429,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
         teamName: matchingTeam?.team_name_number || '',
         teamType: matchingTeam?.type || '',
         teamLeader: matchingTeam ? leaderById[matchingTeam.leader_responder_id] || 'Unknown' : '',
+        teamStatus: matchingTeam?.status || '',
         hasBoth: !!matchingTeam,
         teamId: asnItem.team_id,
       };
@@ -506,15 +439,30 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     (assignments || []).forEach(a => { if (a.team_id) assignmentTeamSet.add(a.team_id); });
 
     const teamOnlyRows = (teams || [])
-      .filter(tItem => !assignmentTeamSet.has(tItem.team_id))
+      .filter(tItem => {
+        // Show team as a standalone row if it's not linked to any assignment
+        // Hide Disbanded teams from active board
+        return !assignmentTeamSet.has(tItem.team_id) && tItem.status !== 'Disbanded';
+      })
       .map(tItem => {
       return {
           id: `team-${tItem.team_id}`, // Prefixed ID ensures React sees this as a new row type
+          isParOverdue: tItem.status !== 'Staged' && parInterval > 0 && (() => {
+            const lastCheck = tItem.last_par_check 
+              ? new Date(tItem.last_par_check).getTime() 
+              : new Date(tItem.created_at || Date.now()).getTime();
+            const minutesSince = (currentTime - lastCheck) / 60000;
+            return minutesSince > (parInterval + 3);
+          })(),
+          timeSincePar: formatTimeSince(tItem.last_par_check, tItem.created_at),
+          tacChannel: '',
+          assignmentId: '',
           assignmentName: '',
           assignmentType: '',
           assignmentStatus: '',
           teamName: tItem.team_name_number,
           teamType: tItem.type,
+          teamStatus: tItem.status,
           teamLeader: leaderById[tItem.leader_responder_id] || 'Unknown',
           hasBoth: false,
           teamId: tItem.team_id,
@@ -522,6 +470,18 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     });
 
     let result = [...assignmentRows, ...teamOnlyRows];
+
+    // Apply View Mode Filter
+    if (viewMode === 'Operations') {
+      result = result.filter(row => 
+        row.teamStatus === 'Assigned' || row.teamStatus === 'Deployed'
+      );
+    } else if (viewMode === 'Planning') {
+      result = result.filter(row => 
+        !['Completed', 'Incomplete'].includes(row.assignmentStatus) &&
+        (row.assignmentStatus === 'Planned' || row.teamStatus === 'Staged')
+      );
+    }
 
     // Apply Filters
     result = result.filter(row => {
@@ -535,7 +495,21 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     // Apply Sorting
     result.sort((a, b) => {
       if (!sortConfig.key) {
-        // Default sort: Rows with both first
+        // Default sort: Deployed on top, Completed at bottom
+        const getPriority = (status) => {
+          if (status === 'Deployed') return 1;
+          if (status === 'Assigned') return 2;
+          if (status === 'Planned') return 3;
+          if (status === 'Completed') return 5;
+          if (status === 'Incomplete') return 6;
+          return 4; // team-only staged rows or empty status
+        };
+
+        const pA = getPriority(a.assignmentStatus);
+        const pB = getPriority(b.assignmentStatus);
+
+        if (pA !== pB) return pA - pB;
+
         if (a.hasBoth && !b.hasBoth) return -1;
         if (!a.hasBoth && b.hasBoth) return 1;
         return 0;
@@ -555,7 +529,22 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     });
 
     return result;
-  }, [assignments, teams, teamById, leaderById, filters, sortConfig]);
+  }, [assignments, teams, teamById, leaderById, filters, sortConfig, viewMode, parInterval, currentTime]);
+
+  /**
+   * Calculate operations statistics based on current data
+   */
+  const stats = useMemo(() => ({
+    deployed: assignments.filter(a => a.status === 'Deployed').length,
+    planned: assignments.filter(a => a.status === 'Planned').length,
+    stagedTeams: teams.filter(t => t.status === 'Staged').length,
+    stagedResponders: responders.filter(r => r.status === 'Staged').length,
+    completed: assignments.filter(a => a.status === 'Completed').length,
+    incomplete: assignments.filter(a => a.status === 'Incomplete').length,
+  }), [assignments, teams, responders]);
+
+  const availableTeams = useMemo(() => teams.filter(t => t.status === 'Staged'), [teams]);
+  const availableAssignments = useMemo(() => assignments.filter(a => !a.team_id && a.status === 'Planned'), [assignments]);
 
   const requestSort = (key) => {
     let direction = 'asc';
@@ -587,12 +576,40 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       <header className="operations-header">
         <div>
           <h1>Operations Dashboard</h1>
-          <p>Summary of all assignments and teams in the current operational period.</p>
+          <p>Summary of assignments and teams in the current operational period.</p>
         </div>
-        <div className="summary-pill">
-          <span>{totalRows} total rows</span>
-          <span>{totalAssignments} assignments</span>
-          <span>{totalTeams} teams</span>
+        <div className="view-filter-container" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <label htmlFor="view-mode-select" style={{ fontSize: '13px', fontWeight: 600, color: '#475569' }}>View:</label>
+          <select 
+            id="view-mode-select"
+            className="status-update-select" 
+            style={{ width: 'auto', minWidth: '140px', height: '32px' }}
+            value={viewMode}
+            onChange={(e) => setViewMode(e.target.value)}
+          >
+            <option value="All">Incident (All)</option>
+            <option value="Operations">Operations (Active)</option>
+            <option value="Planning">Planning (Staged)</option>
+          </select>
+          <button 
+            className="btn btn-secondary" 
+            style={{ 
+              height: '32px', 
+              fontSize: '13px', 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '6px',
+              padding: '0 12px'
+            }}
+            onClick={() => setShowBroadcastModal(true)}
+            title="Send message to all teams"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="22" y1="2" x2="11" y2="13"></line>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+            </svg>
+            Broadcast
+          </button>
         </div>
       </header>
 
@@ -617,6 +634,9 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
                 <th onClick={() => requestSort('assignmentType')} style={{ cursor: 'pointer' }}>
                   Assignment Type {sortConfig.key === 'assignmentType' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
                 </th>
+                <th onClick={() => requestSort('tacChannel')} style={{ cursor: 'pointer' }}>
+                  TAC {sortConfig.key === 'tacChannel' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+                </th>
                 <th onClick={() => requestSort('assignmentStatus')} style={{ cursor: 'pointer' }}>
                   Assignment Status {sortConfig.key === 'assignmentStatus' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
                 </th>
@@ -629,6 +649,14 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
                 <th onClick={() => requestSort('teamLeader')} style={{ cursor: 'pointer' }}>
                   Team Leader {sortConfig.key === 'teamLeader' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
                 </th>
+                <th onClick={() => requestSort('teamStatus')} style={{ cursor: 'pointer' }}>
+                  Team Status {sortConfig.key === 'teamStatus' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+                </th>
+                {parInterval > 0 && (
+                  <th onClick={() => requestSort('timeSincePar')} style={{ cursor: 'pointer' }}>
+                    Last PAR Check {sortConfig.key === 'timeSincePar' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+                  </th>
+                )}
                 <th>Actions</th>
               </tr>
               <tr className="filter-row">
@@ -645,6 +673,8 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
                     />
                   </td>
                 ))}
+                {parInterval > 0 && <td></td>}
+                <td></td>
                 <td></td>
               </tr>
             </thead>
@@ -659,8 +689,9 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
                 <tr key={row.id} className={
                   (row.assignmentStatus === 'Deployed' && row.hasBoth) ? 'row-deployed' :
                   (row.assignmentStatus === 'Assigned' && row.hasBoth) ? 'row-assigned' :
-                  (row.assignmentStatus === 'Completed' && row.hasBoth) ? 'row-completed' : ''
-                }>
+                  (row.assignmentStatus === 'Completed' && row.hasBoth) ? 'row-complete' : ''
+                }
+                style={row.isParOverdue ? { backgroundColor: '#fff7ed', borderLeft: '4px solid #f97316' } : {}}>
                   <td>
                     {row.assignmentName ? (
                       <div 
@@ -672,16 +703,14 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
                         onDragEnter={!row.hasBoth ? (e) => handleDragEnter(e, row.id, 'assignment') : undefined}
                         onDragLeave={!row.hasBoth ? () => setDropTarget(null) : undefined}
                         onDrop={!row.hasBoth ? (e) => handleDrop(e, row.id, 'assignment') : undefined}
-                        onClick={() => {
-                          const rawAsnId = row.id.startsWith('asn-') ? row.id.slice(4) : null;
-                          if (rawAsnId) openEditAssignmentForm(assignmentById[rawAsnId]);
-                        }}
+                        onClick={() => openEditAssignmentForm(assignmentById[getRawUuid(row.id)])}
                       >
                         {row.assignmentName}
                       </div>
                     ) : '—'}
                   </td>
                   <td>{row.assignmentType || '—'}</td>
+                  <td>{row.tacChannel || '—'}</td>
                   <td>
                     {row.hasBoth ? (
                       <select 
@@ -694,6 +723,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
                         <option value="Assigned">Assigned</option>
                         <option value="Deployed">Deployed</option>
                         <option value="Completed">Completed</option>
+                        <option value="Incomplete">Incomplete</option>
                       </select>
                     ) : row.assignmentStatus ? (
                         <span className={`status-indicator ${row.assignmentStatus.toLowerCase()}`}>
@@ -721,20 +751,59 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
                   <td>{row.teamType || '—'}</td>
                   <td>{row.teamLeader || '—'}</td>
                   <td>
+                    {row.teamStatus ? (
+                      <span className={`status-indicator ${row.teamStatus.toLowerCase()}`}>
+                        {row.teamStatus}
+                      </span>
+                    ) : '—'}
+                  </td>
+                  {parInterval > 0 && (
+                    <td>
+                      {row.isParOverdue ? (
+                        <span style={{ 
+                          display: 'inline-flex', 
+                          alignItems: 'center', 
+                          gap: '4px',
+                          backgroundColor: '#dc2626', 
+                          color: 'white', 
+                          padding: '2px 8px', 
+                          borderRadius: '4px', 
+                          fontSize: '11px',
+                          fontWeight: 700,
+                          whiteSpace: 'nowrap'
+                        }}>
+                          {row.timeSincePar}
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <polyline points="12 6 12 12 16 14"></polyline>
+                          </svg>
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: '12px', color: '#64748b' }}>
+                          {row.timeSincePar}
+                        </span>
+                      )}
+                    </td>
+                  )}
+                  <td>
                     <select 
                       className="status-update-select"
                       value=""
                       onChange={(e) => {
                         const action = e.target.value;
-                        // Extract the full UUID by removing the 'asn-' or 'team-' prefix
-                        const rawId = row.id.startsWith('asn-') ? row.id.slice(4) : row.id.slice(5);
+                        const rawId = getRawUuid(row.id);
 
                         if (action === 'edit-team') {
                           openEditTeamForm(teamById[row.teamId]);
                         } else if (action === 'edit-assignment') {
                           openEditAssignmentForm(assignmentById[rawId]);
+                        } else if (action === 'reset-par') {
+                          handleResetPar(row.teamId, row.teamName);
                         } else if (action === 'unassign') {
                           handleUnassignTeam(rawId, row.teamId, row.assignmentName, row.teamName);
+                        } else if (action === 'assign-resource') {
+                          setAssigningRow(row);
+                          setSelectedAssignTarget('');
                         } else if (action === 'edit') {
                           if (row.teamId) openEditTeamForm(teamById[row.teamId]);
                           else openEditAssignmentForm(assignmentById[rawId]);
@@ -776,16 +845,24 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
                           <option value="edit-team">Edit Team</option>
                           <option value="edit-assignment">Edit Assignment</option>
                           <option value="unassign">Unassign Team</option>
+                          {parInterval > 0 && <option value="reset-par">Reset PAR</option>}
                           <option value="new-team">New Team</option>
                           <option value="new-assignment">New Assignment</option>
                         </>
                       ) : (
                         <>
                           <option value="edit">Edit</option>
+                          <option value="assign-resource">
+                            {row.assignmentId ? 'Assign Team' : 'Assign Assignment'}
+                          </option>
                           <option value="new-team">New Team</option>
                           <option value="new-assignment">New Assignment</option>
                           {row.teamId ? (
-                            <option value="release">Release Team</option>
+                            <>
+                              {parInterval > 0 && <option value="reset-par">Reset PAR</option>}
+                                {row.teamStatus === 'Staged' && <option value="detach">Disband Team</option>}
+                              <option value="release">Release Team</option>
+                            </>
                           ) : (
                             <option value="delete">Delete Assignment</option>
                           )}
@@ -797,6 +874,28 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {!loading && !error && (
+        <div className="operations-stats-footer" style={{ 
+          marginTop: '24px',
+          display: 'flex',
+          gap: '32px',
+          flexWrap: 'wrap',
+          padding: '16px',
+          background: '#ffffff',
+          borderRadius: '12px',
+          border: '1px solid #e2e8f0',
+          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)'
+        }}
+        >
+          <div style={{ fontSize: '13px' }}><strong>Assignments/Teams Deployed:</strong> {stats.deployed}</div>
+          <div style={{ fontSize: '13px' }}><strong>Assignments planned:</strong> {stats.planned}</div>
+          <div style={{ fontSize: '13px' }}><strong>Teams staged:</strong> {stats.stagedTeams}</div>
+          <div style={{ fontSize: '13px' }}><strong>Responders staged:</strong> {stats.stagedResponders}</div>
+          <div style={{ fontSize: '13px' }}><strong>Assignments completed:</strong> {stats.completed}</div>
+          <div style={{ fontSize: '13px' }}><strong>Assignments incomplete:</strong> {stats.incomplete}</div>
         </div>
       )}
 
@@ -823,6 +922,94 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
           loading={loading}
           error={error}
         />
+      )}
+
+      {showBroadcastModal && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, width: '100%', height: '100%',
+          backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center',
+          justifyContent: 'center', zIndex: 1000
+        }}>
+          <div style={{
+            background: 'white', padding: '24px', borderRadius: '8px',
+            maxWidth: '500px', width: '90%', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)'
+          }}>
+            <h3 style={{ marginTop: 0 }}>Broadcast Message</h3>
+            <p style={{ color: '#4b5563', fontSize: '14px', marginBottom: '16px' }}>
+              Send a message to the leaders of all <strong>{teams.length}</strong> teams in this operational period.
+            </p>
+            <textarea
+              style={{
+                width: '100%', minHeight: '120px', padding: '12px', borderRadius: '6px',
+                border: '1px solid #cbd5e1', marginBottom: '20px', fontSize: '14px',
+                fontFamily: 'inherit', boxSizing: 'border-box'
+              }}
+              placeholder="Enter message for all teams..."
+              value={broadcastMessage}
+              onChange={(e) => setBroadcastMessage(e.target.value)}
+              autoFocus
+            />
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+              <button 
+                className="btn btn-secondary" 
+                onClick={() => {
+                  setShowBroadcastModal(false);
+                  setBroadcastMessage('');
+                }}
+              >
+                Cancel
+              </button>
+              <button 
+                className="btn btn-primary" 
+                onClick={handleSendBroadcast}
+                disabled={!broadcastMessage.trim() || loading}
+              >
+                {loading ? 'Sending...' : 'Send Broadcast'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {assigningRow && (
+        <BaseModal
+          isOpen={!!assigningRow}
+          onClose={() => setAssigningRow(null)}
+          title={assigningRow.assignmentId ? 'Assign Team to Assignment' : 'Assign to Assignment'}
+          loading={loading}
+          actions={
+            <button 
+              className="btn btn-primary" 
+              disabled={!selectedAssignTarget || loading}
+              onClick={() => {
+                const asnId = assigningRow.assignmentId ? assigningRow.assignmentId : selectedAssignTarget;
+                const teamId = assigningRow.teamId ? assigningRow.teamId : selectedAssignTarget;
+                handlePerformLink(asnId, teamId);
+                setAssigningRow(null);
+              }}
+            >
+              Link Resource
+            </button>
+          }
+        >
+          <p style={{ fontSize: '14px', color: '#475569', marginBottom: '16px' }}>
+            Assigning resource for: <strong>{assigningRow.assignmentName || assigningRow.teamName}</strong>
+          </p>
+          <div className="form-row">
+            <label>{assigningRow.assignmentId ? 'Select Staged Team' : 'Select Planned Assignment'}</label>
+            <select 
+              className="status-update-select" 
+              value={selectedAssignTarget} 
+              onChange={(e) => setSelectedAssignTarget(e.target.value)}
+            >
+              <option value="" disabled>Choose a resource...</option>
+              {assigningRow.assignmentId ? 
+                availableTeams.map(t => <option key={t.team_id} value={t.team_id}>{t.team_name_number} ({t.type})</option>) :
+                availableAssignments.map(a => <option key={a.assignment_id} value={a.assignment_id}>{a.name} ({a.division})</option>)
+              }
+            </select>
+          </div>
+        </BaseModal>
       )}
     </div>
   );

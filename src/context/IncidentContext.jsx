@@ -60,6 +60,22 @@ export const IncidentProvider = ({ children }) => {
       return parsed && typeof parsed === 'object' ? parsed.accessLevel || '' : '';
     } catch { return ''; }
   });
+  const [currentTeamStatus, setCurrentTeamStatus] = useState(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (!saved) return null;
+      const parsed = JSON.parse(saved);
+      return parsed && typeof parsed === 'object' ? parsed.currentTeamStatus || null : null;
+    } catch { return null; }
+  });
+  const [currentAssignmentStatus, setCurrentAssignmentStatus] = useState(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (!saved) return null;
+      const parsed = JSON.parse(saved);
+      return parsed && typeof parsed === 'object' ? parsed.currentAssignmentStatus || null : null;
+    } catch { return null; }
+  });
   const [isAdmin, setIsAdmin] = useState(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (!saved) return false;
@@ -91,9 +107,11 @@ export const IncidentProvider = ({ children }) => {
       responderStatus,
       accessLevel,
       isAdmin,
+      currentTeamStatus,
+      currentAssignmentStatus,
       incidentData
     }));
-  }, [isActive, incidentId, responderId, responderName, responderStatus, accessLevel, isAdmin, incidentData]);
+  }, [isActive, incidentId, responderId, responderName, responderStatus, accessLevel, isAdmin, incidentData, currentTeamStatus, currentAssignmentStatus]);
 
   const startIncident = (id, name, opNumber, opPeriodId) => {
     setIncidentId(id);
@@ -113,6 +131,8 @@ export const IncidentProvider = ({ children }) => {
     setResponderName('');
     setResponderStatus('');
     setAccessLevel('');
+    setCurrentTeamStatus(null);
+    setCurrentAssignmentStatus(null);
     setIncidentData({ name: '', opNumber: '', opPeriodId: '' });
     localStorage.removeItem(STORAGE_KEY);
   };
@@ -131,8 +151,10 @@ export const IncidentProvider = ({ children }) => {
       logout,
       isAdmin,
       setIsAdmin,
-      setIncidentId,
-      setIncidentData,
+      currentTeamStatus,
+      setCurrentTeamStatus,
+      currentAssignmentStatus,
+      setCurrentAssignmentStatus,
       setResponderId,
       setAccessLevel,
       setResponderName,

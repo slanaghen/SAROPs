@@ -6,7 +6,7 @@ import '../styles/IncidentEditPage.css'; // Reusing existing card styles
 
 const CheckOutPage: React.FC = () => {
   const navigate = useNavigate(); //
-  const { responderId, responderName, responderStatus, logout, isActive } = useIncident(); //
+  const { responderId, responderName, responderStatus, accessLevel, logout, isActive } = useIncident(); //
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -16,10 +16,11 @@ const CheckOutPage: React.FC = () => {
       return;
     }
 
-    // Allow both 'Staged' (available field responders) and 'Active' (command staff) to check out
-    const allowedStatuses = ['Staged', 'Active'];
-    if (!allowedStatuses.includes(responderStatus || '')) {
-      setError(`Check-out unsuccessful: Your current status is "${responderStatus}". Only responders in "Staged" or "Active" status can check out. Please ensure you have been released from your team or assignment before clearing.`);
+    const isCommandStaff = accessLevel === 'command staff';
+    const canCheckOut = responderStatus === 'Staged' || (isCommandStaff && responderStatus === 'Assigned');
+
+    if (!canCheckOut) {
+      setError(`Check-out unsuccessful: Your current status is "${responderStatus}". ${isCommandStaff ? 'Staff must be in "Assigned" or "Staged" status' : 'Responders must be in "Staged" status'} to check out. Please ensure you have been released from your team or assignment before clearing.`);
       return;
     }
 

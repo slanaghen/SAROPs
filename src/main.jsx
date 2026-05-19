@@ -1,6 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { Navigate, createBrowserRouter, RouterProvider } from 'react-router-dom';
 import App from './App';
 import ResponderCheckinPage from './pages/ResponderCheckinPage';
 import PlanningDashboardPage from './pages/PlanningDashboardPage';
@@ -18,24 +18,28 @@ const AdminProtectedRoute = ({ children }) => {
   return children;
 };
 
+const router = createBrowserRouter([
+  {
+    path: "/",
+    element: <App />,
+    children: [
+      { index: true, element: <ResponderCheckinPage /> },
+      { path: "checkin", element: <ResponderCheckinPage /> },
+      { path: "checkout", element: <CheckOutPage /> },
+      { path: "planning", element: <PlanningDashboardPage /> },
+      { path: "operations", element: <OperationsDashboardPage /> },
+      { path: "responder-dashboard", element: <ResponderDashboardPage /> },
+      { path: "incident-edit", element: <IncidentEditPage /> },
+      { path: "admin", element: <AdminPage /> },
+      { path: "action-log", element: <ActionLogPage /> },
+    ],
+  },
+]);
+
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <BrowserRouter>
-      <IncidentProvider>
-      <Routes>
-        <Route path="/" element={<App />}>
-          <Route index element={<ResponderCheckinPage />} />
-          <Route path="checkin" element={<ResponderCheckinPage />} />
-          <Route path="checkout" element={<CheckOutPage />} />
-          <Route path="planning" element={<PlanningDashboardPage />} />
-          <Route path="operations" element={<OperationsDashboardPage />} />
-          <Route path="responder-dashboard" element={<ResponderDashboardPage />} />
-          <Route path="incident-edit" element={<IncidentEditPage />} />
-          <Route path="admin" element={<AdminPage />} />
-          <Route path="action-log" element={<ActionLogPage />} />
-        </Route>
-      </Routes>
-      </IncidentProvider>
-    </BrowserRouter>
+    <IncidentProvider>
+      <RouterProvider router={router} />
+    </IncidentProvider>
   </React.StrictMode>
 );

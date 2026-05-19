@@ -1,9 +1,14 @@
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
 import * as matchers from '@testing-library/jest-dom/matchers';
-import { vi, describe, it, expect, afterEach } from 'vitest';
+import { vi, describe, it, expect, afterEach, beforeEach } from 'vitest';
 import PlanningDashboard from './PlanningDashboard';
+import { useIncident } from '../context/IncidentContext';
 
 expect.extend(matchers);
+
+vi.mock('../context/IncidentContext', () => ({
+  useIncident: vi.fn(),
+}));
 
 const mockTeams = [
   { team_id: 't1', team_name_number: 'Team 1', status: 'Staged', type: 'Other' }
@@ -17,6 +22,14 @@ afterEach(() => {
 });
 
 describe('PlanningDashboard Selection', () => {
+  beforeEach(() => {
+    vi.mocked(useIncident).mockReturnValue({
+      incidentId: 'inc-123',
+      responderName: 'Steve',
+      user: { email: 'steve@example.com' }
+    });
+  });
+
   const defaultProps = {
     operationalPeriodId: 'op1',
     teams: mockTeams,
@@ -25,32 +38,36 @@ describe('PlanningDashboard Selection', () => {
     onTeamAssigned: vi.fn()
   };
 
-  it('should enable the assignment button only when both are selected', () => {
+  it('should set drag state on the container when a team is dragged', () => {
     render(<PlanningDashboard {...defaultProps} />);
     
-    const assignBtn = screen.getByText(/Assign Team to Assignment/i);
-    expect(assignBtn).toBeDisabled();
+    const teamCard = screen.getByText('Team 1').closest('.team-card');
 
-    // Select Team
-    fireEvent.click(screen.getAllByText('Team 1')[0]);
-    expect(assignBtn).toBeDisabled();
+    // Simulate drag start
+    fireEvent.dragStart(teamCard, { 
+      dataTransfer: { setData: vi.fn(), effectAllowed: 'move' } 
+    });
 
-    // Select Assignment
-    fireEvent.click(screen.getAllByText('Assignment A')[0]);
-    expect(assignBtn).not.toBeDisabled();
+    const container = screen.getByText('Planning Dashboard').closest('.planning-dashboard');
+    expect(container).toHaveAttribute('data-dragging', 'true');
   });
 
-  it('should call onTeamAssigned when the button is clicked', async () => {
+  it('should call onTeamAssigned when a team is dropped on an assignment', async () => {
     const onAssigned = vi.fn();
     render(<PlanningDashboard {...defaultProps} onTeamAssigned={onAssigned} />);
     
-    fireEvent.click(screen.getAllByText('Team 1')[0]);
-    fireEvent.click(screen.getAllByText('Assignment A')[0]);
-    fireEvent.click(screen.getByText(/Assign Team to Assignment/i));
+    const teamCard = screen.getByText('Team 1').closest('.team-card');
+    const assignmentCard = screen.getByText('Assignment A').closest('.assignment-card');
 
-    expect(onAssigned).toHaveBeenCalledWith(expect.objectContaining({
-      teamId: 't1',
-      assignmentId: 'a1'
-    }));
+    // Simulate Drag and Drop sequence
+    fireEvent.dragStart(teamCard, { dataTransfer: { setData: vi.fn(), effectAllowed: 'move' } });
+    fireEvent.drop(assignmentCard);
+
+    await waitFor(() => {
+      expect(onAssigned).toHaveBeenCalledWith(expect.objectContaining({
+        teamId: 't1',
+        assignmentId: 'a1'
+      }));
+    });
   });
 });

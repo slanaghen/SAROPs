@@ -31,8 +31,7 @@ export const useResponderTeamAndAssignment = (supabaseClient, responderId) => {
             type,
             status,
             leader_responder_id,
-            equipment,
-            sartopo_color_hex
+            equipment
           )
         `)
         .eq('responder_id', responderId)
@@ -51,7 +50,7 @@ export const useResponderTeamAndAssignment = (supabaseClient, responderId) => {
           .from('assignments')
           .select('*')
           .eq('team_id', currentTeam.team_id)
-          .single();
+          .maybeSingle();
 
         if (assignmentError && assignmentError.code !== 'PGRST116') {
           throw assignmentError;

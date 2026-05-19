@@ -1,15 +1,29 @@
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import * as matchers from '@testing-library/jest-dom/matchers';
-import { vi, describe, it, expect, afterEach } from 'vitest';
+import { vi, describe, it, expect, afterEach, beforeEach } from 'vitest';
 import TeamFormModal from './TeamFormModal';
+import { useIncident } from '../context/IncidentContext';
 
 expect.extend(matchers);
+
+vi.mock('../context/IncidentContext', () => ({
+  useIncident: vi.fn(),
+}));
 
 afterEach(() => {
   cleanup();
 });
 
 describe('TeamFormModal', () => {
+  beforeEach(() => {
+    vi.mocked(useIncident).mockReturnValue({
+      incidentId: 'inc-123',
+      responderName: 'Steve',
+      user: { email: 'steve@example.com' },
+      incidentData: { opPeriodId: 'op-123' }
+    });
+  });
+
   const mockResponders = [
     { responder_id: 'r1', name: 'Responder 1', agency: 'Agency A', status: 'Staged' },
     { responder_id: 'r2', name: 'Responder 2', agency: 'Agency B', status: 'Staged' }

@@ -23,7 +23,7 @@ describe('Navigation Component', () => {
     expect(screen.getByText(/Check-In/i)).toBeInTheDocument();
     expect(screen.getByText(/Check-Out/i)).toBeInTheDocument();
     expect(screen.getByText(/My Dashboard/i)).toBeInTheDocument();
-    expect(screen.getByText(/Incident Editor/i)).toBeInTheDocument();
+    expect(screen.getByText(/Incident/i)).toBeInTheDocument();
     expect(screen.getByText(/Admin/i)).toBeInTheDocument();
   });
 

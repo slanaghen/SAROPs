@@ -4,6 +4,15 @@ import { Responder, ResponderStatus } from '../types/sarops-types';
 import '../styles/ResponderCheckin.css';
 
 /**
+ * Configurable Skills/Capabilities List
+ */
+export const SKILLS_LIST = [
+  "Air Scent Dog", "Trail Dog", "UAS", "Vehicle", "Snowmobile", "UTV", 
+  "Swiftwater", "Dive", "Avalanche", "Boat", "Helicopter", "Rope Rescue", 
+  "Litter", "Medical", "Other"
+];
+
+/**
  * ResponderCheckin Component
  *
  * Allows a search and rescue responder to check in at an incident.
@@ -44,7 +53,6 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
   // Form state
   const [formData, setFormData] = useState({
     name: '',
-    email: '',
     agency: '',
     identifier: '',
     cell_phone: '',
@@ -60,7 +68,6 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
   const [confirmedResponder, setConfirmedResponder] = useState<Responder | null>(null);
   const [confirmationData, setConfirmationData] = useState<{
     name: string;
-    email: string;
     agency: string;
     identifier: string;
     cell_phone: string;
@@ -130,10 +137,6 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
       setInternalError('Name is required');
       return false;
     }
-    if (!data.email?.trim() || !data.email.includes('@')) {
-      setInternalError('A valid email address is required');
-      return false;
-    }
     if (!data.agency?.trim()) {
       setInternalError('Agency is required');
       return false;
@@ -167,7 +170,6 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
       responder_id: uuidv4(),
       incident_id: incidentId,
       name: (data.name || '').trim(),
-      email: (data.email || '').trim().toLowerCase(),
       agency: (data.agency || '').trim(),
       identifier: (data.identifier || '').trim(),
       cell_phone: (data.cell_phone || '').trim(),
@@ -176,7 +178,7 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
       device_id: generateDeviceId(),
       checkin_datetime: now,
       checkout_datetime: null,
-      status: (data.is_command_staff ? 'Active' : 'Staged') as ResponderStatus,
+      status: (data.is_command_staff ? 'Assigned' : 'Staged') as ResponderStatus,
     };
   };
 
@@ -192,7 +194,6 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
     const fd = new FormData(formEl);
     const submitted = {
       name: (fd.get('name') as string) || '',
-      email: (fd.get('email') as string) || '',
       agency: (fd.get('agency') as string) || '',
       identifier: (fd.get('identifier') as string) || '',
       cell_phone: formatPhoneNumber((fd.get('cell_phone') as string) || ''),
@@ -239,7 +240,6 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
       // Reset form
       setFormData({
         name: '',
-        email: '',
         agency: '',
         identifier: '',
         cell_phone: '',
@@ -318,20 +318,6 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
                 placeholder="First and Last Name"
                 required
                 autoFocus
-                disabled={displayLoading}
-              />
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="email">Email Address *</label>
-              <input
-                id="email"
-                type="email"
-                name="email"
-                value={formData.email}
-                onChange={handleInputChange}
-                placeholder="name@agency.gov"
-                required
                 disabled={displayLoading}
               />
             </div>
@@ -494,16 +480,6 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
               </div>
 
               <div className="detail-item">
-                <span className="detail-label">Email:</span>
-                <span className="detail-value">{displayResponder.email}</span>
-              </div>
-
-              <div className="detail-item">
-                <span className="detail-label">Agency:</span>
-                <span className="detail-value">{displayResponder.agency}</span>
-              </div>
-
-              <div className="detail-item">
                 <span className="detail-label">Identifier:</span>
                 <span className="detail-value">{displayResponder.identifier}</span>
               </div>
@@ -529,8 +505,10 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
 
               <div className="detail-item">
                 <span className="detail-label">Status:</span>
-                <span className={`detail-value status-badge ${((confirmedResponder && confirmedResponder.status) || 'Staged').toLowerCase()}`}>
-                  {(confirmedResponder && confirmedResponder.status) || 'Staged'}
+                <span className="detail-value">
+                  <span className={`status-badge ${((confirmedResponder && confirmedResponder.status) || 'Staged').toLowerCase()}`}>
+                    {(confirmedResponder && confirmedResponder.status) || 'Staged'}
+                  </span>
                 </span>
               </div>
 

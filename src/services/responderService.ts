@@ -98,7 +98,7 @@ export const getResponder = async (
     .from('responders')
     .select('*')
     .eq('responder_id', responderId)
-    .single();
+    .maybeSingle();
 
   if (error && error.code !== 'PGRST116') {
     // PGRST116 is "no rows" error, which is fine
@@ -256,7 +256,7 @@ export const getResponderCurrentTeam = async (
     .from('team_responders')
     .select('*, teams(*)')
     .eq('responder_id', responderId)
-    .single();
+    .maybeSingle();
 
   if (error && error.code !== 'PGRST116') {
     throw new Error(`Failed to fetch current team: ${error.message}`);
@@ -335,7 +335,7 @@ export const getRespondersByDeviceId = async (
     .from('responders')
     .select('*')
     .eq('device_id', deviceId)
-    .single();
+    .maybeSingle();
 
   if (error && error.code !== 'PGRST116') {
     throw new Error(`Failed to fetch responder: ${error.message}`);

@@ -6,19 +6,18 @@
 -- ============================================================================
 
 CREATE TYPE assignment_status AS ENUM (
-  'Draft',
   'Planned',
   'Assigned',
   'Deployed',
-  'Completed'
+  'Completed',
+  'Incomplete'
 );
 
 CREATE TYPE team_status AS ENUM (
-  'Draft',
   'Staged',
   'Assigned',
   'Deployed',
-  'Demobilized'
+  'Disbanded'
 );
 
 CREATE TYPE team_type AS ENUM (
@@ -35,10 +34,7 @@ CREATE TYPE responder_status AS ENUM (
   'Staged',
   'Attached',
   'Assigned',
-  'Briefed',
-  'Deployed',
-  'Debriefed',
-  'CheckedOut'
+  'Deployed'
 );
 
 -- ============================================================================
@@ -51,6 +47,8 @@ CREATE TABLE incidents (
   incident_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
   number TEXT NOT NULL,
+  sartopo_id TEXT,
+  notes TEXT,
   start_datetime TIMESTAMP WITH TIME ZONE NOT NULL,
   end_datetime TIMESTAMP WITH TIME ZONE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -81,9 +79,10 @@ CREATE TABLE operational_periods (
   incident_id UUID NOT NULL REFERENCES incidents(incident_id) ON DELETE CASCADE,
   op_number INTEGER NOT NULL,
   start_datetime TIMESTAMP WITH TIME ZONE NOT NULL,
-  end_datetime TIMESTAMP WITH TIME ZONE NOT NULL,
+  end_datetime TIMESTAMP WITH TIME ZONE,
   situation_narrative TEXT,
   situational_awareness_narrative TEXT,
+  par_check_interval INTEGER DEFAULT 60,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT unique_op_number_per_incident UNIQUE (incident_id, op_number)
@@ -97,9 +96,11 @@ CREATE TABLE teams (
   team_name_number TEXT NOT NULL,
   sartopo_color_hex TEXT NOT NULL,
   type team_type NOT NULL,
-  status team_status NOT NULL DEFAULT 'Draft',
-  leader_responder_id UUID NOT NULL REFERENCES responders(responder_id) ON DELETE RESTRICT,
+  status team_status NOT NULL DEFAULT 'Staged',
+  leader_responder_id UUID REFERENCES responders(responder_id) ON DELETE SET NULL,
   equipment JSONB DEFAULT '[]'::jsonb,
+  last_par_check TIMESTAMP WITH TIME ZONE,
+  par_status TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -111,7 +112,15 @@ CREATE TABLE assignments (
   op_period_id UUID NOT NULL REFERENCES operational_periods(op_period_id) ON DELETE CASCADE,
   sartopo_id TEXT,
   name TEXT NOT NULL,
-  status assignment_status NOT NULL DEFAULT 'Draft',
+  status assignment_status NOT NULL DEFAULT 'Planned',
+  division TEXT,
+  assignment_type TEXT,
+  assignment_size INTEGER,
+  tac_channel TEXT,
+  description_narrative TEXT,
+  poa INTEGER,
+  pod INTEGER,
+  debrief_narrative TEXT,
   is_orphaned BOOLEAN NOT NULL DEFAULT FALSE,
   team_id UUID REFERENCES teams(team_id) ON DELETE SET NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -152,37 +161,32 @@ CREATE TABLE clues (
 -- JUNCTION TABLES FOR MANY-TO-MANY RELATIONSHIPS
 -- ============================================================================
 
--- Table: incident_clues
--- Many-to-many relationship between incidents and clues
--- (clues are stored at incident level per spec)
-CREATE TABLE incident_clues (
-  incident_id UUID NOT NULL REFERENCES incidents(incident_id) ON DELETE CASCADE,
-  clue_id UUID NOT NULL REFERENCES clues(clue_id) ON DELETE CASCADE,
-  PRIMARY KEY (incident_id, clue_id)
-);
-
--- Table: operational_period_teams
--- Many-to-many relationship for teams active in operational periods
-CREATE TABLE operational_period_teams (
-  op_period_id UUID NOT NULL REFERENCES operational_periods(op_period_id) ON DELETE CASCADE,
-  team_id UUID NOT NULL REFERENCES teams(team_id) ON DELETE CASCADE,
-  PRIMARY KEY (op_period_id, team_id)
-);
-
--- Table: operational_period_assignments
--- Many-to-many relationship for assignments active in operational periods
-CREATE TABLE operational_period_assignments (
-  op_period_id UUID NOT NULL REFERENCES operational_periods(op_period_id) ON DELETE CASCADE,
-  assignment_id UUID NOT NULL REFERENCES assignments(assignment_id) ON DELETE CASCADE,
-  PRIMARY KEY (op_period_id, assignment_id)
-);
-
 -- Table: team_responders
 -- Many-to-many relationship for current responders attached to teams
 CREATE TABLE team_responders (
   team_id UUID NOT NULL REFERENCES teams(team_id) ON DELETE CASCADE,
   responder_id UUID NOT NULL REFERENCES responders(responder_id) ON DELETE CASCADE,
   PRIMARY KEY (team_id, responder_id)
+);
+
+-- Table: action_logs
+-- Audit log of significant actions taken during an incident
+CREATE TABLE action_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  incident_id UUID NOT NULL REFERENCES incidents(incident_id) ON DELETE CASCADE,
+  action TEXT NOT NULL,
+  user_name TEXT NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Table: team_messages
+-- Messaging log between team leaders and incident command
+CREATE TABLE team_messages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  team_id UUID NOT NULL REFERENCES teams(team_id) ON DELETE CASCADE,
+  sender_name TEXT NOT NULL,
+  message_text TEXT NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 -- ============================================================================
@@ -210,6 +214,10 @@ CREATE INDEX idx_clues_coordinates ON clues(latitude, longitude);
 
 CREATE INDEX idx_responders_status ON responders(status);
 CREATE INDEX idx_responders_device_id ON responders(device_id);
+
+CREATE INDEX idx_action_logs_incident_id ON action_logs(incident_id);
+
+CREATE INDEX idx_team_messages_team_id ON team_messages(team_id);
 
 -- ============================================================================
 -- VIEWS
