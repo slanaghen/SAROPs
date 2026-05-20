@@ -31,7 +31,8 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     assignmentStatus: '',
     teamName: '',
     teamType: '',
-    teamLeader: ''
+    teamLeader: '',
+    leaderIdentifier: ''
   });
   
   const [showTeamForm, setShowTeamForm] = useState(false);
@@ -88,7 +89,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   const sartopoId = opPeriod?.incidents?.sartopo_id;
   const parInterval = opPeriod?.par_check_interval || 0;
 
-  const commandStaffExists = useMemo(() => (teams || []).some(t => t.type === 'Command Staff'), [teams]);
+  const commandStaffExists = useMemo(() => (teams || []).some(t => t.type === 'Staff'), [teams]);
 
   /**
    * Lookups and Derived Data
@@ -126,6 +127,16 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     return leaderLookup;
   }, [responders]);
 
+  const leaderIdentifierById = useMemo(() => {
+    const lookup = {};
+    for (const r of responders) {
+      if (r?.responder_id) {
+        lookup[r.responder_id] = r.identifier;
+      }
+    }
+    return lookup;
+  }, [responders]);
+
   const teamById = useMemo(() => {
     const teamLookup = {};
     for (const t of teams) {
@@ -151,7 +162,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       const matchingTeam = asnItem.team_id ? teamById[asnItem.team_id] : null;
       return {
         id: `asn-${asnItem.assignment_id}`,
-        isParOverdue: matchingTeam && matchingTeam.status !== 'Staged' && matchingTeam.type !== 'Command Staff' && parInterval > 0 && (() => {
+        isParOverdue: matchingTeam && matchingTeam.status !== 'Staged' && matchingTeam.type !== 'Staff' && parInterval > 0 && (() => {
           const lastCheck = matchingTeam.last_par_check ? new Date(matchingTeam.last_par_check).getTime() : new Date(matchingTeam.created_at || Date.now()).getTime();
           const minutesSince = (currentTime - lastCheck) / 60000;
           return minutesSince > (parInterval + 3);
@@ -165,6 +176,9 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
         teamName: matchingTeam?.team_name_number || '',
         teamType: matchingTeam?.type || '',
         teamLeader: matchingTeam ? leaderById[matchingTeam.leader_responder_id] || 'Unknown' : '',
+        leaderIdentifier: matchingTeam ? leaderIdentifierById[matchingTeam.leader_responder_id] || '—' : '',
+        teamSize: matchingTeam?.current_responders?.length || 0,
+        leaderId: matchingTeam?.leader_responder_id || null,
         teamStatus: matchingTeam?.status || '',
         hasBoth: !!matchingTeam,
         teamId: asnItem.team_id,
@@ -176,21 +190,25 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
 
     const teamOnlyRows = (teams || []).filter(tItem => !assignmentTeamSet.has(tItem.team_id)).map(tItem => ({
       id: `team-${tItem.team_id}`,
-      isParOverdue: tItem.status !== 'Staged' && tItem.type !== 'Command Staff' && parInterval > 0 && (() => {
+      isParOverdue: tItem.status !== 'Staged' && tItem.type !== 'Staff' && parInterval > 0 && (() => {
         const lastCheck = tItem.last_par_check ? new Date(tItem.last_par_check).getTime() : new Date(tItem.created_at || Date.now()).getTime();
         return (currentTime - lastCheck) / 60000 > (parInterval + 3);
       })(),
       timeSincePar: formatTimeSince(tItem.last_par_check, tItem.created_at),
       tacChannel: '', assignmentId: '', assignmentName: '', assignmentType: '', assignmentStatus: '',
       teamName: tItem.team_name_number, teamType: tItem.type, teamStatus: tItem.status,
-      teamLeader: leaderById[tItem.leader_responder_id] || 'Unknown', hasBoth: false, teamId: tItem.team_id,
+      teamLeader: leaderById[tItem.leader_responder_id] || 'Unknown',
+      leaderIdentifier: leaderIdentifierById[tItem.leader_responder_id] || '—',
+      teamSize: tItem.current_responders?.length || 0,
+      leaderId: tItem.leader_responder_id || null,
+      hasBoth: false, teamId: tItem.team_id,
     }));
 
     let result = [...assignmentRows, ...teamOnlyRows];
     if (viewMode === 'Operations') {
-      result = result.filter(r => (r.teamStatus === 'Assigned' || r.teamStatus === 'Deployed') && r.teamType !== 'Command Staff');
+      result = result.filter(r => (r.teamStatus === 'Assigned' || r.teamStatus === 'Deployed') && r.teamType !== 'Staff');
     } else if (viewMode === 'Planning') {
-      result = result.filter(r => !['Completed', 'Incomplete'].includes(r.assignmentStatus) && (r.assignmentStatus === 'Planned' || r.teamStatus === 'Staged') && r.teamType !== 'Command Staff');
+      result = result.filter(r => !['Completed', 'Incomplete'].includes(r.assignmentStatus) && (r.assignmentStatus === 'Planned' || r.teamStatus === 'Staged') && r.teamType !== 'Staff');
     }
 
     result = result.filter(row => Object.keys(filters).every(k => !filters[k] || (row[k] || '').toString().toLowerCase().includes(filters[k].toLowerCase())));
@@ -220,7 +238,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       return sortConfig.direction === 'asc' ? comparison : -comparison;
     });
     return result;
-  }, [assignments, teams, teamById, leaderById, filters, sortConfig, viewMode, parInterval, currentTime]);
+  }, [assignments, teams, teamById, leaderById, leaderIdentifierById, filters, sortConfig, viewMode, parInterval, currentTime]);
 
   // Keep a live clock for timer displays and overdue calculations
   useEffect(() => {
@@ -266,7 +284,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
 
       if (resetErr) throw resetErr;
 
-      await recordAction(`Manual PAR reset for ${teamName || 'Team'}`);
+      await recordAction(`Manual PAR reset for team "${teamName}". Status set to "OK".`);
       await fetchDashboardData();
     } catch (err) {
       setError(err.message || 'Failed to reset PAR');
@@ -291,8 +309,8 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
         await supabase.from('responder_team_history').update({ detached_datetime: new Date().toISOString() }).eq('team_id', teamId).is('detached_datetime', null);
       }
 
-      await supabase.from('teams').update({ status: 'Disbanded', last_par_check: new Date().toISOString() }).eq('team_id', teamId);
-      await recordAction(`Disbanded team: ${teamName}`);
+      await supabase.from('teams').update({ status: 'Disbanded', last_par_check: null }).eq('team_id', teamId);
+      await recordAction(`Disbanded team "${teamName}". Members released back to Staged status.`);
       await fetchDashboardData();
     } catch (err) {
       setError(err.message || 'Failed to disband team');
@@ -323,7 +341,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
 
       if (broadcastErr) throw broadcastErr;
 
-      await recordAction(`Sent broadcast message to ${teams.length} teams`);
+      await recordAction(`Sent broadcast message to ${teams.length} teams. Message: "${broadcastMessage.trim()}"`);
       setBroadcastMessage('');
       setShowBroadcastModal(false);
     } catch (err) {
@@ -345,7 +363,6 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       const teamName = team?.team_name_number || 'Unknown Team';
       const asnName = assignment?.name || 'Unknown Assignment';
       
-      await recordAction(`Assigned ${teamName} to ${asnName}`);
     } catch (err) {
       // Error is handled by hook
     }
@@ -388,19 +405,46 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       
       setDraggedItem(null);
       setDropTarget(null);
-      await recordAction(`Assigned ${teamName} to ${asnName}`);
     } catch (err) {
        // Error is handled by hook
     }
+  };
+
+  const openNewTeamForm = () => {
+    setPendingAssignmentId(null);
+    setTeamForm({
+      op_period_id: operationalPeriodId,
+      team_name_number: '',
+      type: 'Ground Search',
+      status: 'Staged',
+      leader_responder_id: null,
+      equipment: [],
+      responder_ids: []
+    });
+    setShowTeamForm(true);
+  };
+
+  const openNewAssignmentForm = () => {
+    setPendingTeamId(null);
+    setAssignmentForm({
+      op_period_id: operationalPeriodId,
+      division: 'A',
+      name: '',
+      assignment_type: 'Ground',
+      assignment_size: 2,
+      status: 'Planned'
+    });
+    setShowAssignmentForm(true);
   };
 
   const openEditTeamForm = async (team) => {
     if (!team) return;
     setLoading(true);
     try {
-      const { data: members } = await supabase.from('team_responders').select('responder_id').eq('team_id', team.team_id);
+      const { data: members } = await supabase.from('team_responders').select('responder_id, role').eq('team_id', team.team_id);
       setTeamForm({
         ...team,
+        current_responders: members, // Ensure roles are passed to the modal
         responder_ids: members?.map(m => m.responder_id) || []
       });
       setShowTeamForm(true);
@@ -466,7 +510,6 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
         assignment_size: formData.assignment_size ? parseInt(formData.assignment_size, 10) : null,
         tac_channel: formData.tac_channel || '',
         description_narrative: formData.description_narrative || '',
-        poa: formData.poa ? parseInt(formData.poa, 10) : null,
         pod: formData.pod ? parseInt(formData.pod, 10) : null,
         debrief_narrative: formData.debrief_narrative || '',
         team_id: targetTeamId,
@@ -491,7 +534,6 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
 
     try {
       await unassignTeam(assignmentId);
-      await recordAction(`Unassigned ${teamName || 'Team'} from ${assignmentName || 'Assignment'}`);
     } catch (err) {
        // Error handled by hook
     }
@@ -502,7 +544,6 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
 
     try {
       await deleteAssignment(assignmentId);
-      await recordAction(`Deleted Assignment: ${assignmentName}`);
     } catch (err) {
        // Error handled by hook
     }
@@ -514,7 +555,6 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
 
     try {
       await deleteTeam(teamId);
-      await recordAction(`Released Team: ${teamName}`);
     } catch (err) {
        // Error handled by hook
     }
@@ -630,8 +670,10 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
               parInterval={parInterval}
               onStatusUpdate={(asnId, teamId, status) => handleStatusUpdate(asnId, teamId, status)}
               onResetPar={handleResetPar} onUnassignTeam={handleUnassignTeam}
-              onEditTeam={(id) => openEditTeamForm(teamById[id])}
-              onEditAssignment={(id) => openEditAssignmentForm(assignmentById[id])}
+              onEditTeam={(id) => openEditTeamForm(teamById[id])} onReleaseTeam={handleReleaseTeam}
+              openNewTeamForm={openNewTeamForm}
+              openNewAssignmentForm={openNewAssignmentForm}
+              onEditAssignment={(id) => openEditAssignmentForm(assignmentById[id])} onReleaseTeam={handleReleaseTeam}
               onNewTeam={(asnId) => { setPendingAssignmentId(asnId); setTeamForm({ op_period_id: operationalPeriodId, status: 'Assigned', type: 'Ground Search' }); setShowTeamForm(true); }}
               onNewAssignment={(teamId) => { setPendingTeamId(teamId); setAssignmentForm({ op_period_id: operationalPeriodId, status: 'Assigned', division: 'A' }); setShowAssignmentForm(true); }}
               onDeleteAssignment={handleDeleteAssignment} onAssignResource={(row) => { setAssigningRow(row); setSelectedAssignTarget(''); }}
@@ -661,19 +703,42 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
           display: 'flex',
           gap: '32px',
           flexWrap: 'wrap',
-          padding: '16px',
+          padding: '8px 20px',
           background: '#ffffff',
           borderRadius: '12px',
           border: '1px solid #e2e8f0',
-          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)'
+          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)',
+          alignItems: 'center'
         }}
         >
-          <div style={{ fontSize: '13px' }}><strong>Assignments/Teams Deployed:</strong> {stats.deployed}</div>
-          <div style={{ fontSize: '13px' }}><strong>Assignments planned:</strong> {stats.planned}</div>
-          <div style={{ fontSize: '13px' }}><strong>Teams staged:</strong> {stats.stagedTeams}</div>
-          <div style={{ fontSize: '13px' }}><strong>Responders staged:</strong> {stats.stagedResponders}</div>
-          <div style={{ fontSize: '13px' }}><strong>Assignments completed:</strong> {stats.completed}</div>
-          <div style={{ fontSize: '13px' }}><strong>Assignments incomplete:</strong> {stats.incomplete}</div>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <strong style={{ color: '#1e293b', fontSize: '10px', textTransform: 'uppercase', marginBottom: '2px' }}>Teams</strong>
+            <div style={{ fontSize: '12px', color: '#475569' }}>
+              Staged: {stats.teams.staged}, Assigned: {stats.teams.assigned}, Deployed: {stats.teams.deployed}, 
+              Overdue: <span style={{ color: rows.some(r => r.isParOverdue) ? '#dc2626' : 'inherit', fontWeight: rows.some(r => r.isParOverdue) ? 700 : 'inherit' }}>{rows.filter(r => r.isParOverdue).length}</span>, 
+              Total: {stats.teams.total}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <strong style={{ color: '#1e293b', fontSize: '10px', textTransform: 'uppercase', marginBottom: '2px' }}>Assignments</strong>
+            <div style={{ fontSize: '12px', color: '#475569' }}>
+              Planned: {stats.assignments.planned}, Assigned: {stats.assignments.assigned}, Deployed: {stats.assignments.deployed}, 
+              Complete: {stats.assignments.complete}, Incomplete: {stats.assignments.incomplete}, Total: {stats.assignments.total}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <strong style={{ color: '#1e293b', fontSize: '10px', textTransform: 'uppercase', marginBottom: '2px' }}>Responders</strong>
+            <div style={{ fontSize: '12px', color: '#475569' }}>
+              Staged: {stats.responders.staged}, Attached: {stats.responders.attached}, Assigned: {stats.responders.assigned}, 
+              Deployed: {stats.responders.deployed}, Total: {stats.responders.total}
+            </div>
+          </div>
+
+          <div style={{ fontSize: '13px', marginLeft: 'auto', fontWeight: 700, color: '#1e293b' }}>
+            {new Date(currentTime).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }).replace(',', '')}
+          </div>
         </div>
       )}
 

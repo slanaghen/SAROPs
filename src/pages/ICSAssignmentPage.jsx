@@ -105,7 +105,7 @@ const ICSAssignmentPage = () => {
           if (oldResponderId) {
             updates.push(supabase.from('ics_assignments').delete().eq('incident_id', incidentId).eq('position', position));
             updates.push(updateResponderStatus(supabase, oldResponderId, 'Staged', 'responder'));
-            updates.push(supabase.from('action_logs').insert({ incident_id: incidentId, action: `Unassigned ${responders.find(r => r.responder_id === oldResponderId)?.name || 'Responder'} from ${position.toUpperCase()}`, user_name: userName }));
+            updates.push(supabase.from('action_logs').insert({ incident_id: incidentId, action: `Unassigned ${responders.find(r => r.responder_id === oldResponderId)?.name || 'Responder'} from position "${position.toUpperCase()}". Status reverted to "Staged", Access Level reverted to "responder".`, user_name: userName }));
             // If the current user was the one unassigned, update their context
             if (oldResponderId === responderId) {
               setResponderStatus('Staged');
@@ -115,7 +115,7 @@ const ICSAssignmentPage = () => {
           if (newResponderId) {
             updates.push(supabase.from('ics_assignments').upsert({ incident_id: incidentId, position, responder_id: newResponderId }, { onConflict: ['incident_id', 'position'], ignoreDuplicates: false }));
             updates.push(updateResponderStatus(supabase, newResponderId, 'Assigned', 'command staff'));
-            updates.push(supabase.from('action_logs').insert({ incident_id: incidentId, action: `Assigned ${responders.find(r => r.responder_id === newResponderId)?.name || 'Responder'} to ${position.toUpperCase()}`, user_name: userName }));
+            updates.push(supabase.from('action_logs').insert({ incident_id: incidentId, action: `Assigned ${responders.find(r => r.responder_id === newResponderId)?.name || 'Responder'} to position "${position.toUpperCase()}". Status set to "Assigned", Access Level set to "command staff".`, user_name: userName }));
             // If the current user is the one assigned, update their context
             if (newResponderId === responderId) {
               setResponderStatus('Assigned');

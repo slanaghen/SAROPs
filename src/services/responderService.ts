@@ -281,8 +281,9 @@ export const getResponderCurrentTeam = async (
 ): Promise<{ team_id: string; teams: Team } | null> => {
   const { data, error } = await supabaseClient
     .from('team_responders')
-    .select('*, teams(*)')
+    .select('*, teams!inner(*)')
     .eq('responder_id', responderId)
+    .neq('teams.status', 'Disbanded')
     .maybeSingle();
 
   if (error && error.code !== 'PGRST116') {

@@ -1,7 +1,7 @@
 import { render, screen, cleanup } from '@testing-library/react';
 import * as matchers from '@testing-library/jest-dom/matchers';
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
-import PlanningDashboardPage from '../pages/PlanningDashboardPage';
+import PlanningDashboardPage from './PlanningDashboardPage';
 import { useIncident } from '../context/IncidentContext';
 import { usePlanningDashboard } from '../hooks/usePlanningDashboard';
 
@@ -53,23 +53,9 @@ describe('PlanningDashboardPage', () => {
       assignments: [],
       responders: [],
       loading: false,
-      stats: {
-        teams: { staged: 0, assigned: 0, deployed: 0, total: 0 },
-        assignments: { planned: 0, assigned: 0, deployed: 0, complete: 0, incomplete: 0, total: 0 },
-        responders: { staged: 0, attached: 0, assigned: 0, deployed: 0, total: 0 }
-      },
+      stats: mockStats,
+      error: null,
       fetchDashboardData: vi.fn(),
-      assignTeamToAssignment: vi.fn(),
-      createTeam: vi.fn(),
-      createAssignment: vi.fn(),
-      updateAssignment: vi.fn(),
-      deleteAssignment: vi.fn(),
-      updateResponder: vi.fn(),
-      checkOutResponder: vi.fn(),
-      updateTeam: vi.fn(),
-      attachResponderToTeam: vi.fn(),
-      detachResponderFromTeam: vi.fn(),
-      deleteTeam: vi.fn(),
     });
 
     render(<PlanningDashboardPage />);
@@ -101,19 +87,7 @@ describe('PlanningDashboardPage', () => {
       responders: [],
       loading: false,
       stats: mockStats,
-      error: null, // Ensure error is explicitly null
       fetchDashboardData: vi.fn(),
-      assignTeamToAssignment: vi.fn(),
-      createTeam: vi.fn(),
-      createAssignment: vi.fn(),
-      updateAssignment: vi.fn(),
-      deleteAssignment: vi.fn(),
-      updateResponder: vi.fn(),
-      checkOutResponder: vi.fn(),
-      updateTeam: vi.fn(),
-      attachResponderToTeam: vi.fn(),
-      detachResponderFromTeam: vi.fn(),
-      deleteTeam: vi.fn(),
     });
 
     render(<PlanningDashboardPage />);

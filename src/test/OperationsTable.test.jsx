@@ -15,6 +15,7 @@ describe('OperationsTable', () => {
       teamName: 'Team 1',
       teamType: 'Ground',
       teamLeader: 'Steve',
+      leaderIdentifier: 'K9-1',
       assignmentStatus: 'Deployed',
       teamStatus: 'Deployed',
       timeSincePar: '5m ago',
@@ -35,16 +36,42 @@ describe('OperationsTable', () => {
     onDeleteAssignment: vi.fn(),
     onEditTeam: vi.fn(),
     onEditAssignment: vi.fn(),
-    onNewTeam: vi.fn(),
+    openNewTeamForm: vi.fn(), // Added for new button
+    openNewAssignmentForm: vi.fn(), // Added for new button
+    onNewTeam: vi.fn(), // Existing prop for action menu
     onNewAssignment: vi.fn(),
     onAssignResource: vi.fn()
   };
+
+  it('renders the group headers for Assignment and Team with "New" buttons', () => {
+    render(<OperationsTable {...defaultProps} />);
+    
+    // Find the th elements that contain the text "Assignment" and "Team" respectively
+    // Use getAllByRole and then filter with within to handle nested elements
+    const groupHeaders = screen.getAllByRole('columnheader', { selector: '.group-header-row th' });
+    const assignmentHeader = groupHeaders.find(header => within(header).queryByText(/Assignment/i));
+    const teamHeader = groupHeaders.find(header => within(header).queryByText(/Team/i));
+    
+    expect(assignmentHeader).toBeInTheDocument();
+    expect(teamHeader).toBeInTheDocument();
+
+    const newAssignmentButton = within(assignmentHeader).getByRole('button', { name: 'New' });
+    const newTeamButton = within(teamHeader).getByRole('button', { name: 'New' });
+    expect(newAssignmentButton).toBeInTheDocument();
+    expect(newTeamButton).toBeInTheDocument();
+
+    fireEvent.click(newAssignmentButton);
+    expect(defaultProps.openNewAssignmentForm).toHaveBeenCalled();
+    fireEvent.click(newTeamButton);
+    expect(defaultProps.openNewTeamForm).toHaveBeenCalled();
+  });
 
   it('renders assignment and team data in the same row', () => {
     render(<OperationsTable {...defaultProps} />);
     const row = screen.getByText('Alpha Assignment').closest('tr');
     expect(within(row).getByText('Team 1')).toBeInTheDocument();
     expect(within(row).getByText('Steve')).toBeInTheDocument();
+    expect(within(row).getByText('K9-1')).toBeInTheDocument();
     expect(within(row).getByText('TAC 1')).toBeInTheDocument();
   });
 
@@ -66,9 +93,21 @@ describe('OperationsTable', () => {
     expect(screen.getByText('75m ago')).toHaveClass('status-indicator incomplete');
   });
 
+  it('triggers onResetPar when clicking the overdue PAR chip', () => {
+    const overdueRows = [{ ...mockRows[0], isParOverdue: true, timeSincePar: '75m ago' }];
+    render(<OperationsTable {...defaultProps} rows={overdueRows} />);
+    
+    const overdueChip = screen.getByText('75m ago');
+    fireEvent.click(overdueChip);
+    
+    expect(defaultProps.onResetPar).toHaveBeenCalledWith('t1', 'Team 1');
+  });
+
   it('triggers column sorting when headers are clicked', () => {
     render(<OperationsTable {...defaultProps} />);
-    fireEvent.click(screen.getByText(/Assignment Name/i));
+    // Get the Assignment Name column (the first column with text "Name")
+    const nameHeaders = screen.getAllByText('Name', { selector: 'th' }); // Specify selector to avoid matching team name in row
+    fireEvent.click(nameHeaders[0]);
     expect(defaultProps.requestSort).toHaveBeenCalledWith('assignmentName');
   });
 

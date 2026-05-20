@@ -1,7 +1,7 @@
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import * as matchers from '@testing-library/jest-dom/matchers';
 import { vi, describe, it, expect, afterEach } from 'vitest';
-import ResponderDashboardPage from '../pages/ResponderDashboardPage';
+import ResponderDashboardPage from './ResponderDashboardPage';
 import { useIncident } from '../context/IncidentContext';
 import useResponderTeamAndAssignment from '../hooks/useResponderTeamAndAssignment';
 import { supabase } from '../lib/supabase';

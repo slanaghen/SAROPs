@@ -290,7 +290,8 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       const now = Date.now();
       const diffMs = now - lastCheckMs;
       const minutesSince = diffMs / 60000;
-      setParRequired(minutesSince >= parInterval);
+
+      setParRequired(parInterval > 0 && minutesSince > (parInterval + 3));
 
       if (!team.last_par_check) {
         setTimeSinceLastPar('Never');
@@ -378,9 +379,9 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       // 2. Update team status to Disbanded (standard terminal state to release resources)
       const { error: teamError } = await supabase
         .from('teams')
-        .update({ 
+        .update({
           status: 'Disbanded', 
-          last_par_check: now 
+          last_par_check: null // Clear PAR check when disbanded
         })
         .eq('team_id', team.team_id);
       
@@ -530,8 +531,8 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
 
       {(team || accessLevel === 'command staff' || accessLevel === 'admin') && (
         <div className="dashboard-section team-info">
-          <SectionHeader 
-            title={accessLevel === 'command staff' || accessLevel === 'admin' ? 'Command Staff Status' : `Your Team: ${team?.team_name_number}`} 
+          <SectionHeader
+            title={accessLevel === 'command staff' || accessLevel === 'admin' ? 'Staff Status' : `Your Team: ${team?.team_name_number}`} 
             sectionKey="team" 
             showBadge={parRequired && <span className="status-indicator incomplete" style={{ fontSize: '9px' }}>PAR OVERDUE</span>}
           />
@@ -541,7 +542,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
               {accessLevel === 'command staff' || accessLevel === 'admin' ? (
                 <div className="staff-status-card" style={{ padding: '24px', background: '#f0f9ff', borderRadius: '12px', border: '1px solid #bae6fd', textAlign: 'center' }}>
                   <div style={{ fontSize: '32px', marginBottom: '12px' }}>🛡️</div>
-                  <h3 style={{ color: '#0369a1', marginBottom: '8px' }}>{icsRole ? icsRole.toUpperCase() : 'Command Staff'}</h3>
+                  <h3 style={{ color: '#0369a1', marginBottom: '8px' }}>{icsRole ? icsRole.toUpperCase() : 'Staff'}</h3>
                   {icsRole && (
                     <p style={{ color: '#0c4a6e', fontSize: '14px', marginBottom: '16px' }}>
                       You are assigned as the {icsRole} for this incident.
@@ -567,7 +568,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
                     {team.leader_responder_id && (
                       <div>
                         <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>
-                          {team.type === 'Command Staff' ? 'Incident Commander' : 'Leader Name'}
+                          {team.type === 'Staff' ? 'Incident Commander' : 'Leader Name'}
                         </label>
                         <div style={{ fontSize: '15px', fontWeight: 500 }}>{leaderById[team.leader_responder_id] || 'Unknown'}</div>
                       </div>
@@ -576,11 +577,41 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
                   
                   {team.equipment && team.equipment.length > 0 && <p><strong>Equipment:</strong> {team.equipment.join(', ')}</p>}
 
-                  {team.status !== 'Staged' && team.type !== 'Command Staff' && parInterval > 0 && (
+                  {team.status !== 'Staged' && team.type !== 'Staff' && parInterval > 0 && (
                     <div className={`par-integration ${parRequired ? 'par-required' : ''}`} style={{ marginTop: '16px', padding: '16px', backgroundColor: parRequired ? '#fff7ed' : '#f8fafc', borderRadius: '8px', border: parRequired ? '2px solid #f59e0b' : '1px solid #e2e8f0' }}>
                       <h3 style={{ fontSize: '15px', marginBottom: '8px', marginTop: 0 }}>Status Check (PAR)</h3>
                       {parRequired && <div className="alert alert-warning" style={{ marginBottom: '12px', fontSize: '12px', padding: '8px' }}><strong>Check-in Required!</strong> Please confirm your team's status.</div>}
-                      <p style={{ fontSize: '12px', color: '#64748b', marginBottom: '12px' }}>Last PAR Check: {timeSinceLastPar}</p>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                        <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 600 }}>Last PAR Check:</span>
+                        {parRequired ? (
+                          <span 
+                            className="status-indicator incomplete" 
+                            onClick={() => handleParResponse('OK')}
+                            title="Click to reset PAR"
+                            style={{ 
+                              display: 'inline-flex', 
+                              alignItems: 'center', 
+                              gap: '4px',
+                              backgroundColor: '#dc2626', 
+                              color: 'white', 
+                              padding: '2px 8px', 
+                              borderRadius: '4px', 
+                              fontSize: '11px',
+                              fontWeight: 700,
+                              whiteSpace: 'nowrap',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            {timeSinceLastPar}
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <circle cx="12" cy="12" r="10"></circle>
+                              <polyline points="12 6 12 12 16 14"></polyline>
+                            </svg>
+                          </span>
+                        ) : (
+                          <span style={{ fontSize: '12px', color: '#64748b' }}>{timeSinceLastPar}</span>
+                        )}
+                      </div>
                       <div style={{ display: 'flex', gap: '8px' }}><button className="btn btn-primary btn-sm" onClick={() => handleParResponse('OK')} style={{ flex: 1 }}>PAR OK</button><button className="btn btn-secondary btn-sm" onClick={() => handleParResponse('Contact me')} style={{ flex: 1, borderColor: '#f59e0b', color: '#d97706' }}>Contact Command</button></div>
                     </div>
                   )}
@@ -605,7 +636,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
 
       {(assignment || accessLevel === 'command staff' || accessLevel === 'admin') && (
         <div className="dashboard-section assignment-info">
-          <SectionHeader 
+          <SectionHeader
             title={accessLevel === 'command staff' || accessLevel === 'admin' ? 'ICS Assignment' : `Team Assignment: ${assignment?.name}`} 
             sectionKey="assignment" 
           />
@@ -651,12 +682,6 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
               <div>
                 <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>TAC Channel</label>
                 <div style={{ fontSize: '15px', fontWeight: 500 }}>{assignment.tac_channel}</div>
-              </div>
-            )}
-            {assignment.poa !== null && assignment.poa !== undefined && (
-              <div>
-                <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>POA</label>
-                <div style={{ fontSize: '15px', fontWeight: 500 }}>{assignment.poa}%</div>
               </div>
             )}
           </div>

@@ -46,7 +46,7 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
 
     try {
       const [teamsRes, assignmentsRes, respondersRes, opRes] = await Promise.all([
-        supabaseClient.from('teams').select('*, current_responders:team_responders(responder_id)').eq('op_period_id', operationalPeriodId),
+        supabaseClient.from('teams').select('*, current_responders:team_responders(responder_id, role)').eq('op_period_id', operationalPeriodId),
         supabaseClient.from('assignments').select('*').eq('op_period_id', operationalPeriodId),
         supabaseClient.from('responders').select('*, access_level'), // Ensure access_level is fetched
         supabaseClient.from('operational_periods').select('*, incidents(*)').eq('op_period_id', operationalPeriodId).maybeSingle()
@@ -81,12 +81,17 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
       const now = new Date().toISOString();
 
       // 1. Handle Terminal States
+      let teamUpdatePayload = { status: finalTeamStatus };
       if (['Completed', 'Incomplete'].includes(newStatus)) {
         finalTeamStatus = 'Disbanded';
         unlinkRequired = false;
+        teamUpdatePayload.last_par_check = null; // Clear PAR check for non-active states
       } else if (newStatus === 'Planned') {
         finalTeamStatus = 'Staged';
         unlinkRequired = true;
+        teamUpdatePayload.last_par_check = null; // Clear PAR check for non-active states
+      } else if (['Assigned', 'Deployed'].includes(finalTeamStatus)) {
+        teamUpdatePayload.last_par_check = now; // Set PAR check for active states
       }
 
       // 2. Update Assignment
@@ -101,7 +106,7 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
         // Update Team Record
         const { error: teamError } = await supabaseClient
           .from('teams')
-          .update({ status: finalTeamStatus, last_par_check: now })
+          .update(teamUpdatePayload)
           .eq('team_id', teamId);
         if (teamError) throw teamError;
 
@@ -121,10 +126,7 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
               supabaseClient.from('responder_team_history')
                 .update({ detached_datetime: now })
                 .eq('team_id', teamId)
-                .is('detached_datetime', null),
-              supabaseClient.from('team_responders')
-                .delete()
-                .eq('team_id', teamId)
+                .is('detached_datetime', null)
             ]);
 
             // Sync local context if current user was on this team
@@ -138,7 +140,11 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
         }
       }
 
-      await recordAction(`Transitioned Assignment ${assignmentId} to ${newStatus}`);
+      const assignment = assignments.find(a => a.assignment_id === assignmentId);
+      const team = teams.find(t => t.team_id === teamId);
+      const asnName = assignment?.name || 'Unknown Assignment';
+      const teamName = team?.team_name_number || 'No Team';
+      await recordAction(`Resource status update: Assignment "${asnName}" set to ${newStatus}${teamId ? `, Team "${teamName}" set to ${finalTeamStatus}` : ''}.`);
       await fetchDashboardData();
       return { success: true };
     } catch (err) {
@@ -175,7 +181,7 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
       const assignment = assignments.find(a => a.assignment_id === assignmentId);
       const teamName = team?.team_name_number || 'Unknown Team';
       const asnName = assignment?.name || 'Unknown Assignment';
-      await recordAction(`Assigned ${teamName} to ${asnName}`);
+      await recordAction(`Assigned team "${teamName}" to assignment "${asnName}". Statuses set to "Assigned".`);
 
       // Update local state
       setAssignments(prev =>
@@ -255,7 +261,7 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
 
       if (updateError) throw updateError;
 
-      await recordAction(`Unassigned team from ${assignmentToUnassign.name}`);
+      await recordAction(`Unassigned team from assignment "${assignmentToUnassign.name}". Assignment status set to "Planned", team status set to "Staged", assignment marked as "Orphaned".`);
 
       // Update local state
       setAssignments(prev =>
@@ -270,9 +276,9 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
       if (assignmentToUnassign.team_id) {
         const { error: teamError } = await supabaseClient
           .from('teams')
-          .update({ 
+          .update({
             status: 'Staged',
-            last_par_check: new Date().toISOString()
+            last_par_check: null // Clear PAR check when unassigned/staged
           })
           .eq('team_id', assignmentToUnassign.team_id);
 
@@ -308,12 +314,15 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
 
     try {
       setLoading(true);
+      let teamUpdatePayload = { status: newStatus };
+      if (['Assigned', 'Deployed'].includes(newStatus)) {
+        teamUpdatePayload.last_par_check = new Date().toISOString();
+      } else {
+        teamUpdatePayload.last_par_check = null; // Clear PAR check for non-active states
+      }
       const { error } = await supabaseClient
         .from('teams')
-        .update({ 
-          status: newStatus,
-          last_par_check: new Date().toISOString()
-        })
+        .update(teamUpdatePayload)
         .eq('team_id', teamId);
 
       if (error) throw error;
@@ -364,7 +373,8 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
       if (error) throw error;
       if (!data) throw new Error('No team data returned from server');
 
-      await recordAction(`Created new team: ${teamPayload.team_name_number}`);
+      const leaderName = responders.find(r => r.responder_id === teamPayload.leader_responder_id)?.name || 'None';
+      await recordAction(`Created team "${teamPayload.team_name_number}". Type: ${teamPayload.type}, Status: ${teamPayload.status}, Leader: ${leaderName}, Members: ${teamPayload.responder_ids?.length || 0}.`);
 
       const newTeam = data;
       setTeams(prev => [...prev, newTeam]);
@@ -425,7 +435,6 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
         assignment_size: assignmentPayload.assignment_size ? parseInt(assignmentPayload.assignment_size, 10) : null,
         tac_channel: assignmentPayload.tac_channel || '',
         description_narrative: assignmentPayload.description_narrative || '',
-        poa: assignmentPayload.poa ? parseInt(assignmentPayload.poa, 10) : null,
         pod: assignmentPayload.pod ? parseInt(assignmentPayload.pod, 10) : null,
         debrief_narrative: assignmentPayload.debrief_narrative || '',
         is_orphaned: false
@@ -442,7 +451,7 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
       if (error) throw error;
       if (!data) throw new Error('No assignment data returned from server');
 
-      await recordAction(`Created new assignment: ${assignmentPayload.name}`);
+      await recordAction(`Created assignment "${assignmentPayload.name}". Division: ${assignmentPayload.division}, Type: ${assignmentPayload.assignment_type}, Status: ${assignmentPayload.status}.`);
 
       // Atomic state update then background refresh
       setAssignments(prev => [...prev, data]);
@@ -471,7 +480,6 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
         assignment_size: updates.assignment_size ? parseInt(updates.assignment_size, 10) : null,
         tac_channel: updates.tac_channel || '',
         description_narrative: updates.description_narrative || '',
-        poa: updates.poa ? parseInt(updates.poa, 10) : null,
         pod: updates.pod ? parseInt(updates.pod, 10) : null,
         debrief_narrative: updates.debrief_narrative || '',
         team_id: updates.team_id || null,
@@ -489,7 +497,17 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
 
       if (error) throw error;
 
-      await recordAction(`Updated details for assignment: ${payload.name}`);
+      const oldAsn = assignments.find(a => a.assignment_id === assignmentId);
+      const changes = [];
+      if (oldAsn) {
+        Object.keys(payload).forEach(key => {
+          if (payload[key] !== oldAsn[key] && key !== 'updated_at' && key !== 'op_period_id') {
+            changes.push(`${key}: "${oldAsn[key] ?? 'null'}" -> "${payload[key] ?? 'null'}"`);
+          }
+        });
+      }
+      const changeLog = changes.length > 0 ? ` Details: ${changes.join(', ')}` : '';
+      await recordAction(`Updated assignment "${payload.name}".${changeLog}`);
 
       // Synchronize linked team status and reset PAR timer if status changed
       if (updates.team_id) {
@@ -536,8 +554,7 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
               supabaseClient.from('responder_team_history')
                 .update({ detached_datetime: new Date().toISOString() })
                 .eq('team_id', updates.team_id)
-                .is('detached_datetime', null),
-              supabaseClient.from('team_responders').delete().eq('team_id', updates.team_id)
+                .is('detached_datetime', null)
             ]);
           }
         }
@@ -577,7 +594,7 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
       if (error) throw error;
 
       const assignment = assignments.find(a => a.assignment_id === assignmentId);
-      await recordAction(`Deleted Assignment: ${assignment?.name || 'Unknown'}`);
+      await recordAction(`Deleted assignment "${assignment?.name || 'Unknown'}".`);
 
       setAssignments(prev => prev.filter(a => a.assignment_id !== assignmentId));
       return { success: true };
@@ -628,11 +645,7 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
             .from('responder_team_history')
             .update({ detached_datetime: new Date().toISOString() })
             .eq('team_id', teamId)
-            .is('detached_datetime', null),
-          supabaseClient
-            .from('team_responders')
-            .delete()
-            .eq('team_id', teamId)
+            .is('detached_datetime', null)
         ]);
 
         // Sync local context if current user was on this team
@@ -646,14 +659,14 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
         .from('teams')
         .update({ 
           status: 'Disbanded',
-          last_par_check: new Date().toISOString()
+          last_par_check: null // Clear PAR check when disbanded
         })
         .eq('team_id', teamId);
 
       if (teamError) throw teamError;
 
       const team = teams.find(t => t.team_id === teamId);
-      await recordAction(`Disbanded ${team?.team_name_number || 'Team'}`);
+      await recordAction(`Disbanded team "${team?.team_name_number || 'Team'}". Members released to Staged status. Associated incomplete assignments marked as "Orphaned".`);
       await fetchDashboardData();
 
       return { success: true };
@@ -680,8 +693,21 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
 
       if (error) throw error;
 
-      const team = teams.find(t => t.team_id === teamId);
-      await recordAction(`Updated details for ${team?.team_name_number || 'Team'}`);
+      const oldTeam = teams.find(t => t.team_id === teamId);
+      const changes = [];
+      if (oldTeam) {
+        Object.keys(updates).forEach(key => {
+          if (key === 'equipment') {
+            if (JSON.stringify(updates[key]) !== JSON.stringify(oldTeam[key])) {
+              changes.push(`${key}: [${(oldTeam[key] || []).join(', ')}] -> [${(updates[key] || []).join(', ')}]`);
+            }
+          } else if (updates[key] !== oldTeam[key] && key !== 'updated_at' && key !== 'current_responders') {
+            changes.push(`${key}: "${oldTeam[key] ?? 'null'}" -> "${updates[key] ?? 'null'}"`);
+          }
+        });
+      }
+      const changeLog = changes.length > 0 ? ` Details: ${changes.join(', ')}` : '';
+      await recordAction(`Updated team "${oldTeam?.team_name_number || 'Team'}".${changeLog}`);
 
       setTeams(prev => prev.map(t => t.team_id === teamId ? data : t));
       return data;
@@ -830,7 +856,17 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
 
       if (error) throw error;
 
-      await recordAction(`Updated details for responder: ${updates.name || 'Responder'}`);
+      const oldResponder = responders.find(r => r.responder_id === responderId);
+      const changes = [];
+      if (oldResponder) {
+        Object.keys(updates).forEach(key => {
+          if (updates[key] !== oldResponder[key] && key !== 'updated_at') {
+            changes.push(`${key}: "${oldResponder[key] ?? 'null'}" -> "${updates[key] ?? 'null'}"`);
+          }
+        });
+      }
+      const changeLog = changes.length > 0 ? ` Details: ${changes.join(', ')}` : '';
+      await recordAction(`Updated details for responder "${updates.name || 'Responder'}".${changeLog}`);
       setResponders(prev => prev.map(r => r.responder_id === responderId ? data : r));
       return data;
     } catch (err) {
@@ -865,6 +901,7 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
       const { data, error } = await supabaseClient
         .from('responders')
         .update({
+          status: 'CheckedOut',
           checkout_datetime: new Date().toISOString()
         })
         .eq('responder_id', responderId)
@@ -888,12 +925,27 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
    * Memoized operational statistics to prevent calculation drift across pages
    */
   const stats = useMemo(() => ({
-    deployed: (Array.isArray(assignments) ? assignments : []).filter(a => a.status === 'Deployed').length,
-    planned: (Array.isArray(assignments) ? assignments : []).filter(a => a.status === 'Planned').length,
-    stagedTeams: (Array.isArray(teams) ? teams : []).filter(t => t.status === 'Staged').length,
-    stagedResponders: (Array.isArray(responders) ? responders : []).filter(r => r.status === 'Staged').length,
-    completed: (Array.isArray(assignments) ? assignments : []).filter(a => a.status === 'Completed').length,
-    incomplete: (Array.isArray(assignments) ? assignments : []).filter(a => a.status === 'Incomplete').length,
+    teams: {
+      staged: (Array.isArray(teams) ? teams : []).filter(t => t.status === 'Staged').length,
+      assigned: (Array.isArray(teams) ? teams : []).filter(t => t.status === 'Assigned').length,
+      deployed: (Array.isArray(teams) ? teams : []).filter(t => t.status === 'Deployed').length,
+      total: (Array.isArray(teams) ? teams : []).length,
+    },
+    assignments: {
+      planned: (Array.isArray(assignments) ? assignments : []).filter(a => a.status === 'Planned').length,
+      assigned: (Array.isArray(assignments) ? assignments : []).filter(a => a.status === 'Assigned').length,
+      deployed: (Array.isArray(assignments) ? assignments : []).filter(a => a.status === 'Deployed').length,
+      complete: (Array.isArray(assignments) ? assignments : []).filter(a => a.status === 'Completed').length,
+      incomplete: (Array.isArray(assignments) ? assignments : []).filter(a => a.status === 'Incomplete').length,
+      total: (Array.isArray(assignments) ? assignments : []).length,
+    },
+    responders: {
+      staged: (Array.isArray(responders) ? responders : []).filter(r => r.status === 'Staged').length,
+      attached: (Array.isArray(responders) ? responders : []).filter(r => r.status === 'Attached').length,
+      assigned: (Array.isArray(responders) ? responders : []).filter(r => r.status === 'Assigned').length,
+      deployed: (Array.isArray(responders) ? responders : []).filter(r => r.status === 'Deployed').length,
+      total: (Array.isArray(responders) ? responders : []).length,
+    }
   }), [assignments, teams, responders]);
 
   return {

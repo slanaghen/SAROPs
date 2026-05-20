@@ -46,19 +46,25 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
     if (!assignments || assignments.length === 0) return `${division}A`;
     
     const divisionAssignments = assignments.filter(a => a.division === division);
-    const sequenceCodes = divisionAssignments
-      .map(a => {
-        // Look for names starting with the division followed by a single uppercase letter
-        if (a.name && a.name.startsWith(division)) {
-          const suffix = a.name.slice(division.length);
-          return suffix.length === 1 ? suffix.charCodeAt(0) : null;
-        }
-        return null;
-      })
-      .filter(code => code !== null && code >= 65 && code <= 90); // Only A-Z
+    const usedSuffixes = new Set(
+      divisionAssignments
+        .map(a => {
+          if (a.name && a.name.startsWith(division) && a.name.length === division.length + 1) {
+            return a.name.slice(division.length);
+          }
+          return null;
+        })
+        .filter(Boolean)
+    );
 
-    const maxCode = sequenceCodes.length > 0 ? Math.max(...sequenceCodes) : 64; // 64 is @, so next is 65 (A)
-    return `${division}${String.fromCharCode(maxCode + 1)}`;
+    for (let i = 65; i <= 90; i++) {
+      const suffix = String.fromCharCode(i);
+      if (!usedSuffixes.has(suffix)) {
+        return `${division}${suffix}`;
+      }
+    }
+
+    return `${division}A`; // Wrap around if A-Z are all used
   };
 
   // Load data when component mounts or when operational period changes
@@ -142,19 +148,36 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
             display: 'flex',
             gap: '32px',
             flexWrap: 'wrap',
-            padding: '16px',
+            padding: '8px 20px',
             background: '#ffffff',
             borderRadius: '12px',
             border: '1px solid #e2e8f0',
-            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)'
+            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)',
+            alignItems: 'center'
           }}
           >
-            <div style={{ fontSize: '13px' }}><strong>Assignments/Teams Deployed:</strong> {stats.deployed}</div>
-            <div style={{ fontSize: '13px' }}><strong>Assignments planned:</strong> {stats.planned}</div>
-            <div style={{ fontSize: '13px' }}><strong>Teams staged:</strong> {stats.stagedTeams}</div>
-            <div style={{ fontSize: '13px' }}><strong>Responders staged:</strong> {stats.stagedResponders}</div>
-            <div style={{ fontSize: '13px' }}><strong>Assignments completed:</strong> {stats.completed}</div>
-            <div style={{ fontSize: '13px' }}><strong>Assignments incomplete:</strong> {stats.incomplete}</div>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <strong style={{ color: '#1e293b', fontSize: '10px', textTransform: 'uppercase', marginBottom: '2px' }}>Teams</strong>
+              <div style={{ fontSize: '12px', color: '#475569' }}>
+                Staged: {stats.teams.staged}, Assigned: {stats.teams.assigned}, Deployed: {stats.teams.deployed}, Total: {stats.teams.total}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <strong style={{ color: '#1e293b', fontSize: '10px', textTransform: 'uppercase', marginBottom: '2px' }}>Assignments</strong>
+              <div style={{ fontSize: '12px', color: '#475569' }}>
+                Planned: {stats.assignments.planned}, Assigned: {stats.assignments.assigned}, Deployed: {stats.assignments.deployed}, 
+                Complete: {stats.assignments.complete}, Incomplete: {stats.assignments.incomplete}, Total: {stats.assignments.total}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <strong style={{ color: '#1e293b', fontSize: '10px', textTransform: 'uppercase', marginBottom: '2px' }}>Responders</strong>
+              <div style={{ fontSize: '12px', color: '#475569' }}>
+                Staged: {stats.responders.staged}, Attached: {stats.responders.attached}, Assigned: {stats.responders.assigned}, 
+                Deployed: {stats.responders.deployed}, Total: {stats.responders.total}
+              </div>
+            </div>
           </div>
         </>
       )}

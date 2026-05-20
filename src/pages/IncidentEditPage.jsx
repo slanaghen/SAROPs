@@ -135,31 +135,32 @@ const IncidentEditPage = () => {
 
   const saveData = async () => {
     setIsSaving(true);
+    const newIncidentId = incident.number.trim();
+
+    if (!newIncidentId) {
+      alert("Incident Number is required to start tracking.");
+      setIsSaving(false);
+      return false;
+    }
 
     try {
-      // Defensive check: Ensure context ID is a valid UUID, otherwise generate a new one
-      // This prevents "poisoned" localStorage from breaking new incident creation
-      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-      const isExistingIdValid = contextIncidentId && uuidRegex.test(contextIncidentId);
-      
-      const incidentId = isExistingIdValid ? contextIncidentId : uuidv4();
       const opPeriodId = uuidv4();
-
       const parsedPar = parseInt(operationalPeriod.par_check_interval, 10);
       const finalParInterval = isNaN(parsedPar) ? 60 : parsedPar;
 
-      if (isActive && isExistingIdValid) {
+      if (isActive && contextIncidentId) {
         // 1. Update Incident in Supabase
         const { error: incError } = await supabase
           .from('incidents')
           .update({
+            incident_id: newIncidentId, // In case number changed, PK cascades
             name: incident.name,
             number: incident.number,
             sartopo_id: incident.sartopo_id || null,
             start_datetime: incident.start_datetime,
             notes: incident.notes
           })
-          .eq('incident_id', incidentId);
+          .eq('incident_id', contextIncidentId);
 
         if (incError) throw incError;
 
@@ -177,13 +178,13 @@ const IncidentEditPage = () => {
 
         if (opError) throw opError;
 
-        startIncident(incidentId, incident.name, operationalPeriod.op_number, incidentData?.opPeriodId);
+        startIncident(newIncidentId, incident.name, operationalPeriod.op_number, incidentData?.opPeriodId);
       } else {
         // 1. Create Incident in Supabase
         const { error: incError } = await supabase
           .from('incidents')
           .insert({
-            incident_id: incidentId,
+            incident_id: newIncidentId,
             name: incident.name,
             number: incident.number,
             sartopo_id: incident.sartopo_id || null,
@@ -198,7 +199,7 @@ const IncidentEditPage = () => {
           .from('operational_periods')
           .insert({
             op_period_id: opPeriodId,
-            incident_id: incidentId,
+            incident_id: newIncidentId,
             op_number: operationalPeriod.op_number,
             start_datetime: operationalPeriod.start_datetime,
             situation_narrative: operationalPeriod.situation_narrative,
@@ -213,16 +214,16 @@ const IncidentEditPage = () => {
           .from('teams')
           .insert({
             op_period_id: opPeriodId,
-            team_name_number: 'Incident Command',
+            team_name_number: 'Staff',
             sartopo_color_hex: '#0000FF',
-            type: 'Command Staff',
+            type: 'Staff',
             status: 'Staged'
           });
 
         if (teamError) throw teamError;
 
         // 4. Update global state with real IDs
-        startIncident(incidentId, incident.name, operationalPeriod.op_number, opPeriodId);
+        startIncident(newIncidentId, incident.name, operationalPeriod.op_number, opPeriodId);
       }
 
       setInitialIncident(incident);
@@ -305,7 +306,7 @@ const IncidentEditPage = () => {
 
         // Disband all teams in this OP as they are released
         await supabase.from('teams')
-          .update({ status: 'Disbanded', last_par_check: now })
+          .update({ status: 'Disbanded', last_par_check: null })
           .eq('op_period_id', incidentData.opPeriodId);
 
         // Check out all remaining responders

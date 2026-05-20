@@ -1,7 +1,7 @@
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
 import * as matchers from '@testing-library/jest-dom/matchers';
 import { vi, describe, it, expect, afterEach, beforeEach } from 'vitest';
-import PlanningDashboard from '../components/PlanningDashboard';
+import PlanningDashboard from './PlanningDashboard';
 import { useIncident } from '../context/IncidentContext';
 
 expect.extend(matchers);

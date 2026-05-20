@@ -122,7 +122,7 @@ describe('AdminPage Authentication Gate', () => {
   it('should disband a team and release responders', async () => {
     vi.mocked(useIncident).mockReturnValue({ isAdmin: true });
     window.confirm = vi.fn().mockReturnValue(true);
-    const mockTeam = { team_id: 't1', team_name_number: 'Team Alpha', status: 'Staged' };
+    const mockTeam = { team_id: 't1', team_name_number: 'Team Alpha', status: 'Staged', type: 'Staff' };
     const mockMember = { responder_id: 'r1' };
     
     supabase.from.mockImplementation((table) => {

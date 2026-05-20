@@ -11,6 +11,7 @@ import AdminPage from './pages/AdminPage';
 import ActionLogPage from './pages/ActionLogPage';
 import ErrorPage from './components/ErrorPage';
 import ICSAssignmentPage from './pages/ICSAssignmentPage';
+import QRCodesPage from './pages/QRCodesPage';
 import { IncidentProvider } from './context/IncidentContext';
 
 const OperationsDashboardPage = lazy(() => import('./pages/OperationsDashboardPage'));
@@ -47,6 +48,7 @@ const router = createBrowserRouter([
       { path: "incident-edit", element: <IncidentEditPage /> },
       { path: "admin", element: <AdminPage /> },
       { path: "action-log", element: <ActionLogPage /> },
+      { path: "qrcodes", element: <QRCodesPage /> },
       { path: "ics", element: <ICSAssignmentPage /> },
     ],
   },

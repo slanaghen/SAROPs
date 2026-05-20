@@ -23,58 +23,64 @@ const AssignmentFormModal = ({
         {error && <div className="alert alert-error">{error}</div>}
 
         <div className="form-row">
-          <label htmlFor="asn_division">Division</label>
-          <input
-            id="asn_division"
-            type="text"
-            value={assignmentForm.division || ''}
-            onChange={e => setAssignmentForm({ ...assignmentForm, division: e.target.value })}
-            placeholder="Assignment division"
-          />
-        </div>
-
-        <div className="form-row">
           <label htmlFor="asn_name">Assignment Name</label>
           <input
             id="asn_name"
             type="text"
             value={assignmentForm.name || ''}
             onChange={e => setAssignmentForm({ ...assignmentForm, name: e.target.value })}
-            placeholder="Auto-generated as Division+Suffix if blank"
+            placeholder="e.g., AA, AB, Sector 1"
           />
         </div>
 
-        <div className="form-row">
-          <label htmlFor="asn_type">Assignment Type</label>
-          <input
-            id="asn_type"
-            type="text"
-            value={assignmentForm.assignment_type || ''}
-            onChange={e => setAssignmentForm({ ...assignmentForm, assignment_type: e.target.value })}
-            placeholder="Assignment type"
-          />
-        </div>
+        <div style={{ display: 'flex', gap: '16px', marginBottom: '16px', alignItems: 'flex-start' }}>
+          <div className="form-row" style={{ flex: 1, minWidth: 0 }}>
+            <label htmlFor="asn_division">Division</label>
+            <input
+              id="asn_division"
+              type="text"
+              value={assignmentForm.division || ''}
+              onChange={e => setAssignmentForm({ ...assignmentForm, division: e.target.value })}
+              placeholder="Division"
+              style={{ width: '100%', boxSizing: 'border-box' }}
+            />
+          </div>
 
-        <div className="form-row">
-          <label htmlFor="asn_size">Assignment Size</label>
-          <input
-            id="asn_size"
-            type="text"
-            value={assignmentForm.assignment_size || ''}
-            onChange={e => setAssignmentForm({ ...assignmentForm, assignment_size: e.target.value })}
-            placeholder="Assignment size"
-          />
-        </div>
+          <div className="form-row" style={{ flex: 1, minWidth: 0 }}>
+            <label htmlFor="asn_size">Size</label>
+            <input
+              id="asn_size"
+              type="number"
+              value={assignmentForm.assignment_size || ''}
+              onChange={e => setAssignmentForm({ ...assignmentForm, assignment_size: e.target.value })}
+              placeholder="Size"
+              style={{ width: '100%', boxSizing: 'border-box' }}
+            />
+          </div>
 
-        <div className="form-row">
-          <label htmlFor="asn_tac">TAC Channel</label>
-          <input
-            id="asn_tac"
-            type="text"
-            value={assignmentForm.tac_channel || ''}
-            onChange={e => setAssignmentForm({ ...assignmentForm, tac_channel: e.target.value })}
-            placeholder="TAC channel"
-          />
+          <div className="form-row" style={{ flex: 1, minWidth: 0 }}>
+            <label htmlFor="asn_type">Assignment Type</label>
+            <input
+              id="asn_type"
+              type="text"
+              value={assignmentForm.assignment_type || ''}
+              onChange={e => setAssignmentForm({ ...assignmentForm, assignment_type: e.target.value })}
+              placeholder="Type"
+              style={{ width: '100%', boxSizing: 'border-box' }}
+            />
+          </div>
+
+          <div className="form-row" style={{ flex: 1, minWidth: 0 }}>
+            <label htmlFor="asn_tac">TAC Channel</label>
+            <input
+              id="asn_tac"
+              type="text"
+              value={assignmentForm.tac_channel || ''}
+              onChange={e => setAssignmentForm({ ...assignmentForm, tac_channel: e.target.value })}
+              placeholder="TAC"
+              style={{ width: '100%', boxSizing: 'border-box' }}
+            />
+          </div>
         </div>
 
         <div className="form-row">
@@ -91,18 +97,6 @@ const AssignmentFormModal = ({
 
         <div style={{ display: 'flex', gap: '12px' }}>
           <div className="form-row" style={{ flex: 1 }}>
-            <label htmlFor="asn_poa">POA (%)</label>
-            <input
-              id="asn_poa"
-              type="number"
-              min="0"
-              max="100"
-              value={assignmentForm.poa || ''}
-              onChange={e => setAssignmentForm({ ...assignmentForm, poa: e.target.value })}
-              placeholder="0-100"
-            />
-          </div>
-          <div className="form-row" style={{ flex: 1 }}>
             <label htmlFor="asn_pod">POD (%)</label>
             <input
               id="asn_pod"
@@ -111,7 +105,8 @@ const AssignmentFormModal = ({
               max="100"
               value={assignmentForm.pod || ''}
               onChange={e => setAssignmentForm({ ...assignmentForm, pod: e.target.value })}
-              placeholder="0-100"
+              placeholder="0-100" // Placeholder for 3 digits + %
+              style={{ width: '80px', boxSizing: 'border-box' }}
             />
           </div>
         </div>

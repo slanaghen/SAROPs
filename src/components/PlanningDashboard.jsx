@@ -51,7 +51,7 @@ const PlanningDashboard = ({
   const [draggedItem, setDraggedItem] = useState(null); // { id, type }
   const [dropTarget, setDropTarget] = useState(null); // { id, type }
 
-  const commandStaffExists = useMemo(() => (teams || []).some(t => t.type === 'Command Staff'), [teams]);
+  const commandStaffExists = useMemo(() => (teams || []).some(t => t.type === 'Staff'), [teams]);
 
   const handleDragStart = (e, id, type) => {
     setDraggedItem({ id, type });
@@ -492,7 +492,12 @@ const PlanningDashboard = ({
                 >
                   <div className="responder-header">
                     <div className="responder-name clickable-name">{responder.name}</div>
-                    <div className="responder-id-badge">{responder.identifier}</div>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <span className={`status-indicator ${responder.status?.toLowerCase() || ''}`} style={{ fontSize: '10px' }}>
+                        {responder.status}
+                      </span>
+                      <div className="responder-id-badge">{responder.identifier}</div>
+                    </div>
                   </div>
                   <div className="responder-agency-meta">{responder.agency}</div>
                   {responder.special_skills && (
@@ -507,7 +512,7 @@ const PlanningDashboard = ({
         {/* Staged Teams Section */}
         <div className="section teams-section">
           <div className="section-header">
-            <h2>Staged Teams ({stagedTeams.length})</h2>
+            <h2>Staged Teams ({stagedTeams.length})</h2> {/* Removed button here */}
             <div>
               <button className="btn btn-primary btn-sm" onClick={openNewTeamForm}>New Team</button>
             </div>
@@ -541,7 +546,7 @@ const PlanningDashboard = ({
                     </div>
                     <span style={{ fontSize: '11px', color: '#64748b' }}>Size: {getTeamMemberCount(team)}</span>
                     <span style={{ fontSize: '11px', color: '#1e293b', fontWeight: 500 }}>
-                      {team.type === 'Command Staff' ? 'IC' : 'Ldr'}: {getResponderName(team.leader_responder_id)}
+                      {team.type === 'Staff' ? 'IC' : 'Ldr'}: {getResponderName(team.leader_responder_id)}
                     </span>
                   </div>
 

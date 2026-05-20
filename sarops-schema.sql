@@ -24,13 +24,18 @@ CREATE TYPE team_status AS ENUM (
 
 DROP TYPE IF EXISTS team_type CASCADE;
 CREATE TYPE team_type AS ENUM (
+  'Hasty',
   'Ground Search',
-  'UAS Search',
-  'Dog Air',
-  'Dog Track',
+  'Vehicle Search',
+  'Aerial Search',
+  'Water Search',
+  'Tracking',
+  'Dog',
+  'Avalanche',
   'Transport',
   'Helicopter',
-  'Command Staff',
+  'Medical',
+  'Staff',
   'Other'
 );
 
@@ -46,7 +51,8 @@ CREATE TYPE responder_status AS ENUM (
 DROP TYPE IF EXISTS access_level CASCADE;
 CREATE TYPE access_level AS ENUM (
   'responder',
-  'command staff'
+  'command staff',
+  'admin'
 );
 
 -- ============================================================================
@@ -70,7 +76,7 @@ DROP VIEW IF EXISTS incident_summary CASCADE;
 -- Table: incidents
 -- Root entity for a search and rescue incident
 CREATE TABLE incidents (
-  incident_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  incident_id TEXT PRIMARY KEY, -- Primary key based on the incident number
   name TEXT NOT NULL,
   number TEXT NOT NULL,
   sartopo_id TEXT,
@@ -86,7 +92,7 @@ CREATE TABLE incidents (
 CREATE TABLE responders (
   responder_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
-  incident_id UUID NOT NULL REFERENCES incidents(incident_id) ON DELETE CASCADE,
+  incident_id TEXT NOT NULL REFERENCES incidents(incident_id) ON DELETE CASCADE ON UPDATE CASCADE,
   agency TEXT NOT NULL,
   identifier TEXT NOT NULL,
   cell_phone TEXT,
@@ -105,7 +111,7 @@ CREATE TABLE responders (
 -- Time-based operational divisions within an incident
 CREATE TABLE operational_periods (
   op_period_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  incident_id UUID NOT NULL REFERENCES incidents(incident_id) ON DELETE CASCADE,
+  incident_id TEXT NOT NULL REFERENCES incidents(incident_id) ON DELETE CASCADE ON UPDATE CASCADE,
   op_number INTEGER NOT NULL,
   start_datetime TIMESTAMP WITH TIME ZONE NOT NULL,
   end_datetime TIMESTAMP WITH TIME ZONE,
@@ -134,10 +140,10 @@ CREATE TABLE teams (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- Ensure only one Command Staff team per operational period
-CREATE UNIQUE INDEX idx_one_command_staff_per_op 
+-- Ensure only one Staff team per operational period
+CREATE UNIQUE INDEX idx_one_staff_per_op 
 ON teams (op_period_id) 
-WHERE type = 'Command Staff';
+WHERE type = 'Staff';
 
 -- Table: assignments
 -- Tasks or objectives assigned to teams
@@ -152,7 +158,6 @@ CREATE TABLE assignments (
   assignment_size INTEGER,
   tac_channel TEXT,
   description_narrative TEXT,
-  poa INTEGER,
   pod INTEGER,
   debrief_narrative TEXT,
   is_orphaned BOOLEAN NOT NULL DEFAULT FALSE,
@@ -178,7 +183,7 @@ CREATE TABLE responder_team_history (
 -- Evidence and findings discovered during the incident
 CREATE TABLE clues (
   clue_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  incident_id UUID NOT NULL REFERENCES incidents(incident_id) ON DELETE CASCADE,
+  incident_id TEXT NOT NULL REFERENCES incidents(incident_id) ON DELETE CASCADE ON UPDATE CASCADE,
   sartopo_marker_id TEXT,
   latitude NUMERIC(10, 8) NOT NULL,
   longitude NUMERIC(11, 8) NOT NULL,
@@ -208,7 +213,7 @@ CREATE TABLE team_responders (
 -- Audit log of significant actions taken during an incident
 CREATE TABLE action_logs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  incident_id UUID NOT NULL REFERENCES incidents(incident_id) ON DELETE CASCADE,
+  incident_id TEXT NOT NULL REFERENCES incidents(incident_id) ON DELETE CASCADE ON UPDATE CASCADE,
   action TEXT NOT NULL,
   user_name TEXT NOT NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -228,7 +233,7 @@ CREATE TABLE team_messages (
 -- Stores assignments for ICS roles for a given incident
 CREATE TABLE ics_assignments (
   ics_assignment_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  incident_id UUID NOT NULL REFERENCES incidents(incident_id) ON DELETE CASCADE,
+  incident_id TEXT NOT NULL REFERENCES incidents(incident_id) ON DELETE CASCADE ON UPDATE CASCADE,
   position TEXT NOT NULL, -- e.g., 'ic', 'safety', 'ops'
   responder_id UUID REFERENCES responders(responder_id) ON DELETE SET NULL,
   assigned_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -357,7 +362,7 @@ BEGIN
         FROM team_responders tr
         JOIN teams t ON tr.team_id = t.team_id
         WHERE tr.responder_id = _responder_id
-          AND t.type = 'Command Staff'
+          AND t.type = 'Staff'
     ) INTO is_command_staff_team_member;
 
     -- Check if the responder has any ICS assignment

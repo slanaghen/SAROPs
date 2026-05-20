@@ -287,8 +287,8 @@ describe('usePlanningDashboard Hook', () => {
     const { result } = renderHook(() => usePlanningDashboard(mockSupabase, opPeriodId));
     await act(async () => { await result.current.fetchDashboardData(); });
 
-    expect(result.current.stats.deployed).toBe(1);
-    expect(result.current.stats.stagedTeams).toBe(1);
-    expect(result.current.stats.completed).toBe(1);
+    expect(result.current.stats.assignments.deployed).toBe(1);
+    expect(result.current.stats.teams.staged).toBe(1);
+    expect(result.current.stats.assignments.complete).toBe(1);
   });
 });

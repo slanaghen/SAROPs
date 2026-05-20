@@ -363,7 +363,8 @@ const AdminPage = () => {
         if (assignedCount > 0) {
           await supabase.from('assignments').update({ status: 'Planned', team_id: null }).eq('op_period_id', opId).eq('status', 'Assigned');
         }
-        await supabase.from('teams').update({ status: 'Disbanded', last_par_check: now }).eq('op_period_id', opId);
+
+        await supabase.from('teams').update({ status: 'Disbanded', last_par_check: null }).eq('op_period_id', opId);
         await supabase.from('operational_periods').update({ end_datetime: now }).eq('op_period_id', opId);
       }
 

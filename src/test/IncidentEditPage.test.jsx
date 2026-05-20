@@ -68,7 +68,7 @@ describe('IncidentEditPage', () => {
     // Mocking active state specifically for this test
     vi.mocked(useIncident).mockReturnValue({ 
       isActive: true, 
-      incidentId: 'cc5b10f5-fe2f-4748-9df3-33f6c083e51b',
+      incidentId: 'SAR-2026-001',
       incidentData: { name: 'Active Incident', opNumber: '1', opPeriodId: '1e7148f1-ad69-4c24-a25f-8a074a5033f8' },
       startIncident: vi.fn(),
       endIncident: vi.fn(),
@@ -111,7 +111,7 @@ describe('IncidentEditPage', () => {
     // Setup active state
     vi.mocked(useIncident).mockReturnValue({ 
       isActive: true, 
-      incidentId: 'cc5b10f5-fe2f-4748-9df3-33f6c083e51b',
+      incidentId: 'SAR-2026-001',
       incidentData: { name: 'Old Name', opNumber: '1', opPeriodId: '1e7148f1-ad69-4c24-a25f-8a074a5033f8' },
       startIncident: vi.fn(),
       endIncident: vi.fn(),
