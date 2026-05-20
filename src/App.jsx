@@ -79,7 +79,7 @@ function App() {
           .from('responders')
           .select('status, access_level')
           .eq('responder_id', responderId)
-          .single();
+          .maybeSingle();
 
         if (resp) {
           setResponderStatus(resp.status);
@@ -186,8 +186,14 @@ function App() {
 
   // Navigation Guard: Redirect to check-in if trying to access operational pages without a session
   useEffect(() => {
-    const publicPaths = ['/', '/checkin', '/admin'];
+    // Added /incident and /qrcodes to public paths so anonymous users can start incidents
+    const publicPaths = ['/', '/checkin', '/admin', '/incident', '/qrcodes'];
+    
     if (!isActive && !isAdmin && !publicPaths.includes(location.pathname)) {
+      console.warn(`[App Guard] Unauthorized access attempt to ${location.pathname}. Redirecting to /checkin.`, {
+        isActive,
+        isAdmin
+      });
       navigate('/checkin');
     }
   }, [isActive, isAdmin, location.pathname, navigate]);
@@ -245,7 +251,7 @@ function App() {
                   <Link to="/operations" onClick={() => setMenuOpen(false)}>Operations</Link>
                   <Link to="/planning" onClick={() => setMenuOpen(false)}>Planning</Link>
                   <Link to="/checkin" onClick={() => setMenuOpen(false)}>Check-in</Link>
-                  <Link to="/incident-edit" onClick={() => setMenuOpen(false)}>Incident</Link>
+                  <Link to="/incident" onClick={() => setMenuOpen(false)}>Incident</Link>
                   <Link to="/admin" onClick={() => setMenuOpen(false)}>Administration</Link>
                   <Link to="/ics" onClick={() => setMenuOpen(false)}>ICS Organization Chart</Link>
                   <Link to="/action-log" onClick={() => setMenuOpen(false)}>Action Log</Link>

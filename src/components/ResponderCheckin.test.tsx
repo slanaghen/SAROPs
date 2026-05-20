@@ -1,13 +1,20 @@
 import React from 'react';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
-import ResponderCheckin from '../components/ResponderCheckin';
+import ResponderCheckin from './ResponderCheckin';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 describe('ResponderCheckin confirmation screen', () => {
   it('renders entered values in confirmation and uses white detail styles', async () => {
-    render(<ResponderCheckin onCheckIn={async () => {}} />);
+    const mockIncidents = [{ incident_id: 'inc-123', name: 'Test Incident', number: '2024-001' }];
+    render(
+      <ResponderCheckin 
+        onCheckIn={async () => {}} 
+        incidents={mockIncidents}
+        selectedIncidentId="inc-123"
+      />
+    );
 
     fireEvent.change(screen.getByLabelText(/Full Name/i), {
       target: { value: 'asdf' },

@@ -1,7 +1,6 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { useIncident } from '../context/IncidentContext';
-import { updateResponderStatus } from '../services/responderService';
 import { usePlanningDashboard } from '../hooks/usePlanningDashboard';
 import '../styles/ICSAssignmentPage.css';
 
@@ -10,29 +9,10 @@ import '../styles/ICSAssignmentPage.css';
  * Displays the ICS organizational hierarchy with editable assignments.
  */
 const ICSAssignmentPage = () => {
-  const { incidentId, responderName, user, responderId, setAccessLevel: setContextAccessLevel, setResponderStatus, incidentData } = useIncident();
+  const { incidentData } = useIncident();
   const operationalPeriodId = incidentData?.opPeriodId;
-  const userName = responderName || user?.email || 'System';
 
-  const { responders, loading, fetchDashboardData, setError: setHookError } = usePlanningDashboard(supabase, operationalPeriodId);
-
-  const initialIcsState = {
-    ic: '',
-    safety: '',
-    pio: '',
-    liaison: '',
-    ops: '',
-    planning: '',
-    logistics: '',
-    admin: ''
-
-  };
-
-  const [staff, setStaff] = useState(initialIcsState);
-  const [initialStaff, setInitialStaff] = useState(initialIcsState);
-  const [isSaving, setIsSaving] = useState(false);
-  const [pageError, setPageError] = useState(null);
-  const [successMessage, setSuccessMessage] = useState(null);
+  const { teams, responders, loading, error: hookError, fetchDashboardData } = usePlanningDashboard(supabase, operationalPeriodId);
 
   // Fetch responders for the dropdowns
   useEffect(() => {
@@ -41,116 +21,55 @@ const ICSAssignmentPage = () => {
     }
   }, [operationalPeriodId, fetchDashboardData]);
 
-  // Fetch existing ICS assignments on load
-  useEffect(() => {
-    const fetchIcsAssignments = async () => {
-      if (!incidentId) return;
-      setPageError(null);
-      try {
-        const { data, error: fetchError } = await supabase
-          .from('ics_assignments')
-          .select('position, responder_id') // Only need position and responder_id
-          .eq('incident_id', incidentId);
-
-        if (fetchError) throw fetchError;
-
-        const currentAssignments = {};
-        data.forEach(assignment => {
-          currentAssignments[assignment.position] = assignment.responder_id;
-        });
-        setStaff(currentAssignments);
-        setInitialStaff(currentAssignments); // Store initial state for dirty check
-      } catch (err) {
-        setPageError('Failed to load ICS assignments: ' + err.message);
-        console.error('Error fetching ICS assignments:', err);
-      }
+  // Derived mapping of ICS positions to names based on the Staff team members
+  const icsMapping = useMemo(() => {
+    const mapping = {
+      ic: '', safety: '', pio: '', liaison: '', ops: '', planning: '', logistics: '', admin: ''
     };
 
-    if (incidentId) {
-      fetchIcsAssignments();
+    const staffTeam = teams?.find(t => t.type === 'Staff');
+    
+    if (staffTeam?.current_responders) {
+      staffTeam.current_responders.forEach(member => {
+        const fullResponder = responders?.find(r => r.responder_id === member.responder_id);
+        if (!fullResponder) return;
+
+        const role = member.role?.toLowerCase() || '';
+        const name = fullResponder.name;
+
+        if (role === 'incident commander') mapping.ic = name;
+        else if (role === 'safety') mapping.safety = name;
+        else if (role === 'pio') mapping.pio = name;
+        else if (role === 'liaison') mapping.liaison = name;
+        else if (role === 'operations') mapping.ops = name;
+        else if (role === 'planning') mapping.planning = name;
+        else if (role === 'logistics') mapping.logistics = name;
+        else if (role.includes('admin') || role.includes('finance')) mapping.admin = name;
+      });
     }
-  }, [incidentId]);
-
-  // Filter responders for dropdown: Staged OR currently assigned to an ICS role
-  const availableResponders = useMemo(() => {
-    const assignedIcsResponderIds = Object.values(staff).filter(Boolean);
-    return (responders || []).filter(r => 
-      r.status === 'Staged' || assignedIcsResponderIds.includes(r.responder_id)
-    );
-  }, [responders, staff]);
-
-  const handleChange = (field, responderId) => {
-    setStaff(prev => ({ ...prev, [field]: responderId }));
-  };
-
-  const handleSaveICSChart = async () => {
-    if (!incidentId) {
-      setPageError('No incident selected to save ICS assignments.');
-      return;
-    }
-    setIsSaving(true);
-    setPageError(null);
-    setSuccessMessage(null);
-
-    try {
-      const updates = [];
-      const currentIcsResponderIds = new Set(Object.values(initialStaff).filter(Boolean));
-
-      for (const position of Object.keys(staff)) {
-        const newResponderId = staff[position];
-        const oldResponderId = initialStaff[position];
-
-        if (newResponderId !== oldResponderId) {
-          // Unassign old responder if any
-          if (oldResponderId) {
-            updates.push(supabase.from('ics_assignments').delete().eq('incident_id', incidentId).eq('position', position));
-            updates.push(updateResponderStatus(supabase, oldResponderId, 'Staged', 'responder'));
-            updates.push(supabase.from('action_logs').insert({ incident_id: incidentId, action: `Unassigned ${responders.find(r => r.responder_id === oldResponderId)?.name || 'Responder'} from position "${position.toUpperCase()}". Status reverted to "Staged", Access Level reverted to "responder".`, user_name: userName }));
-            // If the current user was the one unassigned, update their context
-            if (oldResponderId === responderId) {
-              setResponderStatus('Staged');
-            }
-          }
-          // Assign new responder if any
-          if (newResponderId) {
-            updates.push(supabase.from('ics_assignments').upsert({ incident_id: incidentId, position, responder_id: newResponderId }, { onConflict: ['incident_id', 'position'], ignoreDuplicates: false }));
-            updates.push(updateResponderStatus(supabase, newResponderId, 'Assigned', 'command staff'));
-            updates.push(supabase.from('action_logs').insert({ incident_id: incidentId, action: `Assigned ${responders.find(r => r.responder_id === newResponderId)?.name || 'Responder'} to position "${position.toUpperCase()}". Status set to "Assigned", Access Level set to "command staff".`, user_name: userName }));
-            // If the current user is the one assigned, update their context
-            if (newResponderId === responderId) {
-              setResponderStatus('Assigned');
-            }
-          }
-        }
-      }
-      await Promise.all(updates);
-      setInitialStaff(staff); // Update initial state to reflect saved changes
-      setSuccessMessage('ICS assignments saved successfully!');
-      fetchDashboardData(); // Refresh responder list to reflect status changes
-    } catch (err) {
-      setPageError('Failed to save ICS assignments: ' + err.message);
-      console.error('Error saving ICS assignments:', err);
-    } finally {
-      setIsSaving(false);
-      setTimeout(() => setSuccessMessage(null), 3000);
-    }
-  };
+    return mapping;
+  }, [teams, responders]);
+  
 
   const OrgBox = ({ title, field }) => (
     <div className="ics-box">
       <div className="ics-box-title">{title}</div>
-      <select
-        className="ics-box-input"
-        value={staff[field]}
-        onChange={(e) => handleChange(field, e.target.value)}
-      >
-        <option value="">— Unassigned —</option>
-        {availableResponders.map(r => (
-          <option key={r.responder_id} value={r.responder_id}>
-            {r.name} ({r.agency})
-          </option>
-        ))}
-      </select>
+
+      <div className="ics-box-input" style={{ 
+        background: '#fff', 
+        border: '1px solid #e2e8f0', 
+        borderRadius: '6px', 
+        padding: '8px 12px', 
+        fontSize: '14px',
+        minHeight: '38px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontWeight: 600,
+        color: icsMapping[field] ? '#1e293b' : '#94a3b8'
+      }}>
+        {icsMapping[field] || ''}
+      </div>
     </div>
   );
 
@@ -162,9 +81,8 @@ const ICSAssignmentPage = () => {
       </div>
       
       <div className="ics-hierarchy">
-        {loading && <p style={{ color: '#64748b', fontSize: '13px', marginBottom: '10px' }}>Loading responders and assignments...</p>}
-        {pageError && <div className="alert alert-error" style={{ marginBottom: '10px' }}>{pageError}</div>}
-        {successMessage && <div className="alert alert-success" style={{ marginBottom: '10px' }}>{successMessage}</div>}
+        {loading && <p style={{ color: '#64748b', fontSize: '13px', marginBottom: '10px' }}>Loading organization data...</p>}
+        {hookError && <div className="alert alert-error" style={{ marginBottom: '10px' }}>{hookError}</div>}
 
         {/* Level 1: IC */}
         <div className="ics-row ics-top">
@@ -196,12 +114,6 @@ const ICSAssignmentPage = () => {
           <OrgBox title="Logistics Section" field="logistics" />
           <OrgBox title="Admin / Finance" field="admin" />
         </div>
-      </div>
-      
-      <div className="ics-footer">
-        <button className="btn btn-primary" onClick={handleSaveICSChart} disabled={isSaving || loading}>
-          Save ICS Chart
-        </button>
       </div>
     </div>
   );

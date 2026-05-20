@@ -191,6 +191,7 @@ const AdminPage = () => {
       const { error: updateError } = await supabase
         .from('responders')
         .update({ 
+          status: 'CheckedOut',
           checkout_datetime: new Date().toISOString()
         })
         .eq('responder_id', id);
@@ -371,7 +372,7 @@ const AdminPage = () => {
       // 4. Check out responders
       if (activeResponders.length > 0) {
         await supabase.from('responders')
-          .update({ status: 'Staged', checkout_datetime: now })
+            .update({ status: 'CheckedOut', checkout_datetime: now })
           .eq('incident_id', id)
           .is('checkout_datetime', null);
       }

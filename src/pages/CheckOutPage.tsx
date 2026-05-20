@@ -36,13 +36,17 @@ const CheckOutPage: React.FC = () => {
 
       if (leaderError) throw leaderError;
 
-      // Delete the responder record from the database
+      // Transition responder to CheckedOut status rather than deleting
+      // This preserves the incident history and action logs
       const { error: dbError } = await supabase //
-        .from('responders') //
-        .delete() //
+        .from('responders')
+        .update({ status: 'CheckedOut', checkout_datetime: new Date().toISOString() })
         .eq('responder_id', responderId);
 
       if (dbError) throw dbError;
+
+      // Invalidate the anonymous session
+      await supabase.auth.signOut();
 
       // Clear the global incident context and local session
       logout(); //
@@ -50,7 +54,7 @@ const CheckOutPage: React.FC = () => {
       alert("You have been successfully cleared from the incident.");
       navigate('/checkin'); //
     } catch (err) {
-      const message = err instanceof Error ? err.message : (error?.message || 'Check-out failed');
+      const message = err instanceof Error ? err.message : 'Check-out failed';
       console.error('Check-out error:', err);
       setError(message);
     } finally {

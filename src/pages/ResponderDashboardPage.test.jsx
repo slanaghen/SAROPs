@@ -1,12 +1,11 @@
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import * as matchers from '@testing-library/jest-dom/matchers';
 import { vi, describe, it, expect, afterEach } from 'vitest';
+
 import ResponderDashboardPage from './ResponderDashboardPage';
 import { useIncident } from '../context/IncidentContext';
 import useResponderTeamAndAssignment from '../hooks/useResponderTeamAndAssignment';
 import { supabase } from '../lib/supabase';
-
-expect.extend(matchers);
 
 vi.mock('../context/IncidentContext', () => ({
   useIncident: vi.fn(),
@@ -228,6 +227,44 @@ describe('ResponderDashboardPage', () => {
     await waitFor(() => {
       expect(supabase.from).toHaveBeenCalledWith('teams');
       expect(mockRefetch).toHaveBeenCalled();
+    });
+  });
+
+  it('does not require PAR during the 3-minute grace period', async () => {
+    const parInterval = 60;
+    // Set last check to 62 minutes ago (interval is 60, so it's inside 60+3 grace)
+    const sixtyTwoMinsAgo = new Date(Date.now() - 62 * 60000).toISOString();
+    
+    const mockTeam = { 
+      team_id: 't1', 
+      status: 'Assigned', 
+      last_par_check: sixtyTwoMinsAgo 
+    };
+
+    vi.mocked(useIncident).mockReturnValue({ 
+      responderId: 'r1', 
+      incidentData: { opPeriodId: 'op-1' },
+      accessLevel: 'responder' 
+    });
+
+    vi.mocked(useResponderTeamAndAssignment).mockReturnValue({
+      team: mockTeam,
+      assignment: null,
+      loading: false,
+      error: null,
+      refetch: vi.fn()
+    });
+    
+    // Mock OP period interval
+    supabase.from.mockImplementation((table) => 
+      createSupabaseQueryMock({ par_check_interval: parInterval })
+    );
+
+    render(<ResponderDashboardPage />);
+    
+    // The "PAR OVERDUE" badge should not be present
+    await waitFor(() => {
+      expect(screen.queryByText(/PAR OVERDUE/i)).not.toBeInTheDocument();
     });
   });
 });

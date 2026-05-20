@@ -23,7 +23,7 @@ export const IncidentProvider = ({ children }) => {
     try {
       const parsed = JSON.parse(saved);
       const id = parsed?.incidentId;
-      return (id && uuidRegex.test(id)) ? id : null;
+      return id || null; // Incident IDs are now incident numbers (strings), not UUIDs
     } catch { return null; }
   });
   const [responderId, setResponderId] = useState(() => {

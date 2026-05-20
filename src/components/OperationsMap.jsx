@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { importLibrary } from '@googlemaps/js-api-loader';
+import { Loader } from '@googlemaps/js-api-loader';
 
 const OperationsMap = ({ 
   loading, 
@@ -28,7 +28,11 @@ const OperationsMap = ({
 
     const initMap = async () => {
       try {
-        const { Map } = await importLibrary("maps");
+        const loader = new Loader({
+          apiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '',
+          version: "weekly"
+        });
+        const { Map } = await loader.importLibrary("maps");
         map.current = new Map(mapContainer.current, {
           center: { lat: 40.0150, lng: -105.2705 },
           zoom: 13,
@@ -58,7 +62,9 @@ const OperationsMap = ({
   if (mapError) {
     return (
       <div className="map-fallback" style={{ 
-        height: '100%', width: '100%', display: 'flex', flexDirection: 'column',
+        height: '100%', width: '100%', 
+        aspectRatio: '1 / 1',
+        display: 'flex', flexDirection: 'column',
         alignItems: 'center', justifyContent: 'center', background: '#f1f5f9',
         backgroundImage: 'url("https://placehold.co/600x400/e2e8f0/64748b?text=Boulder,+CO+Static+Preview")',
         backgroundSize: 'cover', backgroundPosition: 'center'

@@ -6,15 +6,18 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'jsdom',
-    setupFiles: './src/test/setup.js',
+    setupFiles: ['./src/setup.js'],
     include: ['src/**/*.{test,spec}.{js,jsx,ts,tsx}'],
     exclude: ['**/node_modules/**', '**/dist/**', '**/.git/**'],
+    server: {
+      deps: {
+        inline: [/@googlemaps\/js-api-loader/]
+      }
+    }
   },
   optimizeDeps: {
-    // Transitioning from esbuildOptions to rolldownOptions as suggested by Vite 5.4+ 
-    // This addresses the deprecation warning regarding the internal babel plugin's 
-    // configuration mapping.
-    rolldownOptions: {},
+    include: ['@googlemaps/js-api-loader'],
+    esbuildOptions: {}
   },
   build: {
     chunkSizeWarningLimit: 800,
@@ -30,6 +33,9 @@ export default defineConfig({
             }
             if (id.includes('@supabase')) {
               return 'vendor-supabase';
+            }
+            if (id.includes('@googlemaps')) {
+              return 'vendor-googlemaps';
             }
             return 'vendor';
           }

@@ -1,8 +1,8 @@
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import * as matchers from '@testing-library/jest-dom/matchers';
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { BrowserRouter } from 'react-router-dom';
-import CheckOutPage from '../pages/CheckOutPage';
+import { MemoryRouter } from 'react-router-dom';
+import CheckOutPage from './CheckOutPage';
 import { useIncident } from '../context/IncidentContext';
 import { supabase } from '../lib/supabase';
 
@@ -19,9 +19,14 @@ vi.mock('../context/IncidentContext', () => ({
 }));
 
 vi.mock('../lib/supabase', () => ({
-  supabase: {
-    from: vi.fn(),
-  },
+  supabase: { 
+    from: vi.fn(() => ({
+      update: vi.fn().mockReturnThis(),
+      delete: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockResolvedValue({ error: null }),
+    })),
+    auth: { signOut: vi.fn().mockResolvedValue({ error: null }) },
+  }, 
 }));
 
 describe('CheckOutPage', () => {
@@ -45,9 +50,9 @@ describe('CheckOutPage', () => {
     } as any);
 
     render(
-      <BrowserRouter>
+      <MemoryRouter>
         <CheckOutPage />
-      </BrowserRouter>
+      </MemoryRouter>
     );
 
     expect(screen.getByText(/No Active Session/i)).toBeInTheDocument();
@@ -71,9 +76,9 @@ describe('CheckOutPage', () => {
     (supabase.from as any).mockReturnValue(mockQueryChain);
 
     render(
-      <BrowserRouter>
+      <MemoryRouter>
         <CheckOutPage />
-      </BrowserRouter>
+      </MemoryRouter>
     );
 
     fireEvent.click(screen.getByText(/Confirm Check-Out/i));
@@ -84,7 +89,7 @@ describe('CheckOutPage', () => {
     });
   });
 
-  it('calls delete and logout when confirmation is clicked', async () => {
+  it('calls update status and logout when confirmation is clicked', async () => {
     vi.mocked(useIncident).mockReturnValue({
       isActive: true,
       responderId: 'res-123',
@@ -101,9 +106,9 @@ describe('CheckOutPage', () => {
     (supabase.from as any).mockReturnValue(mockQueryChain);
 
     render(
-      <BrowserRouter>
+      <MemoryRouter>
         <CheckOutPage />
-      </BrowserRouter>
+      </MemoryRouter>
     );
 
     fireEvent.click(screen.getByText(/Confirm Check-Out/i));
@@ -116,7 +121,7 @@ describe('CheckOutPage', () => {
     });
   });
 
-  it('clears leadership status before deleting responder record', async () => {
+  it('clears leadership status before updating responder record', async () => {
     vi.mocked(useIncident).mockReturnValue({
       isActive: true,
       responderId: 'leader-123',
@@ -132,13 +137,16 @@ describe('CheckOutPage', () => {
     };
     (supabase.from as any).mockReturnValue(mockQueryChain);
 
-    render(<BrowserRouter><CheckOutPage /></BrowserRouter>);
+    render(<MemoryRouter><CheckOutPage /></MemoryRouter>);
     fireEvent.click(screen.getByText(/Confirm Check-Out/i));
 
     await waitFor(() => {
       expect(mockQueryChain.update).toHaveBeenCalledWith({ leader_responder_id: null });
       expect(mockQueryChain.eq).toHaveBeenCalledWith('leader_responder_id', 'leader-123');
-      expect(mockQueryChain.delete).toHaveBeenCalled();
+      expect(mockQueryChain.update).toHaveBeenCalledWith(expect.objectContaining({ 
+        status: 'CheckedOut',
+        checkout_datetime: expect.any(String)
+      }));
     });
   });
 });

@@ -36,8 +36,16 @@ interface ResponderCheckinProps {
   loadingIncidents?: boolean;
   incidentError?: string | null;
   onIncidentSelected?: (incidentId: string) => void;
-  onCreateIncident?: () => void;
+  onCreateIncident?: (formData: any) => void;
+  isAdmin?: boolean; // Add isAdmin prop
   selectedIncidentId?: string;
+  initialData?: {
+    name: string;
+    agency: string;
+    identifier: string;
+    cell_phone: string;
+    special_skills: string;
+  };
 }
 
 const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
@@ -50,10 +58,12 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
   incidentError = null,
   onIncidentSelected,
   onCreateIncident,
+  isAdmin = false, // Default to false
   selectedIncidentId = '',
+  initialData,
 }) => {
   // Form state
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState(initialData || {
     name: '',
     agency: '',
     identifier: '',
@@ -133,6 +143,10 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
    * Validate form data
    */
   const validateForm = (data = formData): boolean => {
+    if (incidents.length > 0 && !selectedIncidentId) {
+      setInternalError('Please select an active incident');
+      return false;
+    }
     if (!data.name?.trim()) {
       setInternalError('Name is required');
       return false;
@@ -240,8 +254,12 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
     setInternalError(null);
 
     try {
+      if (!selectedIncidentId) {
+        throw new Error('No incident selected. Please go back and select an incident.');
+      }
+
       // Call the onCheckIn callback
-      if (onCheckIn && selectedIncidentId) { // Pass selectedIncidentId
+      if (onCheckIn) {
         await onCheckIn(confirmedResponder);
       }
 
@@ -416,44 +434,43 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
             </div>
 
             {/* Incident Selection Dropdown */}
-            {incidents.length > 0 && (
-              <div className="form-group">
-                <label htmlFor="incident">Select Active Incident *</label>
-                <select
-                  id="incident"
-                  value={selectedIncidentId}
-                  onChange={(e) => {
+            <div className="form-group">
+              <label htmlFor="incident">Select Active Incident *</label>
+              <select
+                id="incident"
+                value={selectedIncidentId}
+                onChange={(e) => {
+                  if (e.target.value === 'CREATE_NEW') {
+                    onCreateIncident?.(formData);
+                  } else {
                     onIncidentSelected?.(e.target.value);
-                  }}
-                  disabled={loadingIncidents || displayLoading}
-                  required
-                >
-                  <option value="">— Select an Incident —</option>
-                  {incidents.map((inc) => (
-                    <option key={inc.incident_id} value={inc.incident_id}>
-                      {inc.name} ({inc.number})
-                    </option>
-                  ))}
-                </select>
-                {incidentError && <small className="form-hint error-text">{incidentError}</small>}
-              </div>
-            )}
+                  }
+                }}
+                disabled={loadingIncidents || displayLoading}
+                required
+              >
+                <option value="">— Select an Incident —</option>
+                {incidents.map((inc) => (
+                  <option key={inc.incident_id} value={inc.incident_id}>
+                    {inc.name} ({inc.number})
+                  </option>
+                ))}
+                {(incidents.length === 0 || isAdmin || !confirmedResponder) && (
+                  <option value="CREATE_NEW">+ Create New Incident</option>
+                )}
+              </select>
+              {incidentError && <small className="form-hint error-text">{incidentError}</small>}
+            </div>
 
             <div className="login-actions" style={{ marginTop: '24px' }}>
               <button
                 type="submit"
                 className="btn btn-primary btn-large"
-                disabled={displayLoading || (incidents.length > 0 && !selectedIncidentId)}
+                disabled={displayLoading || !selectedIncidentId}
                 aria-busy={displayLoading}
                 style={{ width: '100%', marginBottom: '12px' }}
               >
                 {displayLoading ? 'Processing...' : 'Continue to Confirmation'}
-              </button>
-
-              {incidents.length > 0 && <div className="divider" style={{ textAlign: 'center', margin: '12px 0', color: '#64748b', fontSize: '12px', textTransform: 'uppercase' }}>or</div>}
-
-              <button type="button" className="btn btn-secondary" onClick={onCreateIncident}>
-                Create New Incident
               </button>
             </div>
           </form>
@@ -474,7 +491,7 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
               <div className="detail-item">
                 <span className="detail-label">Incident:</span>
                 <span className="detail-value">
-                  {incidents.find(i => i.incident_id === selectedIncidentId)?.name || 'None Selected'}
+                  {incidents.find(i => i.incident_id === (displayResponder as any).incident_id)?.name || 'None Selected'}
                 </span>
               </div>
 

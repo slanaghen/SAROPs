@@ -673,7 +673,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
               onEditTeam={(id) => openEditTeamForm(teamById[id])} onReleaseTeam={handleReleaseTeam}
               openNewTeamForm={openNewTeamForm}
               openNewAssignmentForm={openNewAssignmentForm}
-              onEditAssignment={(id) => openEditAssignmentForm(assignmentById[id])} onReleaseTeam={handleReleaseTeam}
+              onEditAssignment={(id) => openEditAssignmentForm(assignmentById[id])}
               onNewTeam={(asnId) => { setPendingAssignmentId(asnId); setTeamForm({ op_period_id: operationalPeriodId, status: 'Assigned', type: 'Ground Search' }); setShowTeamForm(true); }}
               onNewAssignment={(teamId) => { setPendingTeamId(teamId); setAssignmentForm({ op_period_id: operationalPeriodId, status: 'Assigned', division: 'A' }); setShowAssignmentForm(true); }}
               onDeleteAssignment={handleDeleteAssignment} onAssignResource={(row) => { setAssigningRow(row); setSelectedAssignTarget(''); }}
@@ -690,7 +690,11 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
           )}
 
           {(layoutMode === 'map' || layoutMode === 'split') && (
-            <div className="map-panel" style={layoutMode === 'split' ? { flex: 1, minWidth: 0 } : {}}>
+            <div className="map-panel" style={layoutMode === 'split' ? { 
+              flex: 1, 
+              minWidth: 0, 
+              aspectRatio: '1 / 1' 
+            } : { aspectRatio: '1 / 1' }}>
               <OperationsMap loading={loading} assignments={assignments} teams={teams} sartopoId={sartopoId} layoutMode={layoutMode} />
             </div>
           )}

@@ -1,7 +1,7 @@
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import * as matchers from '@testing-library/jest-dom/matchers';
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
-import ActionLogPage from '../pages/ActionLogPage';
+import ActionLogPage from './ActionLogPage';
 import { useIncident } from '../context/IncidentContext';
 import { supabase } from '../lib/supabase';
 

@@ -22,6 +22,7 @@ describe('AssignmentFormModal', () => {
       tac_channel: 'TAC 1',
       description_narrative: 'Test narrative',
       status: 'Planned',
+      poa: 50,
       pod: 0,
       debrief_narrative: ''
     }

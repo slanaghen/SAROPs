@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { Incident, Responder, Team, ResponderStatus } from '../types/sarops-types';
 import ResponderCheckin from '../components/ResponderCheckin';
@@ -19,12 +19,14 @@ interface ResponderCheckinPageProps {
   onResponderCheckedIn?: (responder: Responder) => void;
 }
 
+// Add useLocation hook
 const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
   incidentId,
   operationalPeriodId,
   onResponderCheckedIn,
 }) => {
   const navigate = useNavigate();
+  const location = useLocation(); // Use useLocation to access state
   const { 
     incidentId: contextIncidentId, 
     incidentData, 
@@ -36,6 +38,7 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
     setResponderName, // This is already set in the context
     setAccessLevel,
     setResponderStatus,
+    isAdmin, // Get isAdmin from context
     isActive 
   } = useIncident();
   const {
@@ -46,6 +49,32 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
     checkIn,
   } = useResponderCheckin(supabase);
 
+  // Ensure an anonymous session exists before fetching data or allowing navigation
+  const [isAuthenticating, setIsAuthenticating] = useState(true);
+
+  useEffect(() => {
+    const initSession = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          console.debug('No active session. Establishing temporary anonymous access...');
+          const { error: authError } = await supabase.auth.signInAnonymously();
+          if (authError) throw authError;
+        }
+      } catch (err) {
+        console.error('Initial authentication failed:', err);
+      } finally {
+        setIsAuthenticating(false);
+      }
+    };
+
+    initSession();
+    
+    // Listen for auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {});
+    return () => subscription.unsubscribe();
+  }, []);
+
   const [showTeamSelection, setShowTeamSelection] = useState(false);
   const [teams, setTeams] = useState<Team[]>([]);
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
@@ -55,15 +84,21 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
 
   // Guard: If the user navigates here but is already checked in, send them back
   useEffect(() => {
-    // Only guard against accidental navigation if we have a confirmed responder in context
-    if (isActive && responderName && responderStatus !== 'CheckedOut' && !checkInInProgress && !showTeamSelection && !loading) {
+    const isStaff = accessLevel === 'command staff' || accessLevel === 'admin';
+    const shouldRedirect = location.pathname === '/checkin' && isActive && responderName && responderStatus !== 'CheckedOut';
+
+    if (isActive) {
+      console.debug('Guard Check:', { pathname: location.pathname, isActive, isStaff, responderName, shouldRedirect });
+    }
+
+    if (shouldRedirect && !checkInInProgress && !showTeamSelection && !loading) {
       const isStaff = accessLevel === 'command staff' || (incidentData && incidentData.name && accessLevel === 'admin');
       const target = isStaff ? '/operations' : '/responder-dashboard';
       
       console.info(`Active session detected, redirecting to ${target}`);
       navigate(target);
     }
-  }, [isActive, responderName, responderStatus, checkInInProgress, showTeamSelection, loading, navigate, incidentData, accessLevel]);
+   }, [isActive, responderName, responderStatus, checkInInProgress, showTeamSelection, loading, navigate, incidentData, accessLevel, location.pathname]);
 
   // Incident selection state (moved from LoginPage)
   const [incidents, setIncidents] = useState<Incident[]>([]);
@@ -72,7 +107,13 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
   const [incidentError, setIncidentError] = useState<string | null>(null);
 
   const effectiveIncidentId = incidentId || contextIncidentId;
+  // Incident IDs are now TEXT (incident numbers), not UUIDs
+  // This regex is still needed for op_period_id which is UUID
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  // const isValidOpId = (id: string | undefined) => {
+  //   return id && id.length > 0; // Simple check for non-empty string
+  // };
+  // const effectiveOpId = (operationalPeriodId && uuidRegex.test(operationalPeriodId)) 
   const effectiveOpId = (operationalPeriodId && uuidRegex.test(operationalPeriodId)) 
     ? operationalPeriodId 
     : incidentData?.opPeriodId;
@@ -80,6 +121,8 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
   // Fetch active incidents for the dropdown (moved from LoginPage)
   useEffect(() => {
     const fetchActiveIncidents = async () => {
+      if (isAuthenticating) return; // Wait for initial auth session
+
       setLoadingIncidents(true);
       try {
         const { data, error: fetchError } = await supabase
@@ -99,7 +142,15 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
         if (fetchError) throw fetchError;
         setIncidents(data || []);
         if (data && data.length > 0) {
-          setSelectedIncidentId(data[0].incident_id); // Auto-select first incident
+          // Prioritize incident from navigation state, then context, then first active
+          const incidentFromState = location.state?.newIncidentId;
+          if (incidentFromState && data.some(inc => inc.incident_id === incidentFromState)) {
+            setSelectedIncidentId(incidentFromState);
+          } else if (contextIncidentId && data.some(inc => inc.incident_id === contextIncidentId)) {
+            setSelectedIncidentId(contextIncidentId);
+          } else {
+            setSelectedIncidentId(data[0].incident_id); // Auto-select first incident
+          }
         } else if (data && data.length === 0) {
           // Log that we are in initial setup mode, but don't force redirect
           console.info('No active incidents found. System is in initial setup mode.');
@@ -112,7 +163,7 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
     };
 
     fetchActiveIncidents();
-  }, [isActive, navigate]);
+  }, [isActive, navigate, location.state?.newIncidentId, contextIncidentId, isAuthenticating]);
 
   /**
    * Handles navigation after check-in or team assignment is complete
@@ -148,7 +199,7 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
     setSelectedIncidentId(id);
   };
 
-  const handleCreateIncident = () => navigate('/incident-edit');
+  const handleCreateIncident = (formData: any) => navigate('/incident', { state: { responderData: formData } });
 
   /**
    * Handle responder check-in
@@ -166,27 +217,71 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
       const targetOpNumber = latestOp?.op_number || '1';
       const targetOpId = latestOp?.op_period_id;
 
-      await checkIn(responder);
+      // Session should already exist from the initial mount
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user?.id) throw new Error('Authentication required to complete check-in.');
+      const auth_uid = session.user.id;
+
+      // Pass the auth_uid to the checkIn function
+      await checkIn({ ...responder, auth_uid });
 
       // Fetch the latest responder record to catch trigger-updated access_level
       const { data: updatedResp } = await supabase
         .from('responders')
         .select('*')
         .eq('responder_id', responder.responder_id)
-        .single();
+        .maybeSingle();
 
-      const finalResponder = updatedResp || responder;
+      let finalResponder = updatedResp || responder;
 
       // Set responder email and incident in context after successful check-in
       if (setResponderId) setResponderId(finalResponder.responder_id);
       setResponderName(finalResponder.name);
       setResponderStatus(finalResponder.status);
-      
+
       if (targetIncidentId && targetIncidentName) {
         console.log('✅ Setting active incident context:', { name: targetIncidentName, op: targetOpNumber });
         startIncident(targetIncidentId, targetIncidentName, targetOpNumber, targetOpId || '');
       } else {
         console.warn('⚠️ Could not set active incident context: missing ID or Name', { targetIncidentId, targetIncidentName });
+      }
+
+      // Check if this is the first responder for this incident and assign to Staff team
+      if (targetIncidentId && targetOpId) {
+        const { data: staffTeam, error: staffTeamError } = await supabase
+          .from('teams')
+          .select('team_id, leader_responder_id')
+          .eq('op_period_id', targetOpId)
+          .eq('type', 'Staff')
+          .maybeSingle();
+
+        if (staffTeam && !staffTeam.leader_responder_id) {
+          console.log('First responder detected. Auto-assigning to Staff team as leader.');
+          
+          // 1. Assign responder to Staff team
+          await supabase.from('team_responders').insert({
+            team_id: staffTeam.team_id,
+            responder_id: finalResponder.responder_id,
+            role: 'Incident Commander'
+          });
+
+          // 2. Set responder as leader of the Staff team
+          await supabase.from('teams')
+            .update({ leader_responder_id: finalResponder.responder_id })
+            .eq('team_id', staffTeam.team_id);
+
+          // 3. Re-fetch responder to get updated access_level from trigger
+          const { data: reFetchedResp } = await supabase
+            .from('responders')
+            .select('*')
+            .eq('responder_id', finalResponder.responder_id)
+            .maybeSingle();
+          
+          finalResponder = reFetchedResp || finalResponder;
+          await completeCheckInFlow(finalResponder);
+          setCheckInInProgress(false);
+          return;
+        }
       }
 
       // If operational period provided, show team assignment or staff confirmation
@@ -280,7 +375,7 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
         .from('responders')
         .select('*')
         .eq('responder_id', checkedInResponder.responder_id)
-        .single();
+        .maybeSingle();
 
       const finalResponder = updatedResp || { ...checkedInResponder, status: 'Attached' as ResponderStatus };
 
@@ -405,6 +500,13 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
   return (
     <div className="responder-checkin" style={{ display: 'flex', justifyContent: 'center', padding: '48px 24px' }}>
       <div className="checkin-container" style={{ width: '100%', maxWidth: '480px', textAlign: 'center' }}>
+        {isAuthenticating ? (
+          <div className="checkin-transition">
+            <div className="loading-spinner" style={{ fontSize: '40px', marginBottom: '20px' }}>⏳</div>
+            <h2 style={{ fontSize: '24px', fontWeight: 700, marginBottom: '8px' }}>Initializing Session</h2>
+            <p style={{ color: '#64748b' }}>Establishing secure temporary access...</p>
+          </div>
+        ) : (
         <ResponderCheckin
           onCheckIn={handleCheckIn}
           isLoading={loading}
@@ -414,8 +516,11 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
           incidentError={incidentError}
           onIncidentSelected={handleIncidentSelected}
           onCreateIncident={handleCreateIncident}
+          isAdmin={isAdmin} // Pass isAdmin to ResponderCheckin
           selectedIncidentId={selectedIncidentId}
+          initialData={location.state?.responderData}
         />
+        )}
       </div>
     </div>
   );

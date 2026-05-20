@@ -114,4 +114,32 @@ describe('TeamFormModal', () => {
     fireEvent.click(screen.getByText('Cancel'));
     expect(defaultProps.onClose).toHaveBeenCalled();
   });
+
+  it('enforces unique staff positions: moving IC role clears it from previous holder', () => {
+    const staffProps = {
+      ...defaultProps,
+      initialData: { 
+        ...defaultProps.initialData, 
+        type: 'Staff', 
+        leader_responder_id: 'r1',
+        responder_roles: { 'r1': 'Incident Commander' }
+      }
+    };
+    render(<TeamFormModal {...staffProps} />);
+
+    // Find Responder 2 chip and the IC drop zone (Row 1)
+    const r2Chip = screen.getByText('Responder 2').closest('[draggable="true"]');
+    const icRow = screen.getByText('Incident Commander').closest('tr');
+
+    const dataTransfer = { setData: vi.fn(), getData: vi.fn().mockReturnValue('r2') };
+    fireEvent.dragStart(r2Chip, { dataTransfer });
+    fireEvent.drop(icRow, { dataTransfer });
+
+    // Responder 2 should now be the IC
+    const table = screen.getByRole('table');
+    const rows = within(table).getAllByRole('row');
+    expect(within(rows[1]).getByText('Responder 2')).toBeInTheDocument();
+    // Responder 1 is no longer IC (it would move to custom members or clear)
+    expect(within(rows[1]).queryByText('Responder 1')).not.toBeInTheDocument();
+  });
 });

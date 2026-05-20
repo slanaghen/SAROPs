@@ -2,7 +2,7 @@ import { render, screen, fireEvent, cleanup, waitFor, act } from '@testing-libra
 import * as matchers from '@testing-library/jest-dom/matchers';
 import { vi, describe, it, expect, afterEach, beforeEach } from 'vitest';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
-import IncidentEditPage from '../pages/IncidentEditPage';
+import IncidentEditPage from './IncidentEditPage';
 import { useIncident } from '../context/IncidentContext';
 
 expect.extend(matchers);
@@ -16,13 +16,22 @@ const mockFrom = vi.fn();
 vi.mock('../lib/supabase', () => ({
   supabase: {
     from: (table) => mockFrom(table),
+    auth: {
+      getSession: vi.fn().mockResolvedValue({ data: { session: { user: { id: 'test-user' } } } }),
+    },
   },
 }));
 
-const createMockChain = (resolvedValue = { error: null }) => ({
+const createMockChain = (resolvedValue = { error: null, data: null }) => ({
   insert: vi.fn().mockResolvedValue(resolvedValue),
-  update: vi.fn().mockReturnThis(),
-  eq: vi.fn().mockResolvedValue(resolvedValue),
+  update: vi.fn().mockResolvedValue(resolvedValue),
+  eq: vi.fn().mockReturnThis(),
+  select: vi.fn().mockReturnThis(),
+  order: vi.fn().mockReturnThis(),
+  maybeSingle: vi.fn().mockResolvedValue(resolvedValue),
+  single: vi.fn().mockResolvedValue(resolvedValue),
+  in: vi.fn().mockResolvedValue(resolvedValue),
+  is: vi.fn().mockResolvedValue(resolvedValue),
 });
 
 afterEach(cleanup);
@@ -39,7 +48,7 @@ describe('IncidentEditPage', () => {
     });
   });
 
-  it('renders the form with default values', () => {
+  it('renders the form with default values', async () => {
     const router = createMemoryRouter([
       {
         path: "/",
@@ -47,10 +56,10 @@ describe('IncidentEditPage', () => {
       },
     ]);
     render(<RouterProvider router={router} />);
-    expect(screen.getByDisplayValue('Missing Person Search')).toBeInTheDocument();
+    expect(await screen.findByDisplayValue('Missing Person Search')).toBeInTheDocument();
   });
 
-  it('updates form fields on change', () => {
+  it('updates form fields on change', async () => {
     const router = createMemoryRouter([
       {
         path: "/",
@@ -58,13 +67,13 @@ describe('IncidentEditPage', () => {
       },
     ]);
     render(<RouterProvider router={router} />);
-    const nameInput = screen.getByLabelText(/Incident Name/i);
+    const nameInput = await screen.findByLabelText(/Incident Name/i);
     
     fireEvent.change(nameInput, { target: { value: 'Wildfire Response' } });
     expect(nameInput.value).toBe('Wildfire Response');
   });
 
-  it('displays the End Incident button only when an incident is active', () => {
+  it('displays the End Incident button only when an incident is active', async () => {
     // Mocking active state specifically for this test
     vi.mocked(useIncident).mockReturnValue({ 
       isActive: true, 
@@ -81,21 +90,24 @@ describe('IncidentEditPage', () => {
       },
     ]);
     render(<RouterProvider router={router} />);
-    expect(screen.getByText(/End Incident/i)).toBeInTheDocument();
+    expect(await screen.findByText(/End Incident/i)).toBeInTheDocument();
   });
 
   it('persists new incident and operational period to database on create', async () => {
     const chain = createMockChain();
     mockFrom.mockReturnValue(chain);
 
-    const router = createMemoryRouter([
-      {
-        path: "/",
-        element: <IncidentEditPage />,
-      },
-    ]);
-    render(<RouterProvider router={router} />);
-    fireEvent.submit(screen.getByRole('button', { name: /Start Incident Tracking/i }));
+    let router;
+    await act(async () => {
+      router = createMemoryRouter([
+        {
+          path: "/",
+          element: <IncidentEditPage />,
+        },
+      ]);
+      render(<RouterProvider router={router} />);
+    });
+    fireEvent.submit(await screen.findByRole('button', { name: /Start Incident Tracking/i }));
 
     await waitFor(() => {
       expect(mockFrom).toHaveBeenCalledWith('incidents');
@@ -125,10 +137,10 @@ describe('IncidentEditPage', () => {
     ]);
     render(<RouterProvider router={router} />);
     
-    const nameInput = screen.getByLabelText(/Incident Name/i);
+    const nameInput = await screen.findByLabelText(/Incident Name/i);
     fireEvent.change(nameInput, { target: { value: 'Updated Mission Name' } });
     
-    fireEvent.submit(screen.getByRole('button', { name: /Update Incident Information/i }));
+    fireEvent.submit(await screen.findByRole('button', { name: /Update Incident Information/i }));
 
     await waitFor(() => {
       expect(mockFrom).toHaveBeenCalledWith('incidents');
@@ -148,24 +160,39 @@ describe('IncidentEditPage', () => {
       incidentId: 'inc-123',
       incidentData: { opPeriodId: 'op-123' },
       endIncident: vi.fn(),
+      logout: vi.fn(), // Add logout mock as it's called by endIncident
     });
 
     // Mock active assignments and responders response
+    const mockTableChains = {};
     mockFrom.mockImplementation((table) => {
-      if (table === 'assignments') return { ...chain, select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), in: vi.fn().mockResolvedValue({ data: [{ status: 'Deployed' }] }) };
-      if (table === 'responders') return { ...chain, select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), is: vi.fn().mockResolvedValue({ data: [{ id: 'r1' }] }) };
-      return chain;
+      if (!mockTableChains[table]) {
+        mockTableChains[table] = createMockChain();
+      }
+      // Configure specific behavior for each table's chain
+      if (table === 'assignments') {
+        mockTableChains[table].in.mockResolvedValue({ data: [{ status: 'Deployed' }] }); // Mock active assignments
+      } else if (table === 'responders') {
+        mockTableChains[table].is.mockResolvedValue({ data: [{ id: 'r1' }] }); // Mock active responders
+      }
+      return mockTableChains[table];
     });
 
     const router = createMemoryRouter([{ path: "/", element: <IncidentEditPage /> }]);
-    render(<RouterProvider router={router} />);
+    await act(async () => {
+      render(<RouterProvider router={router} />);
+    });
 
-    fireEvent.click(screen.getByText(/End Incident/i));
+    fireEvent.click(await screen.findByText(/End Incident/i));
 
     await waitFor(() => {
       expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('1 active assignments and 1 responders'));
       expect(mockFrom).toHaveBeenCalledWith('teams'); // Disband teams step
-      expect(chain.update).toHaveBeenCalledWith(expect.objectContaining({ status: 'Disbanded' }));
+      expect(mockTableChains.teams.update).toHaveBeenCalledWith(expect.objectContaining({ status: 'Disbanded' }));
+      expect(mockTableChains.assignments.update).toHaveBeenCalledTimes(2); // Two updates for assignments (Deployed -> Incomplete, Assigned -> Planned)
+      expect(mockTableChains.responders.update).toHaveBeenCalledWith(expect.objectContaining({ status: 'Staged' }));
+      expect(mockTableChains.operational_periods.update).toHaveBeenCalledWith(expect.objectContaining({ end_datetime: expect.any(String) }));
+      expect(mockTableChains.incidents.update).toHaveBeenCalledWith(expect.objectContaining({ end_datetime: expect.any(String) }));
     });
   });
 
@@ -185,18 +212,64 @@ describe('IncidentEditPage', () => {
     render(<RouterProvider router={router} />);
     
     // Make the form dirty
-    const nameInput = screen.getByLabelText(/Incident Name/i);
+    const nameInput = await screen.findByLabelText(/Incident Name/i);
     fireEvent.change(nameInput, { target: { value: 'Dirty Change' } });
     
     // Try to navigate away
     act(() => { router.navigate('/admin'); });
 
     // Verify blocker modal is visible
-    expect(screen.getByText(/Unsaved Changes/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Unsaved Changes/i)).toBeInTheDocument();
     
     // Test "Stay" button
-    fireEvent.click(screen.getByText('Stay'));
+    fireEvent.click(await screen.findByText('Stay'));
     expect(screen.queryByText(/Unsaved Changes/i)).not.toBeInTheDocument();
     expect(router.state.location.pathname).toBe('/');
+  });
+
+  it('auto check-in the creator when creating a new incident with responder data', async () => {
+    const chain = createMockChain();
+    mockFrom.mockReturnValue(chain);
+    
+    const mockStartIncident = vi.fn();
+    vi.mocked(useIncident).mockReturnValue({
+      isActive: false,
+      incidentId: null,
+      incidentData: { name: '', opNumber: '', opPeriodId: '' },
+      startIncident: mockStartIncident,
+      endIncident: vi.fn(),
+      setResponderId: vi.fn(),
+      setResponderName: vi.fn(),
+      setAccessLevel: vi.fn(),
+      setResponderStatus: vi.fn(),
+    });
+
+    const responderData = { name: 'Creator Steve', agency: 'SAR', identifier: 'IC-1', cell_phone: '555' };
+    const router = createMemoryRouter([
+      {
+        path: "/",
+        element: <IncidentEditPage />,
+      },
+      {
+        path: "/operations",
+        element: <div>Operations Dashboard</div>,
+      },
+    ], {
+      initialEntries: [{ pathname: '/', state: { responderData } }]
+    });
+
+    await act(async () => {
+      render(<RouterProvider router={router} />);
+    });
+
+    const submitBtn = await screen.findByRole('button', { name: /Start Incident Tracking/i });
+    await act(async () => {
+      fireEvent.submit(submitBtn);
+    });
+    await waitFor(() => {
+      expect(mockFrom).toHaveBeenCalledWith('responders');
+      expect(chain.insert).toHaveBeenCalledWith(expect.objectContaining({ name: 'Creator Steve' }));
+      expect(mockStartIncident).toHaveBeenCalled();
+    });
   });
 });

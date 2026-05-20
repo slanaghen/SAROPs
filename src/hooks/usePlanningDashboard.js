@@ -368,7 +368,7 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
         .from('teams')
         .insert(payload)
         .select()
-        .single();
+        .maybeSingle();
 
       if (error) throw error;
       if (!data) throw new Error('No team data returned from server');
@@ -446,7 +446,7 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
         .from('assignments')
         .insert(payload)
         .select()
-        .single();
+        .maybeSingle();
 
       if (error) throw error;
       if (!data) throw new Error('No assignment data returned from server');
@@ -493,7 +493,7 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
         .update(payload)
         .eq('assignment_id', assignmentId)
         .select()
-        .single();
+        .maybeSingle();
 
       if (error) throw error;
 

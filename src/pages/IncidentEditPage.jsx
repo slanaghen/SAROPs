@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useNavigate, useBlocker } from 'react-router-dom';
+import { useNavigate, useBlocker, useLocation } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { supabase } from '../lib/supabase';
 import { useIncident } from '../context/IncidentContext';
@@ -47,6 +47,7 @@ const defaultOperationalPeriod = {
 
 const IncidentEditPage = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [isSaving, setIsSaving] = useState(false);
   const [incident, setIncident] = useState(defaultIncident);
   const [initialIncident, setInitialIncident] = useState(defaultIncident);
@@ -54,7 +55,51 @@ const IncidentEditPage = () => {
   const [operationalPeriod, setOperationalPeriod] = useState(defaultOperationalPeriod);
   const [initialOpPeriod, setInitialOpPeriod] = useState(defaultOperationalPeriod);
 
-  const { isActive, incidentId: contextIncidentId, incidentData, startIncident, endIncident } = useIncident();
+  // Anonymous session initialization (required for RLS)
+  const [isAuthenticating, setIsAuthenticating] = useState(true);
+  useEffect(() => {
+    const initSession = async () => {
+      try {
+        console.log('[IncidentEdit] Component mounted. Initializing session...');
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          // Check if we are already in the process of signing in to prevent loops
+          if (localStorage.getItem('sar_auth_pending') === 'true') return;
+          localStorage.setItem('sar_auth_pending', 'true');
+
+          console.info('[IncidentEdit] Establishing anonymous session for incident creation...');
+          const { error: authError } = await supabase.auth.signInAnonymously();
+          if (authError) throw authError;
+          console.info('[IncidentEdit] Anonymous session established.');
+        } else {
+          console.debug('[IncidentEdit] Active session found:', session.user.id);
+        }
+      } catch (err) {
+        console.error('[IncidentEdit] Auth initialization failed:', err);
+      } finally {
+        setIsAuthenticating(false);
+        localStorage.removeItem('sar_auth_pending');
+      }
+    };
+    initSession();
+
+    return () => {
+      console.log('[IncidentEdit] Component unmounting.');
+    };
+  }, []);
+
+  const { 
+    isActive, 
+    incidentId: contextIncidentId, 
+    incidentData, 
+    startIncident, 
+    endIncident,
+    setResponderId,
+    setResponderName,
+    setAccessLevel,
+    setResponderStatus
+  } = useIncident();
+
   const [isLocalSaved, setIsLocalSaved] = useState(false);
 
   // Load existing data if an incident is already active
@@ -144,6 +189,7 @@ const IncidentEditPage = () => {
     }
 
     try {
+      console.log('[IncidentEdit] Beginning database save operations...');
       const opPeriodId = uuidv4();
       const parsedPar = parseInt(operationalPeriod.par_check_interval, 10);
       const finalParInterval = isNaN(parsedPar) ? 60 : parsedPar;
@@ -161,6 +207,7 @@ const IncidentEditPage = () => {
             notes: incident.notes
           })
           .eq('incident_id', contextIncidentId);
+        console.debug('[IncidentEdit] Update incident response:', { error: incError });
 
         if (incError) throw incError;
 
@@ -175,6 +222,7 @@ const IncidentEditPage = () => {
             par_check_interval: finalParInterval
           })
           .eq('op_period_id', incidentData?.opPeriodId);
+        console.debug('[IncidentEdit] Update op_period response:', { error: opError });
 
         if (opError) throw opError;
 
@@ -191,6 +239,7 @@ const IncidentEditPage = () => {
             start_datetime: incident.start_datetime,
             notes: incident.notes
           });
+        console.debug('[IncidentEdit] Insert incident response:', { error: incError });
 
         if (incError) throw incError;
 
@@ -206,21 +255,9 @@ const IncidentEditPage = () => {
             situational_awareness_narrative: operationalPeriod.situational_awareness_narrative,
             par_check_interval: finalParInterval
           });
+        console.debug('[IncidentEdit] Insert op_period response:', { error: opError });
 
         if (opError) throw opError;
-
-                // 3. Create automatic Command Staff team
-        const { error: teamError } = await supabase
-          .from('teams')
-          .insert({
-            op_period_id: opPeriodId,
-            team_name_number: 'Staff',
-            sartopo_color_hex: '#0000FF',
-            type: 'Staff',
-            status: 'Staged'
-          });
-
-        if (teamError) throw teamError;
 
         // 4. Update global state with real IDs
         startIncident(newIncidentId, incident.name, operationalPeriod.op_number, opPeriodId);
@@ -229,10 +266,11 @@ const IncidentEditPage = () => {
       setInitialIncident(incident);
       setInitialOpPeriod(operationalPeriod);
       setIsLocalSaved(true);
+      console.log('[IncidentEdit] Save successful!');
       return true;
     } catch (err) {
-      const message = err.message || (err instanceof Error ? err.message : 'Unknown database error');
       console.error('Failed to save incident:', err);
+      const message = err.message || 'Unknown database error';
       alert(`Error starting incident tracking: ${message}`);
       return false;
     } finally {
@@ -242,9 +280,75 @@ const IncidentEditPage = () => {
 
   const handleSubmit = async (event) => {
     if (event) event.preventDefault();
+    const wasActive = isActive;
     const success = await saveData();
     if (success) {
-      navigate('/checkin');
+      // Auto check-in the creator if they provided details on the previous check-in page
+      const responderData = location.state?.responderData;
+      if (!wasActive && responderData) {
+        const incidentId = incident.number.trim();
+        console.log('[IncidentEdit] Performing auto check-in for creator...');
+        
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          const responderId = uuidv4();
+          
+          // 1. Create Responder record
+          const { error: respError } = await supabase.from('responders').insert({
+            responder_id: responderId,
+            incident_id: incidentId,
+            name: responderData.name,
+            agency: responderData.agency,
+            identifier: responderData.identifier,
+            cell_phone: responderData.cell_phone,
+            special_skills: responderData.special_skills,
+            auth_uid: session?.user?.id,
+            device_id: `device_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 11)}`,
+            checkin_datetime: new Date().toISOString(),
+            status: 'Assigned'
+          });
+
+          if (respError) throw respError;
+
+          // 2. Fetch the Staff team for auto-assignment (created via database trigger)
+          const { data: opPeriod } = await supabase
+            .from('operational_periods')
+            .select('op_period_id')
+            .eq('incident_id', incidentId)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .single();
+
+          if (opPeriod) {
+            const { data: staffTeam } = await supabase
+              .from('teams')
+              .select('team_id')
+              .eq('op_period_id', opPeriod.op_period_id)
+              .eq('type', 'Staff')
+              .single();
+
+            if (staffTeam) {
+              // 3. Attach as Incident Commander
+              await supabase.from('team_responders').insert({
+                team_id: staffTeam.team_id,
+                responder_id: responderId,
+                role: 'Incident Commander'
+              });
+              // 4. Update team leadership
+              await supabase.from('teams').update({ leader_responder_id: responderId }).eq('team_id', staffTeam.team_id);
+            }
+          }
+
+          // Update global context
+          if (setResponderId) setResponderId(responderId);
+          setResponderName(responderData.name);
+          setResponderStatus('Assigned');
+          if (setAccessLevel) setAccessLevel('command staff');
+        } catch (err) {
+          console.error('[IncidentEdit] Auto check-in failed:', err);
+        }
+      }
+      navigate('/operations');
     }
   };
 
@@ -334,6 +438,15 @@ const IncidentEditPage = () => {
       setIsSaving(false);
     }
   };
+
+  if (isAuthenticating) {
+    return (
+      <div className="incident-edit-page" style={{ textAlign: 'center', padding: '100px' }}>
+        <div className="loading-spinner" style={{ fontSize: '40px' }}>⏳</div>
+        <p>Initializing secure session...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="incident-edit-page">
@@ -489,8 +602,8 @@ const IncidentEditPage = () => {
         </div>
 
         <div className="form-actions">
-          <button type="submit" className="btn btn-primary" disabled={isSaving || !isDirty}>
-            {isSaving ? 'Saving...' : (isActive && isLocalSaved ? 'Update Incident Information' : 'Start Incident Tracking')}
+          <button type="submit" className="btn btn-primary" disabled={isSaving || (isActive && !isDirty)}>
+            {isSaving ? 'Saving...' : (isActive ? 'Update Incident Information' : 'Start Incident Tracking')}
           </button>
           {isActive && (
             <button

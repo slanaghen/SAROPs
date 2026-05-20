@@ -8,7 +8,6 @@ const BaseModal = ({ isOpen, onClose, title, children, actions, loading }) => {
       <div className="modal" onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <h3>{title}</h3>
-          <button className="alert-close" onClick={onClose}>✕</button>
         </div>
         <div className="modal-body">
           {children}

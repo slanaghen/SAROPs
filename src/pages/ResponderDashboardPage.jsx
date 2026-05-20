@@ -1,16 +1,10 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { setOptions, importLibrary } from '@googlemaps/js-api-loader';
+import { Loader } from '@googlemaps/js-api-loader';
 import { supabase } from '../lib/supabase'; // Assuming this is the centralized Supabase client
 import { useIncident } from '../context/IncidentContext';
 import useResponderTeamAndAssignment from '../hooks/useResponderTeamAndAssignment'; // The new hook
 import { removeResponderFromTeam } from '../services/responderService';
 import '../styles/ResponderDashboard.css'; // New CSS file for styling
-
-// Configure Google Maps API Loader options globally
-setOptions({
-  apiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || 'YOUR_GOOGLE_MAPS_API_KEY',
-  version: "weekly"
-});
 
 /**
  * ResponderDashboardPage

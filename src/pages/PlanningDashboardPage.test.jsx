@@ -12,7 +12,6 @@ vi.mock('../context/IncidentContext', () => ({
   useIncident: vi.fn(),
 }));
 
-// Mock Hook
 vi.mock('../hooks/usePlanningDashboard', () => ({
   usePlanningDashboard: vi.fn(),
 }));
@@ -53,9 +52,23 @@ describe('PlanningDashboardPage', () => {
       assignments: [],
       responders: [],
       loading: false,
-      stats: mockStats,
-      error: null,
+      stats: {
+        teams: { staged: 0, assigned: 0, deployed: 0, total: 0 },
+        assignments: { planned: 0, assigned: 0, deployed: 0, complete: 0, incomplete: 0, total: 0 },
+        responders: { staged: 0, attached: 0, assigned: 0, deployed: 0, total: 0 }
+      },
       fetchDashboardData: vi.fn(),
+      assignTeamToAssignment: vi.fn(),
+      createTeam: vi.fn(),
+      createAssignment: vi.fn(),
+      updateAssignment: vi.fn(),
+      deleteAssignment: vi.fn(),
+      updateResponder: vi.fn(),
+      checkOutResponder: vi.fn(),
+      updateTeam: vi.fn(),
+      attachResponderToTeam: vi.fn(),
+      detachResponderFromTeam: vi.fn(),
+      deleteTeam: vi.fn(),
     });
 
     render(<PlanningDashboardPage />);
@@ -87,7 +100,19 @@ describe('PlanningDashboardPage', () => {
       responders: [],
       loading: false,
       stats: mockStats,
+      error: null, // Ensure error is explicitly null
       fetchDashboardData: vi.fn(),
+      assignTeamToAssignment: vi.fn(),
+      createTeam: vi.fn(),
+      createAssignment: vi.fn(),
+      updateAssignment: vi.fn(),
+      deleteAssignment: vi.fn(),
+      updateResponder: vi.fn(),
+      checkOutResponder: vi.fn(),
+      updateTeam: vi.fn(),
+      attachResponderToTeam: vi.fn(),
+      detachResponderFromTeam: vi.fn(),
+      deleteTeam: vi.fn(),
     });
 
     render(<PlanningDashboardPage />);
@@ -108,8 +133,6 @@ describe('PlanningDashboardPage', () => {
 
     render(<PlanningDashboardPage />);
     
-    // Note: Our current logic gives '{' because 90+1 = 91 ([). 
-    // This test helps identify if we need a wrap-around logic.
     const nextName = screen.getByTestId('next-assignment-name').textContent;
     expect(nextName).toBe('AA'); 
   });

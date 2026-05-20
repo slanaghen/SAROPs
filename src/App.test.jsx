@@ -4,6 +4,7 @@ import { vi, describe, it, expect, beforeEach } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import App from './App';
 import { useIncident } from './context/IncidentContext';
+import { supabase } from './lib/supabase';
 
 expect.extend(matchers);
 
@@ -79,5 +80,22 @@ describe('App Component', () => {
     render(<MemoryRouter><App /></MemoryRouter>);
     expect(screen.getByText('Mountain Rescue')).toBeInTheDocument();
     expect(screen.getByText('Steve')).toBeInTheDocument();
+  });
+
+  it('triggers a session sync when the window regains focus', () => {
+    vi.mocked(useIncident).mockReturnValue({
+      isActive: true,
+      responderId: 'res-123',
+      setResponderStatus: vi.fn(),
+      setCurrentTeamStatus: vi.fn(),
+      setCurrentAssignmentStatus: vi.fn(),
+    });
+
+    render(<MemoryRouter><App /></MemoryRouter>);
+    
+    // Simulate window focus
+    window.dispatchEvent(new Event('focus'));
+
+    expect(supabase.from).toHaveBeenCalledWith('responders');
   });
 });
