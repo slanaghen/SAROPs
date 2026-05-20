@@ -1,5 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import BaseModal from './BaseModal';
+import { useIncident } from '../context/IncidentContext';
+
+/**
+ * Constant lists for form options
+ */
+const skillsList = [
+  "Air Scent Dog", "Trail Dog", "UAS", "Vehicle", "Snowmobile", "UTV", 
+  "Swiftwater", "Dive", "Avalanche", "Boat", "Helicopter", "Rope Rescue", 
+  "Litter", "Medical", "Other"
+];
+const ACCESS_LEVELS = ["responder", "command staff"];
+const STATUS_LIST = ["Staged", "Attached", "Assigned", "Deployed"];
+
 
 /**
  * Shared Modal for editing Responder details.
@@ -13,14 +26,11 @@ const ResponderFormModal = ({
   loading = false,
   error = null
 }) => {
+  const { setAccessLevel: setContextAccessLevel } = useIncident();
   const [formData, setFormData] = useState(initialData);
-  const [isCommandStaffChecked, setIsCommandStaffChecked] = useState(
-    initialData.access_level === 'command staff'
-  );
 
   useEffect(() => {
     setFormData(initialData);
-    setIsCommandStaffChecked(initialData.access_level === 'command staff');
   }, [initialData]);
 
   const handleInputChange = (e) => {
@@ -34,21 +44,8 @@ const ResponderFormModal = ({
         ...prev,
         [name]: processedValue,
       }));
-    } else if (name === 'is_command_staff') {
-      const checked = target.checked;
-      setIsCommandStaffChecked(checked);
-      setFormData(prev => ({
-        ...prev,
-        access_level: checked ? 'command staff' : 'responder', // Default to responder if unchecked
-      }));
-    } else if (name === 'access_level') {
-      processedValue = target.value;
-      setIsCommandStaffChecked(processedValue === 'command staff'); // Sync checkbox with select
-      setFormData(prev => ({
-        ...prev,
-        [name]: processedValue,
-      }));
-    } else {
+    }
+    else { // This else block was missing, causing the subsequent `if` to be outside the function
       const { value, type, checked } = target;
       processedValue = type === 'checkbox' ? checked : value;
       setFormData(prev => ({
@@ -56,15 +53,16 @@ const ResponderFormModal = ({
         [name]: processedValue,
       }));
     }
+
+    // This part should be after setFormData, within the function
+    if (name === 'access_level' && formData.responder_id === initialData.responder_id) {
+      setContextAccessLevel(processedValue); // Update context if editing current responder
+    }
   };
 
-  const skillsList = [
-    "Air Scent Dog", "Trail Dog", "UAS", "Vehicle", "Snowmobile", "UTV", 
-    "Swiftwater", "Dive", "Avalanche", "Boat", "Helicopter", "Rope Rescue", 
-    "Litter", "Medical", "Other"
-  ];
-
-  const statusList = ["Staged", "Attached", "Assigned", "Deployed"];
+  const handleSave = () => {
+    onSave(formData);
+  };
 
   return (
     <BaseModal
@@ -79,7 +77,7 @@ const ResponderFormModal = ({
               Check Out
             </button>
           )}
-          <button className="btn btn-primary" onClick={() => onSave(formData)} disabled={loading}>
+          <button className="btn btn-primary" onClick={handleSave} disabled={loading}>
             {loading ? 'Saving...' : 'Save Changes'}
           </button>
         </>
@@ -107,20 +105,6 @@ const ResponderFormModal = ({
         <input id="res_phone" name="cell_phone" value={formData.cell_phone || ''} onChange={handleInputChange} />
       </div>
 
-      {/* Command Staff Checkbox */}
-      <div className="form-row" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
-        <input
-          id="is_command_staff"
-          type="checkbox"
-          name="is_command_staff"
-          checked={isCommandStaffChecked}
-          onChange={handleInputChange}
-          disabled={loading}
-          style={{ width: 'auto', margin: 0 }}
-        />
-        <label htmlFor="is_command_staff" style={{ margin: 0, cursor: 'pointer', fontWeight: 600 }}>Command Staff</label>
-      </div>
-
       <div className="form-row">
         <label htmlFor="res_level">Access Level</label>
         <select
@@ -128,17 +112,18 @@ const ResponderFormModal = ({
           name="access_level"
           value={formData.access_level || 'responder'}
           onChange={handleInputChange}
-          disabled={isCommandStaffChecked || loading} // Disable if command staff is checked
+          disabled={loading}
         >
-          <option value="responder">Responder</option>
-          <option value="command staff">Command Staff</option>
+          {ACCESS_LEVELS.map(level => (
+            <option key={level} value={level}>{level.charAt(0).toUpperCase() + level.slice(1)}</option>
+          ))}
         </select>
       </div>
 
       <div className="form-row">
         <label htmlFor="res_status">Status</label>
         <select id="res_status" name="status" value={formData.status || 'Staged'} onChange={handleInputChange}>
-          {statusList.map(s => <option key={s} value={s}>{s}</option>)}
+          {STATUS_LIST.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
       </div>
 
@@ -159,5 +144,6 @@ const ResponderFormModal = ({
     </BaseModal>
   );
 };
+
 
 export default ResponderFormModal;

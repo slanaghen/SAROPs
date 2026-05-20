@@ -1,7 +1,7 @@
 import React from 'react';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
-import ResponderCheckin from './ResponderCheckin';
+import ResponderCheckin from '../components/ResponderCheckin';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 

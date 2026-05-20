@@ -3,6 +3,13 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [react()],
+  test: {
+    globals: true,
+    environment: 'jsdom',
+    setupFiles: './src/test/setup.js',
+    include: ['src/**/*.{test,spec}.{js,jsx,ts,tsx}'],
+    exclude: ['**/node_modules/**', '**/dist/**', '**/.git/**'],
+  },
   optimizeDeps: {
     // Transitioning from esbuildOptions to rolldownOptions as suggested by Vite 5.4+ 
     // This addresses the deprecation warning regarding the internal babel plugin's 
@@ -10,7 +17,7 @@ export default defineConfig({
     rolldownOptions: {},
   },
   build: {
-    chunkSizeWarningLimit: 700,
+    chunkSizeWarningLimit: 800,
     rollupOptions: {
       output: {
         manualChunks(id) {

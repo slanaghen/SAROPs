@@ -2,7 +2,7 @@ import { render, screen, fireEvent, cleanup, waitFor, act } from '@testing-libra
 import * as matchers from '@testing-library/jest-dom/matchers';
 import { vi, describe, it, expect, afterEach, beforeEach } from 'vitest';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
-import IncidentEditPage from './IncidentEditPage';
+import IncidentEditPage from '../pages/IncidentEditPage';
 import { useIncident } from '../context/IncidentContext';
 
 expect.extend(matchers);
@@ -189,7 +189,6 @@ describe('IncidentEditPage', () => {
     fireEvent.change(nameInput, { target: { value: 'Dirty Change' } });
     
     // Try to navigate away
-    act(() => { router.navigate('/checkin'); });
     act(() => { router.navigate('/admin'); });
 
     // Verify blocker modal is visible

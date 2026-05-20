@@ -1,6 +1,6 @@
 import { render, act, cleanup } from '@testing-library/react';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { IncidentProvider, useIncident } from './IncidentContext';
+import { IncidentProvider, useIncident } from '../context/IncidentContext';
 import React from 'react';
 
 const TestComponent = () => {

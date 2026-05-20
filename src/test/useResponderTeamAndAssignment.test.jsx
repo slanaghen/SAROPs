@@ -1,6 +1,6 @@
 import { renderHook, waitFor } from '@testing-library/react';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
-import useResponderTeamAndAssignment from './useResponderTeamAndAssignment';
+import useResponderTeamAndAssignment from '../hooks/useResponderTeamAndAssignment';
 
 describe('useResponderTeamAndAssignment Hook', () => {
   const mockSupabase = {

@@ -1,7 +1,7 @@
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import * as matchers from '@testing-library/jest-dom/matchers';
 import { vi, describe, it, expect, afterEach } from 'vitest';
-import AssignmentFormModal from './AssignmentFormModal';
+import AssignmentFormModal from '../components/AssignmentFormModal';
 
 expect.extend(matchers);
 

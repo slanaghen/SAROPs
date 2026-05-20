@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import '../styles/PlanningDashboard.css';
 import TeamFormModal from './TeamFormModal';
 import AssignmentFormModal from './AssignmentFormModal';
@@ -50,6 +50,8 @@ const PlanningDashboard = ({
   const [activeTeam, setActiveTeam] = useState(null);
   const [draggedItem, setDraggedItem] = useState(null); // { id, type }
   const [dropTarget, setDropTarget] = useState(null); // { id, type }
+
+  const commandStaffExists = useMemo(() => (teams || []).some(t => t.type === 'Command Staff'), [teams]);
 
   const handleDragStart = (e, id, type) => {
     setDraggedItem({ id, type });
@@ -311,19 +313,22 @@ const PlanningDashboard = ({
 
         // 2. Reconcile responder attachments
         const originalIds = formData.current_responders?.map(r => r.responder_id) || [];
+        const roles = formData.responder_roles || {};
         const toAdd = finalResponderIds.filter(id => !originalIds.includes(id));
         const toRemove = originalIds.filter(id => !finalResponderIds.includes(id));
+        const existing = finalResponderIds.filter(id => originalIds.includes(id));
 
-        if (toAdd.length > 0 || toRemove.length > 0) {
-          await Promise.all([
-            ...toAdd.map(id => attachResponderToTeam?.(id, formData.team_id)),
-            ...toRemove.map(id => detachResponderFromTeam?.(id, formData.team_id))
-          ]);
-        }
+        // Reconcile membership and update roles. 
+        // attachResponderToTeam is now safe to call for existing members thanks to the hook fix.
+        await Promise.all([
+          ...toAdd.map(id => attachResponderToTeam?.(id, formData.team_id, roles[id])),
+          ...existing.map(id => attachResponderToTeam?.(id, formData.team_id, roles[id])),
+          ...toRemove.map(id => detachResponderFromTeam?.(id, formData.team_id))
+        ]);
 
         setSuccessMessage('Team updated');
       } else if (createTeam) {
-        await createTeam({ ...formData, responder_ids: finalResponderIds });
+        await createTeam({ ...formData, responder_ids: finalResponderIds, responder_roles: formData.responder_roles });
         setSuccessMessage('Team created');
       }
       setShowTeamForm(false);
@@ -535,7 +540,9 @@ const PlanningDashboard = ({
                       {team.type}
                     </div>
                     <span style={{ fontSize: '11px', color: '#64748b' }}>Size: {getTeamMemberCount(team)}</span>
-                    <span style={{ fontSize: '11px', color: '#1e293b', fontWeight: 500 }}>Ldr: {getResponderName(team.leader_responder_id)}</span>
+                    <span style={{ fontSize: '11px', color: '#1e293b', fontWeight: 500 }}>
+                      {team.type === 'Command Staff' ? 'IC' : 'Ldr'}: {getResponderName(team.leader_responder_id)}
+                    </span>
                   </div>
 
                   {team.equipment && team.equipment.length > 0 && (
@@ -554,7 +561,7 @@ const PlanningDashboard = ({
                       onClick={(e) => { e.stopPropagation(); handleReleaseTeam(team); }}
                       style={{ color: '#dc2626' }}
                     >
-                      Release
+                      Disband
                     </button>
                   </div>
                 </div>
@@ -637,6 +644,7 @@ const PlanningDashboard = ({
           responders={responders}
           loading={loading}
           error={error}
+          commandStaffExists={commandStaffExists}
         />
       )}
 

@@ -2,7 +2,7 @@ import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/re
 import * as matchers from '@testing-library/jest-dom/matchers';
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { BrowserRouter } from 'react-router-dom';
-import CheckOutPage from './CheckOutPage';
+import CheckOutPage from '../pages/CheckOutPage';
 import { useIncident } from '../context/IncidentContext';
 import { supabase } from '../lib/supabase';
 
@@ -113,6 +113,32 @@ describe('CheckOutPage', () => {
       expect(supabase.from).toHaveBeenCalledWith('responders');
       expect(mockLogout).toHaveBeenCalled();
       expect(mockNavigate).toHaveBeenCalledWith('/checkin');
+    });
+  });
+
+  it('clears leadership status before deleting responder record', async () => {
+    vi.mocked(useIncident).mockReturnValue({
+      isActive: true,
+      responderId: 'leader-123',
+      responderName: 'Leader Steve',
+      responderStatus: 'Staged',
+      logout: mockLogout,
+    } as any);
+
+    const mockQueryChain = {
+      update: vi.fn().mockReturnThis(),
+      delete: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockResolvedValue({ error: null })
+    };
+    (supabase.from as any).mockReturnValue(mockQueryChain);
+
+    render(<BrowserRouter><CheckOutPage /></BrowserRouter>);
+    fireEvent.click(screen.getByText(/Confirm Check-Out/i));
+
+    await waitFor(() => {
+      expect(mockQueryChain.update).toHaveBeenCalledWith({ leader_responder_id: null });
+      expect(mockQueryChain.eq).toHaveBeenCalledWith('leader_responder_id', 'leader-123');
+      expect(mockQueryChain.delete).toHaveBeenCalled();
     });
   });
 });

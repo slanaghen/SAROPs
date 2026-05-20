@@ -1,9 +1,16 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { setOptions, importLibrary } from '@googlemaps/js-api-loader';
 import { supabase } from '../lib/supabase'; // Assuming this is the centralized Supabase client
 import { useIncident } from '../context/IncidentContext';
 import useResponderTeamAndAssignment from '../hooks/useResponderTeamAndAssignment'; // The new hook
 import { removeResponderFromTeam } from '../services/responderService';
 import '../styles/ResponderDashboard.css'; // New CSS file for styling
+
+// Configure Google Maps API Loader options globally
+setOptions({
+  apiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || 'YOUR_GOOGLE_MAPS_API_KEY',
+  version: "weekly"
+});
 
 /**
  * ResponderDashboardPage
@@ -16,13 +23,10 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     responderId: contextId, 
     incidentId, 
     incidentData, 
-    setResponderStatus,
     responderName,
-    setCurrentTeamStatus,
-    setCurrentAssignmentStatus,
     accessLevel 
   } = useIncident();
-  const [responderId, setResponderId] = useState(propId || contextId);
+  const responderId = propId || contextId;
   const [responders, setResponders] = useState([]);
   const [isLeavingTeam, setIsLeavingTeam] = useState(false);
   const [messages, setMessages] = useState([]);
@@ -33,12 +37,98 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     saNarrative: ''
   });
   const [parInterval, setParInterval] = useState(60);
+  const [sartopoId, setSartopoId] = useState(null);
+  const [podValue, setPodValue] = useState('');
+  const [debriefValue, setDebriefValue] = useState('');
+  const [isUpdatingAsnData, setIsUpdatingAsnData] = useState(false);
+  const [icsRole, setIcsRole] = useState(null);
 
+  const mapContainer = useRef(null);
+  const map = useRef(null);
+  const [mapError, setMapError] = useState(false);
+  const [parRequired, setParRequired] = useState(false);
+  const [timeSinceLastPar, setTimeSinceLastPar] = useState('');
+
+  // This hook must be called before any useMemos or useEffects that depend on 'team' or 'assignment'
+  const { team, assignment, loading, error, refetch } = useResponderTeamAndAssignment(supabase, responderId); 
+
+  
+  // Section Collapsibility State
+  const [isExpanded, setIsExpanded] = useState({
+    narratives: true,
+    team: true,
+    assignment: true,
+    messages: true
+  });
+  
+  const lastMessageCountRef = useRef(0);
+  const prevTeamId = useRef(null);
+  const prevAsnId = useRef(null);
+  const prevIcsRole = useRef(null);
+
+  // Trigger: Force open Team section if PAR is overdue
   useEffect(() => {
-    if (!responderId && contextId) {
-      setResponderId(contextId);
+    if (parRequired) setIsExpanded(prev => ({ ...prev, team: true }));
+  }, [parRequired]);
+
+  // Trigger: Force open Messages if unread messages arrive
+  useEffect(() => {
+    if (messages.length > lastMessageCountRef.current) {
+      setIsExpanded(prev => ({ ...prev, messages: true }));
     }
-  }, [propId, contextId, responderId]);
+    if (isExpanded.messages) {
+      lastMessageCountRef.current = messages.length;
+    }
+  }, [messages.length, isExpanded.messages]);
+
+  // Trigger: Force open if sections are newly added
+  useEffect(() => {
+    if (team?.team_id && team.team_id !== prevTeamId.current) {
+      setIsExpanded(prev => ({ ...prev, team: true }));
+    }
+    prevTeamId.current = team?.team_id;
+
+    if (assignment?.assignment_id && assignment.assignment_id !== prevAsnId.current) {
+      setIsExpanded(prev => ({ ...prev, assignment: true }));
+    }
+    prevAsnId.current = assignment?.assignment_id;
+
+    if (icsRole && icsRole !== prevIcsRole.current) {
+      setIsExpanded(prev => ({ ...prev, assignment: true }));
+    }
+    prevIcsRole.current = icsRole;
+  }, [team?.team_id, assignment?.assignment_id, icsRole]);
+
+  // Real-time subscription to detect team assignments and status changes immediately
+  useEffect(() => {
+    if (!responderId) return;
+
+    const channel = supabase
+      .channel(`responder-team-sync-${responderId}`)
+      .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
+        table: 'team_responders', 
+        filter: `responder_id=eq.${responderId}` 
+      }, (payload) => {
+        console.log('📡 Team membership change detected:', payload.eventType);
+        refetch();
+      })
+      .on('postgres_changes', { 
+        event: 'UPDATE', 
+        schema: 'public', 
+        table: 'responders', 
+        filter: `responder_id=eq.${responderId}` 
+      }, (payload) => {
+        console.log('📡 Responder status change detected:', payload.new.status);
+        refetch();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [responderId, refetch]);
 
   useEffect(() => {
     const fetchResponders = async () => {
@@ -60,7 +150,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
 
       try {
         const [incRes, opRes] = await Promise.all([
-          supabase.from('incidents').select('notes').eq('incident_id', incidentId).maybeSingle(),
+          supabase.from('incidents').select('notes, sartopo_id').eq('incident_id', incidentId).maybeSingle(),
           supabase.from('operational_periods').select('situation_narrative, situational_awareness_narrative, par_check_interval').eq('op_period_id', incidentData.opPeriodId).maybeSingle()
         ]);
 
@@ -70,6 +160,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
             opObjective: opRes.data?.situation_narrative || '',
             saNarrative: opRes.data?.situational_awareness_narrative || ''
           });
+          if (incRes.data?.sartopo_id) setSartopoId(incRes.data.sartopo_id);
           if (opRes.data?.par_check_interval !== undefined) setParInterval(opRes.data.par_check_interval);
         }
       } catch (err) {
@@ -80,9 +171,32 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     fetchIncidentDetails();
   }, [incidentId, incidentData?.opPeriodId]);
 
-  const { team, assignment, loading, error, refetch } = useResponderTeamAndAssignment(supabase, responderId);
+  // Fetch ICS Role for command staff
+  useEffect(() => {
+    const fetchIcsRole = async () => {
+      if ((accessLevel === 'command staff' || accessLevel === 'admin') && incidentId && responderId) {
+        const { data } = await supabase
+          .from('ics_assignments')
+          .select('position')
+          .eq('incident_id', incidentId)
+          .eq('responder_id', responderId)
+          .maybeSingle();
+        if (data) setIcsRole(data.position);
+      } else {
+        setIcsRole(null);
+      }
+    };
+    fetchIcsRole();
+  }, [accessLevel, incidentId, responderId]);
 
   const isLeader = useMemo(() => team && team.leader_responder_id === responderId, [team, responderId]);
+
+  useEffect(() => {
+    if (assignment) {
+      setPodValue(assignment.pod !== null && assignment.pod !== undefined ? String(assignment.pod) : '');
+      setDebriefValue(assignment.debrief_narrative || '');
+    }
+  }, [assignment]);
 
   const fetchMessages = useCallback(async () => {
     if (!team?.team_id) return;
@@ -143,6 +257,12 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
   const handleLeaveTeam = async () => {
     if (!team || !responderId) return;
     
+    // Safety guard: Team Leaders cannot leave while the team is deployed
+    if (isLeader && (team.status === 'Deployed' || assignment?.status === 'Deployed')) {
+      alert("As the Team Leader, you cannot leave your team while it is deployed to the field. Please complete your assignment or return to base first.");
+      return;
+    }
+
     const msg = `Are you sure you want to leave team "${team.team_name_number}"? This will return you to "Staged" status.`;
     if (!window.confirm(msg)) return;
 
@@ -157,9 +277,6 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       setIsLeavingTeam(false);
     }
   };
-
-  const [parRequired, setParRequired] = useState(false);
-  const [timeSinceLastPar, setTimeSinceLastPar] = useState('');
 
   useEffect(() => {
     if (!team || !parInterval || team.status === 'Staged') {
@@ -215,6 +332,77 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     }
   };
 
+  const handleUpdateAssignmentData = async () => {
+    if (!assignment?.assignment_id) return;
+    
+    setIsUpdatingAsnData(true);
+    try {
+      const { error: updateErr } = await supabase
+        .from('assignments')
+        .update({ 
+          pod: podValue === '' ? null : parseInt(podValue, 10),
+          debrief_narrative: debriefValue.trim()
+        })
+        .eq('assignment_id', assignment.assignment_id);
+
+      if (updateErr) throw updateErr;
+      await refetch();
+    } catch (err) {
+      console.error('Error updating mission data:', err);
+      alert('Failed to update mission data: ' + err.message);
+    } finally {
+      setIsUpdatingAsnData(false);
+    }
+  };
+
+  const handleCompleteAssignment = async () => {
+    if (!team?.team_id || !assignment?.assignment_id) return;
+    
+    setIsUpdatingAsnData(true);
+    try {
+      const now = new Date().toISOString();
+      
+      // 1. Update assignment: status -> Completed, team_id -> null, and save final mission results
+      const { error: asnError } = await supabase
+        .from('assignments')
+        .update({ 
+          status: 'Completed',
+          team_id: null,
+          pod: podValue === '' ? null : parseInt(podValue, 10),
+          debrief_narrative: debriefValue.trim()
+        })
+        .eq('assignment_id', assignment.assignment_id);
+      
+      if (asnError) throw asnError;
+
+      // 2. Update team status to Disbanded (standard terminal state to release resources)
+      const { error: teamError } = await supabase
+        .from('teams')
+        .update({ 
+          status: 'Disbanded', 
+          last_par_check: now 
+        })
+        .eq('team_id', team.team_id);
+      
+      if (teamError) throw teamError;
+
+      // 3. Cascade status to team members (return to Staged) and close history
+      const { data: members } = await supabase.from('team_responders').select('responder_id').eq('team_id', team.team_id);
+      const ids = members?.map(m => m.responder_id) || [];
+      if (ids.length > 0) {
+        await supabase.from('responders').update({ status: 'Staged' }).in('responder_id', ids);
+        await supabase.from('responder_team_history').update({ detached_datetime: now }).eq('team_id', team.team_id).is('detached_datetime', null);
+      }
+
+      await refetch();
+    } catch (err) {
+      console.error('Error completing assignment:', err);
+      alert('Failed to complete assignment: ' + err.message);
+    } finally {
+      setIsUpdatingAsnData(false);
+    }
+  };
+
   const handleDeploy = async () => {
     if (!team?.team_id || !assignment?.assignment_id) return;
     
@@ -265,22 +453,12 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     return lookup;
   }, [responders]);
 
-  // Sync context status with database reality found via the dashboard data
+  // Debug log to verify session IDs match database records
   useEffect(() => {
-    if (!loading && !error && responderId && setResponderStatus) {
-      if (assignment && assignment.status === 'Deployed') {
-        setResponderStatus('Deployed');
-      } else if (team) {
-        setResponderStatus('Attached');
-      } else {
-        // Revert to base status if no longer on a team
-        setResponderStatus(accessLevel === 'command staff' ? 'Assigned' : 'Staged');
-      }
-      // Also update team and assignment status in context for App.jsx to listen
-      setCurrentTeamStatus(team?.status || null);
-      setCurrentAssignmentStatus(assignment?.status || null);
+    if (responderId) {
+      console.debug(`📊 Dashboard session: responderId=${responderId}, currentTeam=${team?.team_id || 'none'}`);
     }
-  }, [team, assignment, loading, error, responderId, setResponderStatus, setCurrentTeamStatus, setCurrentAssignmentStatus, accessLevel]);
+  }, [responderId, team?.team_id]);
 
   if (!responderId) {
     return (
@@ -307,98 +485,247 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     );
   }
 
+  const SectionHeader = ({ title, sectionKey, showBadge }) => (
+    <div 
+      onClick={() => setIsExpanded(prev => ({ ...prev, [sectionKey]: !prev[sectionKey] }))}
+      style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}
+    >
+      <h2 style={{ margin: 0, border: 'none', padding: 0 }}>{title}</h2>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        {showBadge}
+        <span style={{ fontSize: '10px', color: '#64748b', fontWeight: 700 }}>
+          {isExpanded[sectionKey] ? 'COLLAPSE ▲' : 'EXPAND ▼'}
+        </span>
+      </div>
+    </div>
+  );
+
   return (
     <div className="responder-dashboard-page">
-      <h1>Responder Dashboard</h1>
+      <h1 style={{ marginBottom: '16px' }}>Responder Dashboard</h1>
+
+      <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+        {/* Left Content Panel */}
+        <div style={{ flex: '1 1 0', minWidth: '400px' }}>
 
       {(narratives.incidentNotes || narratives.opObjective || narratives.saNarrative) && (
-        <div className="dashboard-section narratives-info">
-          <h2>Mission Overview</h2>
-          {narratives.incidentNotes && <p><strong>Incident Narrative:</strong> {narratives.incidentNotes}</p>}
-          {narratives.opObjective && <p><strong>OP Objective:</strong> {narratives.opObjective}</p>}
-          {narratives.saNarrative && <p><strong>Situational Awareness:</strong> {narratives.saNarrative}</p>}
+        <div className="dashboard-section narratives-info" style={{ marginBottom: '16px' }}>
+          <SectionHeader title="Mission Overview" sectionKey="narratives" />
+          {isExpanded.narratives && (
+            <div style={{ marginTop: '10px' }}>
+              {narratives.incidentNotes && <p><strong>Incident Narrative:</strong> {narratives.incidentNotes}</p>}
+              {narratives.opObjective && <p><strong>OP Objective:</strong> {narratives.opObjective}</p>}
+              {narratives.saNarrative && <p><strong>Situational Awareness:</strong> {narratives.saNarrative}</p>}
+            </div>
+          )}
         </div>
       )}
 
-      {!team && !assignment && (
+      {!team && !assignment && accessLevel === 'responder' && (
         <div className="dashboard-section empty-state">
           <p>You are currently not attached to a team or your team is not assigned to an assignment.</p>
           <p>Please check in with incident command for your assignment.</p>
         </div>
       )}
 
-      {team && (
+      {(team || accessLevel === 'command staff' || accessLevel === 'admin') && (
         <div className="dashboard-section team-info">
-          <h2>Your Team: {team.team_name_number}</h2>
-          <p><strong>Type:</strong> {team.type}</p>
-          <p>
-            <strong>Status:</strong> 
-            <span className={`status-indicator ${team.status?.toLowerCase()}`} style={{ marginLeft: '8px' }}>
-              {team.status}
-            </span>
-          </p>
-          {team.leader_responder_id && <p><strong>Leader Name:</strong> {leaderById[team.leader_responder_id] || 'Unknown'}</p>}
-          {team.equipment && team.equipment.length > 0 && <p><strong>Equipment:</strong> {team.equipment.join(', ')}</p>}
+          <SectionHeader 
+            title={accessLevel === 'command staff' || accessLevel === 'admin' ? 'Command Staff Status' : `Your Team: ${team?.team_name_number}`} 
+            sectionKey="team" 
+            showBadge={parRequired && <span className="status-indicator incomplete" style={{ fontSize: '9px' }}>PAR OVERDUE</span>}
+          />
 
-        {team.status !== 'Staged' && parInterval > 0 && (
-          <div className={`par-integration ${parRequired ? 'par-required' : ''}`} style={{ 
-            marginTop: '16px', 
-            padding: '16px', 
-            backgroundColor: parRequired ? '#fff7ed' : '#f8fafc',
-            borderRadius: '8px',
-            border: parRequired ? '2px solid #f59e0b' : '1px solid #e2e8f0'
-          }}>
-            <h3 style={{ fontSize: '15px', marginBottom: '8px', marginTop: 0 }}>Status Check (PAR)</h3>
-            {parRequired && (
-              <div className="alert alert-warning" style={{ marginBottom: '12px', fontSize: '12px', padding: '8px' }}>
-                <strong>Check-in Required!</strong> Please confirm your team's status.
+          {isExpanded.team && (
+            <div style={{ marginTop: '10px' }}>
+              {accessLevel === 'command staff' || accessLevel === 'admin' ? (
+                <div className="staff-status-card" style={{ padding: '24px', background: '#f0f9ff', borderRadius: '12px', border: '1px solid #bae6fd', textAlign: 'center' }}>
+                  <div style={{ fontSize: '32px', marginBottom: '12px' }}>🛡️</div>
+                  <h3 style={{ color: '#0369a1', marginBottom: '8px' }}>{icsRole ? icsRole.toUpperCase() : 'Command Staff'}</h3>
+                  {icsRole && (
+                    <p style={{ color: '#0c4a6e', fontSize: '14px', marginBottom: '16px' }}>
+                      You are assigned as the {icsRole} for this incident.
+                    </p>
+                  )}
+                  <button className="btn btn-primary btn-sm" style={{ width: '100%' }} onClick={() => window.location.href = '/operations'}>
+                    Go to Operations Dashboard
+                  </button>
+                </div>
+              ) : team && (
+                <>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px', marginBottom: '10px' }}>
+                    <div>
+                      <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Type</label>
+                      <div style={{ fontSize: '15px', fontWeight: 500 }}>{team.type}</div>
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Status</label>
+                      <span className={`status-indicator ${team.status?.toLowerCase()}`}>
+                        {team.status}
+                      </span>
+                    </div>
+                    {team.leader_responder_id && (
+                      <div>
+                        <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>
+                          {team.type === 'Command Staff' ? 'Incident Commander' : 'Leader Name'}
+                        </label>
+                        <div style={{ fontSize: '15px', fontWeight: 500 }}>{leaderById[team.leader_responder_id] || 'Unknown'}</div>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {team.equipment && team.equipment.length > 0 && <p><strong>Equipment:</strong> {team.equipment.join(', ')}</p>}
+
+                  {team.status !== 'Staged' && team.type !== 'Command Staff' && parInterval > 0 && (
+                    <div className={`par-integration ${parRequired ? 'par-required' : ''}`} style={{ marginTop: '16px', padding: '16px', backgroundColor: parRequired ? '#fff7ed' : '#f8fafc', borderRadius: '8px', border: parRequired ? '2px solid #f59e0b' : '1px solid #e2e8f0' }}>
+                      <h3 style={{ fontSize: '15px', marginBottom: '8px', marginTop: 0 }}>Status Check (PAR)</h3>
+                      {parRequired && <div className="alert alert-warning" style={{ marginBottom: '12px', fontSize: '12px', padding: '8px' }}><strong>Check-in Required!</strong> Please confirm your team's status.</div>}
+                      <p style={{ fontSize: '12px', color: '#64748b', marginBottom: '12px' }}>Last PAR Check: {timeSinceLastPar}</p>
+                      <div style={{ display: 'flex', gap: '8px' }}><button className="btn btn-primary btn-sm" onClick={() => handleParResponse('OK')} style={{ flex: 1 }}>PAR OK</button><button className="btn btn-secondary btn-sm" onClick={() => handleParResponse('Contact me')} style={{ flex: 1, borderColor: '#f59e0b', color: '#d97706' }}>Contact Command</button></div>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {team && !isLeavingTeam && (
+                <button 
+                  className="btn btn-secondary btn-sm" 
+                  onClick={handleLeaveTeam}
+                  disabled={isLeavingTeam || (team.status === 'Deployed' || assignment?.status === 'Deployed')}
+                  style={{ marginTop: '12px', color: '#dc2626', borderColor: '#fecaca' }}
+                  title={(team.status === 'Deployed' || assignment?.status === 'Deployed') ? "Cannot leave team while deployed" : "Remove yourself from this team"}
+                >
+                  {isLeavingTeam ? 'Leaving...' : 'Leave Team'}
+                </button>
+              )}
               </div>
-            )}
-            <p style={{ fontSize: '12px', color: '#64748b', marginBottom: '12px' }}>
-              Last PAR Check: {timeSinceLastPar}
-            </p>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button className="btn btn-primary btn-sm" onClick={() => handleParResponse('OK')} style={{ flex: 1 }}>
-                PAR OK
-              </button>
-              <button className="btn btn-secondary btn-sm" onClick={() => handleParResponse('Contact me')} style={{ flex: 1, borderColor: '#f59e0b', color: '#d97706' }}>
-                Contact Command
-              </button>
-            </div>
-          </div>
-        )}
-
-          <button 
-            className="btn btn-secondary btn-sm" 
-            onClick={handleLeaveTeam}
-            disabled={isLeavingTeam || (assignment && assignment.status === 'Deployed')}
-            style={{ marginTop: '12px', color: '#dc2626', borderColor: '#fecaca' }}
-            title={assignment?.status === 'Deployed' ? "Cannot leave team while deployed" : "Remove yourself from this team"}
-          >
-            {isLeavingTeam ? 'Leaving...' : 'Leave Team'}
-          </button>
+          )}
         </div>
       )}
 
-      {assignment && (
+      {(assignment || accessLevel === 'command staff' || accessLevel === 'admin') && (
         <div className="dashboard-section assignment-info">
-          <h2>Team Assignment: {assignment.name}</h2>
-          <p>
-            <strong>Status:</strong> 
-            <span className={`status-indicator ${assignment.status?.toLowerCase()}`} style={{ marginLeft: '8px' }}>
-              {assignment.status}
-            </span>
-          </p>
-          {assignment.division && <p><strong>Division:</strong> {assignment.division}</p>}
-          {assignment.assignment_type && <p><strong>Type:</strong> {assignment.assignment_type}</p>}
-          {assignment.assignment_size && <p><strong>Size:</strong> {assignment.assignment_size}</p>}
-          {assignment.tac_channel && <p><strong>TAC Channel:</strong> {assignment.tac_channel}</p>}
-          {assignment.description_narrative && <p><strong>Description:</strong> {assignment.description_narrative}</p>}
-          {assignment.poa !== null && assignment.poa !== undefined && <p><strong>POA:</strong> {assignment.poa}%</p>}
-          {assignment.pod !== null && assignment.pod !== undefined && <p><strong>POD:</strong> {assignment.pod}%</p>}
-          {assignment.debrief_narrative && <p><strong>Debrief:</strong> {assignment.debrief_narrative}</p>}
+          <SectionHeader 
+            title={accessLevel === 'command staff' || accessLevel === 'admin' ? 'ICS Assignment' : `Team Assignment: ${assignment?.name}`} 
+            sectionKey="assignment" 
+          />
+          {isExpanded.assignment && (
+            <div style={{ marginTop: '10px' }}>
+              {accessLevel === 'command staff' || accessLevel === 'admin' ? (
+                <div style={{ padding: '16px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <div style={{ fontSize: '24px' }}>📋</div>
+                  <div>
+                    <div style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', marginBottom: '2px' }}>Current Position</div>
+                    <div style={{ fontSize: '16px', fontWeight: 600, color: '#1e293b' }}>{icsRole ? icsRole.toUpperCase() : 'General Staff'}</div>
+                  </div>
+                </div>
+              ) : assignment && (
+                <>
 
-          {isLeader && assignment.status === 'Assigned' && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '10px', marginBottom: '10px' }}>
+            <div>
+              <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Status</label>
+              <span className={`status-indicator ${assignment.status?.toLowerCase()}`}>
+                {assignment.status}
+              </span>
+            </div>
+            {assignment.division && (
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Division</label>
+                <div style={{ fontSize: '15px', fontWeight: 500 }}>{assignment.division}</div>
+              </div>
+            )}
+            {assignment.assignment_type && (
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Assignment Type</label>
+                <div style={{ fontSize: '15px', fontWeight: 500 }}>{assignment.assignment_type}</div>
+              </div>
+            )}
+            {assignment.assignment_size && (
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Size</label>
+                <div style={{ fontSize: '15px', fontWeight: 500 }}>{assignment.assignment_size}</div>
+              </div>
+            )}
+            {assignment.tac_channel && (
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>TAC Channel</label>
+                <div style={{ fontSize: '15px', fontWeight: 500 }}>{assignment.tac_channel}</div>
+              </div>
+            )}
+            {assignment.poa !== null && assignment.poa !== undefined && (
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>POA</label>
+                <div style={{ fontSize: '15px', fontWeight: 500 }}>{assignment.poa}%</div>
+              </div>
+            )}
+          </div>
+
+          {assignment.description_narrative && (
+            <div style={{ marginBottom: '12px' }}>
+              <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Description</label>
+              <p style={{ margin: 0, fontSize: '14px', lineHeight: '1.5' }}>{assignment.description_narrative}</p>
+            </div>
+          )}
+
+          {assignment.status === 'Deployed' && (
+            <div style={{ marginTop: '12px', padding: '12px', backgroundColor: '#f1f5f9', borderRadius: '6px' }}>
+              <div className="form-row">
+                <label style={{ fontSize: '13px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>POD (Probability of Detection %)</label>
+                {isLeader ? (
+                  <input 
+                    type="number" 
+                    value={podValue} 
+                    onChange={e => setPodValue(e.target.value)} 
+                    min="0" max="100"
+                    placeholder="0-100"
+                    style={{ width: '100px', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                  />
+                ) : (
+                  <span>{assignment.pod !== null && assignment.pod !== undefined ? `${assignment.pod}%` : '—'}</span>
+                )}
+              </div>
+
+              <div className="form-row" style={{ marginTop: '12px' }}>
+                <label style={{ fontSize: '13px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Debrief Narrative</label>
+                {isLeader ? (
+                  <textarea 
+                    value={debriefValue} 
+                    onChange={e => setDebriefValue(e.target.value)}
+                    placeholder="Enter findings, tracks, or completion notes..."
+                    style={{ width: '100%', minHeight: '80px', padding: '8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                  />
+                ) : (
+                  <p style={{ margin: 0, fontSize: '13px' }}>{assignment.debrief_narrative || '—'}</p>
+                )}
+              </div>
+
+              {isLeader && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '12px' }}>
+                  <button 
+                    className="btn btn-secondary btn-sm" 
+                    onClick={handleUpdateAssignmentData}
+                    disabled={isUpdatingAsnData}
+                    style={{ width: '100%' }}
+                  >
+                    {isUpdatingAsnData ? 'Saving...' : 'Save Mission Data'}
+                  </button>
+
+                  <button 
+                    className="btn btn-primary btn-sm" 
+                    onClick={handleCompleteAssignment}
+                    disabled={isUpdatingAsnData || podValue === '' || !debriefValue.trim()}
+                    style={{ width: '100%', backgroundColor: '#059669', borderColor: '#059669' }}
+                  >
+                    {isUpdatingAsnData ? 'Completing...' : 'Complete Assignment'}
+                  </button>
+                </div>
+              )}
+
+            </div>
+          )}
+
+          {isLeader && assignment.status === 'Assigned' && team && (
             <button 
               className="btn btn-primary" 
               onClick={handleDeploy}
@@ -407,12 +734,22 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
               Deploy
             </button>
           )}
+                </>
+              )}
+            </div>
+          )}
         </div>
       )}
 
       {team && (
         <div className="dashboard-section messaging-info">
-          <h2>Team Leader Communications</h2>
+          <SectionHeader 
+            title="Team Leader Communications" 
+            sectionKey="messages" 
+            showBadge={messages.length > lastMessageCountRef.current && <span className="status-indicator active" style={{ fontSize: '9px' }}>NEW</span>}
+          />
+          {isExpanded.messages && (
+            <div style={{ marginTop: '10px' }}>
           <div className="messages-container" style={{ maxHeight: '200px', overflowY: 'auto', marginBottom: '12px', background: '#f1f5f9', padding: '12px', borderRadius: '6px' }}>
             {messages.length === 0 ? <p style={{ color: '#64748b', fontSize: '13px' }}>No messages yet.</p> : (
               messages.map((m, i) => (
@@ -436,8 +773,58 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
             />
             <button type="submit" className="btn btn-primary btn-sm">Send</button>
           </form>
+            </div>
+          )}
         </div>
       )}
+        </div>
+
+        {/* Right Map Panel */}
+        <div style={{ flex: 1, minWidth: '400px' }}>
+          <div style={{ 
+            borderRadius: '12px', 
+            overflow: 'hidden', 
+            border: '1px solid #cbd5e1', 
+            boxShadow: '0 6px 22px rgba(0, 0, 0, 0.04)', 
+            background: '#fff', 
+            height: '650px', 
+            position: 'relative' 
+          }}>
+            {mapError ? (
+              <div className="map-fallback" style={{ 
+                height: '100%', 
+                width: '100%', 
+                display: 'flex', 
+                flexDirection: 'column',
+                alignItems: 'center', 
+                justifyContent: 'center', 
+                background: '#f1f5f9',
+                backgroundImage: 'url("https://placehold.co/600x400/e2e8f0/64748b?text=Boulder,+CO+Static+Preview")',
+                backgroundSize: 'cover',
+                backgroundPosition: 'center'
+              }}>
+                <div style={{ 
+                  background: 'rgba(255,255,255,0.9)', 
+                  padding: '20px', 
+                  borderRadius: '8px', 
+                  textAlign: 'center',
+                  boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)',
+                  border: '1px solid #e2e8f0',
+                  maxWidth: '80%'
+                }}>
+                  <div style={{ fontSize: '24px', marginBottom: '8px' }}>⚠️</div>
+                  <h4 style={{ margin: '0 0 8px', color: '#1e293b' }}>Interactive Map Unavailable</h4>
+                  <p style={{ fontSize: '13px', color: '#64748b', margin: 0 }}>
+                    This is a static preview. To enable the live operations map, please configure a valid <strong>Google Maps API Key</strong>.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div ref={mapContainer} style={{ height: '100%', width: '100%', background: '#f1f5f9' }} />
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 };

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { Incident, Responder, Team } from '../types/sarops-types';
+import { Incident, Responder, Team, ResponderStatus } from '../types/sarops-types';
 import ResponderCheckin from '../components/ResponderCheckin';
 import { useResponderCheckin } from '../hooks/useResponderCheckin';
 import { useIncident } from '../context/IncidentContext';
@@ -31,8 +31,9 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
     startIncident, 
     responderName,
     responderStatus,
+    accessLevel,
     setResponderId,
-    setResponderName,
+    setResponderName, // This is already set in the context
     setAccessLevel,
     setResponderStatus,
     isActive 
@@ -50,18 +51,19 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
   const [isAssigningTeam, setIsAssigningTeam] = useState(false);
   const [checkInInProgress, setCheckInInProgress] = useState(false);
+  const [icsRole, setIcsRole] = useState<string | null>(null);
 
   // Guard: If the user navigates here but is already checked in, send them back
   useEffect(() => {
     // Only guard against accidental navigation if we have a confirmed responder in context
     if (isActive && responderName && responderStatus !== 'CheckedOut' && !checkInInProgress && !showTeamSelection && !loading) {
-      const isStaff = (incidentData && incidentData.name); // Simplified staff check
+      const isStaff = accessLevel === 'command staff' || (incidentData && incidentData.name && accessLevel === 'admin');
       const target = isStaff ? '/operations' : '/responder-dashboard';
       
       console.info(`Active session detected, redirecting to ${target}`);
       navigate(target);
     }
-  }, [isActive, responderName, responderStatus, checkInInProgress, showTeamSelection, loading, navigate, incidentData]);
+  }, [isActive, responderName, responderStatus, checkInInProgress, showTeamSelection, loading, navigate, incidentData, accessLevel]);
 
   // Incident selection state (moved from LoginPage)
   const [incidents, setIncidents] = useState<Incident[]>([]);
@@ -166,10 +168,19 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
 
       await checkIn(responder);
 
+      // Fetch the latest responder record to catch trigger-updated access_level
+      const { data: updatedResp } = await supabase
+        .from('responders')
+        .select('*')
+        .eq('responder_id', responder.responder_id)
+        .single();
+
+      const finalResponder = updatedResp || responder;
+
       // Set responder email and incident in context after successful check-in
-      if (setResponderId) setResponderId(responder.responder_id);
-      setResponderName(responder.name); // Update context with responder's name
-      setResponderStatus(responder.status); // Update context with responder's status
+      if (setResponderId) setResponderId(finalResponder.responder_id);
+      setResponderName(finalResponder.name);
+      setResponderStatus(finalResponder.status);
       
       if (targetIncidentId && targetIncidentName) {
         console.log('✅ Setting active incident context:', { name: targetIncidentName, op: targetOpNumber });
@@ -178,10 +189,23 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
         console.warn('⚠️ Could not set active incident context: missing ID or Name', { targetIncidentId, targetIncidentName });
       }
 
-      // If operational period provided and NOT command staff, show team assignment
-      const isStaff = responder.access_level?.toLowerCase() === 'command staff';
+      // If operational period provided, show team assignment or staff confirmation
+      const isStaff = (finalResponder.access_level === 'command staff');
 
-      if (!isStaff && effectiveOpId && uuidRegex.test(effectiveOpId) && supabase) {
+      if (isStaff && targetIncidentId) {
+        const { data: roleData } = await supabase
+          .from('ics_assignments')
+          .select('position')
+          .eq('incident_id', targetIncidentId)
+          .eq('responder_id', finalResponder.responder_id)
+          .maybeSingle();
+
+        if (roleData) {
+          setIcsRole(roleData.position);
+        }
+      }
+
+      if (effectiveOpId && uuidRegex.test(effectiveOpId) && supabase) {
         // Fetch available teams
         const { data: teamsData, error: teamsError } = await supabase
           .from('teams')
@@ -189,16 +213,16 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
           .eq('op_period_id', effectiveOpId)
           .in('status', ['Staged', 'Assigned']);
 
-        if (!teamsError && teamsData && teamsData.length > 0) {
+        if (!teamsError && teamsData && (isStaff || teamsData.length > 0)) {
           setTeams(teamsData);
           setShowTeamSelection(true);
         } else {
           // No team selection needed
-          completeCheckInFlow(responder);
+          completeCheckInFlow(finalResponder);
         }
       } else {
         // No operational period or no Supabase client, just complete checkin
-        completeCheckInFlow(responder);
+        completeCheckInFlow(finalResponder);
       }
     } catch (err) {
       console.error('Check-in error:', err);
@@ -251,9 +275,16 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
 
       if (historyError) throw historyError;
 
-      // Callback
-      const attachedResponder = { ...checkedInResponder, status: 'Attached' as ResponderStatus };
-      completeCheckInFlow(attachedResponder);
+      // Re-fetch to ensure the Command Staff team trigger updated the access_level correctly
+      const { data: updatedResp } = await supabase
+        .from('responders')
+        .select('*')
+        .eq('responder_id', checkedInResponder.responder_id)
+        .single();
+
+      const finalResponder = updatedResp || { ...checkedInResponder, status: 'Attached' as ResponderStatus };
+
+      completeCheckInFlow(finalResponder);
 
       // Close team selection
       setShowTeamSelection(false);
@@ -276,15 +307,29 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
 
   // Show team assignment screen
   if (isCheckedIn && showTeamSelection && checkedInResponder) {
+    const isStaff = checkedInResponder.access_level === 'command staff' || checkedInResponder.access_level === 'admin';
+
     return (
       <div className="responder-team-assignment">
         <div className="assignment-container">
           <div className="assignment-header">
-            <h1>Assign to Team</h1>
-            <p>Welcome {checkedInResponder.name}! Would you like to join a team?</p>
+            <h1>{isStaff ? 'Command Staff Check-In' : 'Assign to Team'}</h1>
+            <p>Welcome {checkedInResponder.name}! {isStaff ? 'You are successfully checked in.' : 'Would you like to join a team?'}</p>
           </div>
 
-          {teams.length === 0 ? (
+          {isStaff ? (
+            <div className="staff-status-card" style={{ padding: '32px', background: '#f0f9ff', borderRadius: '16px', border: '1px solid #bae6fd', textAlign: 'center', marginBottom: '24px' }}>
+              <div style={{ fontSize: '48px', marginBottom: '16px' }}>🛡️</div>
+              <h3 style={{ color: '#0369a1', marginBottom: '8px' }}>{icsRole ? icsRole.toUpperCase() : 'Staff Access Granted'}</h3>
+              <p style={{ color: '#0c4a6e', marginBottom: '24px' }}>
+                {icsRole ? `You are checked in as the ${icsRole} for this incident.` : 'Your account is recognized as command staff.'}
+                {" "}You can now proceed to the operations dashboard to manage assignments and teams.
+              </p>
+              <button className="btn btn-primary btn-large" style={{ width: '100%' }} onClick={() => completeCheckInFlow(checkedInResponder)}>
+                Continue to Operations Dashboard
+              </button>
+            </div>
+          ) : teams.length === 0 ? (
             <div className="no-teams">
               <p>No teams available at this moment.</p>
               <button
@@ -358,17 +403,21 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
 
   // Show check-in form
   return (
-    <ResponderCheckin
-      onCheckIn={handleCheckIn}
-      isLoading={loading}
-      error={error}
-      incidents={incidents} // Pass active incidents
-      loadingIncidents={loadingIncidents}
-      incidentError={incidentError}
-      onIncidentSelected={handleIncidentSelected}
-      onCreateIncident={handleCreateIncident}
-      selectedIncidentId={selectedIncidentId}
-    />
+    <div className="responder-checkin" style={{ display: 'flex', justifyContent: 'center', padding: '48px 24px' }}>
+      <div className="checkin-container" style={{ width: '100%', maxWidth: '480px', textAlign: 'center' }}>
+        <ResponderCheckin
+          onCheckIn={handleCheckIn}
+          isLoading={loading}
+          error={error}
+          incidents={incidents} // Pass active incidents
+          loadingIncidents={loadingIncidents}
+          incidentError={incidentError}
+          onIncidentSelected={handleIncidentSelected}
+          onCreateIncident={handleCreateIncident}
+          selectedIncidentId={selectedIncidentId}
+        />
+      </div>
+    </div>
   );
 };
 

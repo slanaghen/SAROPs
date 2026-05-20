@@ -5,6 +5,7 @@
 -- ENUM TYPES
 -- ============================================================================
 
+DROP TYPE IF EXISTS assignment_status CASCADE;
 CREATE TYPE assignment_status AS ENUM (
   'Planned',
   'Assigned',
@@ -13,6 +14,7 @@ CREATE TYPE assignment_status AS ENUM (
   'Incomplete'
 );
 
+DROP TYPE IF EXISTS team_status CASCADE;
 CREATE TYPE team_status AS ENUM (
   'Staged',
   'Assigned',
@@ -20,6 +22,7 @@ CREATE TYPE team_status AS ENUM (
   'Disbanded'
 );
 
+DROP TYPE IF EXISTS team_type CASCADE;
 CREATE TYPE team_type AS ENUM (
   'Ground Search',
   'UAS Search',
@@ -27,19 +30,42 @@ CREATE TYPE team_type AS ENUM (
   'Dog Track',
   'Transport',
   'Helicopter',
+  'Command Staff',
   'Other'
 );
 
+DROP TYPE IF EXISTS responder_status CASCADE;
 CREATE TYPE responder_status AS ENUM (
   'Staged',
   'Attached',
   'Assigned',
-  'Deployed'
+  'Deployed',
+  'CheckedOut'
+);
+
+DROP TYPE IF EXISTS access_level CASCADE;
+CREATE TYPE access_level AS ENUM (
+  'responder',
+  'command staff'
 );
 
 -- ============================================================================
 -- TABLES
 -- ============================================================================
+
+DROP TABLE IF EXISTS incidents CASCADE;
+DROP TABLE IF EXISTS responders CASCADE;
+DROP TABLE IF EXISTS operational_periods CASCADE;
+DROP TABLE IF EXISTS teams CASCADE;
+DROP TABLE IF EXISTS assignments CASCADE;
+DROP TABLE IF EXISTS responder_team_history CASCADE;
+DROP TABLE IF EXISTS clues CASCADE;
+DROP TABLE IF EXISTS team_responders CASCADE;
+DROP TABLE IF EXISTS action_logs CASCADE;
+DROP TABLE IF EXISTS team_messages CASCADE;
+DROP TABLE IF EXISTS ics_assignments CASCADE;
+DROP VIEW IF EXISTS team_current_responders CASCADE;
+DROP VIEW IF EXISTS incident_summary CASCADE;
 
 -- Table: incidents
 -- Root entity for a search and rescue incident
@@ -60,12 +86,15 @@ CREATE TABLE incidents (
 CREATE TABLE responders (
   responder_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
+  incident_id UUID NOT NULL REFERENCES incidents(incident_id) ON DELETE CASCADE,
   agency TEXT NOT NULL,
   identifier TEXT NOT NULL,
   cell_phone TEXT,
   device_id TEXT NOT NULL,
+  special_skills TEXT,
   checkin_datetime TIMESTAMP WITH TIME ZONE NOT NULL,
   checkout_datetime TIMESTAMP WITH TIME ZONE,
+  access_level access_level NOT NULL DEFAULT 'responder',
   status responder_status NOT NULL DEFAULT 'Staged',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -104,6 +133,11 @@ CREATE TABLE teams (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Ensure only one Command Staff team per operational period
+CREATE UNIQUE INDEX idx_one_command_staff_per_op 
+ON teams (op_period_id) 
+WHERE type = 'Command Staff';
 
 -- Table: assignments
 -- Tasks or objectives assigned to teams
@@ -166,6 +200,7 @@ CREATE TABLE clues (
 CREATE TABLE team_responders (
   team_id UUID NOT NULL REFERENCES teams(team_id) ON DELETE CASCADE,
   responder_id UUID NOT NULL REFERENCES responders(responder_id) ON DELETE CASCADE,
+  role TEXT,
   PRIMARY KEY (team_id, responder_id)
 );
 
@@ -189,6 +224,16 @@ CREATE TABLE team_messages (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Table: ics_assignments
+-- Stores assignments for ICS roles for a given incident
+CREATE TABLE ics_assignments (
+  ics_assignment_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  incident_id UUID NOT NULL REFERENCES incidents(incident_id) ON DELETE CASCADE,
+  position TEXT NOT NULL, -- e.g., 'ic', 'safety', 'ops'
+  responder_id UUID REFERENCES responders(responder_id) ON DELETE SET NULL,
+  assigned_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT unique_ics_position_per_incident UNIQUE (incident_id, position)
+);
 -- ============================================================================
 -- INDEXES
 -- ============================================================================
@@ -214,6 +259,7 @@ CREATE INDEX idx_clues_coordinates ON clues(latitude, longitude);
 
 CREATE INDEX idx_responders_status ON responders(status);
 CREATE INDEX idx_responders_device_id ON responders(device_id);
+CREATE INDEX idx_responders_access_level ON responders(access_level);
 
 CREATE INDEX idx_action_logs_incident_id ON action_logs(incident_id);
 
@@ -225,24 +271,30 @@ CREATE INDEX idx_team_messages_team_id ON team_messages(team_id);
 
 -- View: team_current_responders
 -- Denormalized view of teams with their current responders for dashboard use
-CREATE VIEW team_current_responders AS
+CREATE OR REPLACE VIEW team_current_responders AS
 SELECT
   t.team_id,
   t.op_period_id,
   t.team_name_number,
   t.status,
-  json_agg(
-    json_build_object(
-      'responder_id', r.responder_id,
-      'name', r.name,
-      'agency', r.agency,
-      'status', r.status
-    )
-  ) as responders
-FROM teams t
-LEFT JOIN team_responders tr ON t.team_id = tr.team_id
-LEFT JOIN responders r ON tr.responder_id = r.responder_id
-GROUP BY t.team_id, t.op_period_id, t.team_name_number, t.status;
+  COALESCE(
+    (
+      SELECT json_agg(
+        json_build_object(
+          'responder_id', r.responder_id,
+          'name', r.name,
+          'agency', r.agency,
+          'status', r.status,
+          'role', tr.role
+        )
+      )
+      FROM team_responders tr
+      JOIN responders r ON tr.responder_id = r.responder_id
+      WHERE tr.team_id = t.team_id
+    ),
+    '[]'::json
+  ) AS responders
+FROM teams t;
 
 -- View: incident_summary
 -- Summary view for incident dashboard
@@ -278,6 +330,60 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Function to synchronize responder access level based on team membership and ICS assignments
+CREATE OR REPLACE FUNCTION sync_responder_access_level()
+RETURNS TRIGGER AS $$
+DECLARE
+    _responder_id UUID;
+    is_command_staff_team_member BOOLEAN;
+    has_ics_assignment BOOLEAN;
+    target_access_level access_level;
+BEGIN
+    -- Determine the responder_id relevant to the trigger event
+    IF TG_OP = 'DELETE' THEN
+        _responder_id := OLD.responder_id;
+    ELSE
+        _responder_id := NEW.responder_id;
+    END IF;
+
+    -- If no responder_id, nothing to do
+    IF _responder_id IS NULL THEN
+        RETURN NULL;
+    END IF;
+
+    -- Check if the responder is a member of any 'Command Staff' team
+    SELECT EXISTS (
+        SELECT 1
+        FROM team_responders tr
+        JOIN teams t ON tr.team_id = t.team_id
+        WHERE tr.responder_id = _responder_id
+          AND t.type = 'Command Staff'
+    ) INTO is_command_staff_team_member;
+
+    -- Check if the responder has any ICS assignment
+    SELECT EXISTS (
+        SELECT 1
+        FROM ics_assignments
+        WHERE responder_id = _responder_id
+    ) INTO has_ics_assignment;
+
+    -- Determine the target access level
+    IF is_command_staff_team_member OR has_ics_assignment THEN
+        target_access_level := 'command staff';
+    ELSE
+        target_access_level := 'responder';
+    END IF;
+
+    -- Update the responder's access_level if it's different
+    UPDATE responders
+    SET access_level = target_access_level
+    WHERE responder_id = _responder_id
+      AND access_level IS DISTINCT FROM target_access_level;
+
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
 -- Triggers for updated_at
 CREATE TRIGGER update_incidents_updated_at BEFORE UPDATE ON incidents
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
@@ -296,3 +402,14 @@ CREATE TRIGGER update_responders_updated_at BEFORE UPDATE ON responders
 
 CREATE TRIGGER update_clues_updated_at BEFORE UPDATE ON clues
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Trigger for team_responders changes
+CREATE TRIGGER sync_access_level_on_team_responders
+AFTER INSERT OR UPDATE OR DELETE ON team_responders
+FOR EACH ROW EXECUTE FUNCTION sync_responder_access_level();
+
+-- Trigger for ics_assignments changes (replaces old trigger)
+DROP TRIGGER IF EXISTS update_responders_access_level_on_ics_assign ON ics_assignments;
+CREATE TRIGGER sync_access_level_on_ics_assignments
+AFTER INSERT OR UPDATE OR DELETE ON ics_assignments
+FOR EACH ROW EXECUTE FUNCTION sync_responder_access_level();

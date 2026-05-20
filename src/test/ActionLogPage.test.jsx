@@ -1,7 +1,7 @@
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import * as matchers from '@testing-library/jest-dom/matchers';
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
-import ActionLogPage from './ActionLogPage';
+import ActionLogPage from '../pages/ActionLogPage';
 import { useIncident } from '../context/IncidentContext';
 import { supabase } from '../lib/supabase';
 
@@ -27,7 +27,7 @@ describe('ActionLogPage', () => {
   });
 
   const mockLogs = [
-    { log_id: '1', timestamp: new Date().toISOString(), action: 'Team 1 Assigned', user_name: 'Steve' },
+    { id: '1', created_at: new Date().toISOString(), action: 'Team 1 Assigned', user_name: 'Steve' },
   ];
 
   it('displays a prompt if no incident is active', () => {

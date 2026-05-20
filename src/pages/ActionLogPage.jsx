@@ -23,7 +23,7 @@ const ActionLogPage = () => {
         .from('action_logs')
         .select('*')
         .eq('incident_id', incidentId)
-        .order('timestamp', { ascending: false });
+        .order('created_at', { ascending: false });
 
       if (fetchError) throw fetchError;
       setLogs(data || []);
@@ -104,9 +104,9 @@ const ActionLogPage = () => {
               <tr><td colSpan="3" className="empty-row">No actions recorded yet.</td></tr>
             ) : (
               logs.map(log => (
-                <tr key={log.log_id}>
+                <tr key={log.id}>
                   <td style={{ whiteSpace: 'nowrap', fontSize: '11px', color: '#64748b' }}>
-                    {new Date(log.timestamp).toLocaleString()}
+                    {new Date(log.created_at).toLocaleString()}
                   </td>
                   <td>{log.action}</td>
                   <td><span className="status-indicator attached">{log.user_name}</span></td>

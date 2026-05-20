@@ -2,7 +2,7 @@ import { render, screen, cleanup } from '@testing-library/react';
 import * as matchers from '@testing-library/jest-dom/matchers';
 import { vi, describe, it, expect, afterEach } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
-import Navigation from './Navigation';
+import Navigation from '../components/Navigation';
 
 expect.extend(matchers);
 

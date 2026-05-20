@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { Responder, ResponderStatus } from '../types/sarops-types';
+import { supabase } from '../lib/supabase';
+import { Responder, ResponderStatus, AccessLevel } from '../types/sarops-types';
+import { getResponderByIdentifier } from '../services/responderService';
 import '../styles/ResponderCheckin.css';
 
 /**
@@ -57,7 +59,6 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
     identifier: '',
     cell_phone: '',
     special_skills: '',
-    is_command_staff: false,
   });
 
   // UI state
@@ -72,7 +73,6 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
     identifier: string;
     cell_phone: string;
     special_skills: string;
-    is_command_staff: boolean;
     incident_id?: string;
   } | null>(null);
 
@@ -163,8 +163,22 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
   /**
    * Create responder object from form data
    */
-  const createResponderObject = (data = formData, incidentId = selectedIncidentId): Responder => {
+  const createResponderObject = async (data = formData, incidentId = selectedIncidentId): Promise<Responder> => {
     const now = new Date().toISOString();
+    let initialAccessLevel: AccessLevel = 'responder';
+    let initialStatus: ResponderStatus = 'Staged';
+
+    // Check if a responder with this identifier already exists and is command staff
+    // This is important if they were assigned an ICS role before checking in
+    try {
+      const existingResponder = await getResponderByIdentifier(supabase, data.identifier.trim());
+      if (existingResponder && existingResponder.access_level === 'command staff') {
+        initialAccessLevel = 'command staff';
+        initialStatus = 'Assigned'; // Command staff are 'Assigned' by default
+      }
+    } catch (e) {
+      console.warn('Could not check for existing responder by identifier:', e);
+    }
 
     return {
       responder_id: uuidv4(),
@@ -174,18 +188,18 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
       identifier: (data.identifier || '').trim(),
       cell_phone: (data.cell_phone || '').trim(),
       special_skills: (data.special_skills || '').trim() || undefined,
-      access_level: data.is_command_staff ? 'command staff' : 'responder', // Admin is now handled by AdminPage auth
+      access_level: initialAccessLevel,
       device_id: generateDeviceId(),
       checkin_datetime: now,
       checkout_datetime: null,
-      status: (data.is_command_staff ? 'Assigned' : 'Staged') as ResponderStatus,
+      status: initialStatus,
     };
   };
 
   /**
    * Handle form submission - show confirmation dialog
    */
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setInternalError(null);
 
@@ -198,7 +212,6 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
       identifier: (fd.get('identifier') as string) || '',
       cell_phone: formatPhoneNumber((fd.get('cell_phone') as string) || ''),
       special_skills: fd.getAll('special_skills').filter(v => v !== '').join(', '),
-      is_command_staff: fd.get('is_command_staff') === 'on',
       incident_id: selectedIncidentId,
     };
 
@@ -211,7 +224,7 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
     }
 
     // Create responder object from submitted values and show confirmation
-    const responder = createResponderObject(submitted, selectedIncidentId);
+    const responder = await createResponderObject(submitted, selectedIncidentId);
     console.debug('ResponderCheckin submit -> responder:', responder);
     setConfirmedResponder(responder);
     setShowConfirmation(true);
@@ -244,7 +257,6 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
         identifier: '',
         cell_phone: '',
         special_skills: '',
-        is_command_staff: false,
       });
       setConfirmationData(null);
 
@@ -403,19 +415,6 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
               </small>
             </div>
 
-            <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px' }}>
-              <input
-                id="is_command_staff"
-                type="checkbox"
-                name="is_command_staff"
-                checked={formData.is_command_staff}
-                onChange={handleInputChange}
-                disabled={displayLoading}
-                style={{ width: 'auto', margin: 0 }}
-              />
-              <label htmlFor="is_command_staff" style={{ margin: 0, cursor: 'pointer', fontWeight: 600 }}>Command Staff</label>
-            </div>
-
             {/* Incident Selection Dropdown */}
             {incidents.length > 0 && (
               <div className="form-group">
@@ -491,9 +490,7 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
 
               <div className="detail-item">
                 <span className="detail-label">Access Level:</span>
-                <span className="detail-value"> {/* Admin status is now determined by AdminPage auth */}
-                  {displayResponder.is_command_staff ? 'Command Staff' : 'Responder'}
-                </span>
+                <span className="detail-value">Responder</span>
               </div>
 
               {displayResponder.special_skills ? (

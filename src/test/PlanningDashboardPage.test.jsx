@@ -1,7 +1,7 @@
 import { render, screen, cleanup } from '@testing-library/react';
 import * as matchers from '@testing-library/jest-dom/matchers';
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
-import PlanningDashboardPage from './PlanningDashboardPage';
+import PlanningDashboardPage from '../pages/PlanningDashboardPage';
 import { useIncident } from '../context/IncidentContext';
 import { usePlanningDashboard } from '../hooks/usePlanningDashboard';
 
@@ -27,6 +27,15 @@ vi.mock('../components/PlanningDashboard', () => ({
 }));
 
 describe('PlanningDashboardPage', () => {
+  const mockStats = {
+    deployed: 0,
+    planned: 0,
+    stagedTeams: 0,
+    stagedResponders: 0,
+    completed: 0,
+    incomplete: 0,
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -47,6 +56,7 @@ describe('PlanningDashboardPage', () => {
       assignments: [],
       responders: [],
       loading: false,
+      stats: mockStats,
       error: null,
       fetchDashboardData: vi.fn(),
     });
@@ -79,6 +89,7 @@ describe('PlanningDashboardPage', () => {
       ],
       responders: [],
       loading: false,
+      stats: mockStats,
       fetchDashboardData: vi.fn(),
     });
 
@@ -95,6 +106,7 @@ describe('PlanningDashboardPage', () => {
     vi.mocked(usePlanningDashboard).mockReturnValue({
       assignments: [{ division: 'A', name: 'AZ' }],
       teams: [], responders: [], loading: false, fetchDashboardData: vi.fn(),
+      stats: mockStats,
     });
 
     render(<PlanningDashboardPage />);
@@ -113,6 +125,7 @@ describe('PlanningDashboardPage', () => {
         { division: 'B', name: 'BB' }
       ],
       teams: [], responders: [], loading: false, fetchDashboardData: vi.fn(),
+      stats: mockStats,
     });
 
     render(<PlanningDashboardPage />);

@@ -1,6 +1,6 @@
 .responder-dashboard-page {
   padding: 20px;
-  max-width: 900px;
+  max-width: 1600px;
   margin: 0 auto;
   font-family: 'Arial', sans-serif;
   color: #333;
@@ -16,8 +16,8 @@
   background-color: #f9f9f9;
   border: 1px solid #ddd;
   border-radius: 8px;
-  padding: 20px;
-  margin-bottom: 20px;
+  padding: 12px 16px;
+  margin-bottom: 8px;
   box-shadow: 0 2px 4px rgba(0,0,0,0.05);
 }
 
@@ -30,20 +30,20 @@
 .dashboard-section h2 {
   color: #007bff;
   margin-top: 0;
-  margin-bottom: 15px;
-  border-bottom: 1px solid #eee;
-  padding-bottom: 10px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid transparent;
+  padding-bottom: 4px;
+  font-size: 1.1rem;
 }
 
 .dashboard-section p {
-  margin-bottom: 8px;
+  margin-bottom: 4px;
   line-height: 1.5;
 }
 
 .dashboard-section p strong {
   color: #555;
   display: inline-block;
-  min-width: 100px;
 }
 
 .alert {

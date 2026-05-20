@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useIncident } from '../context/IncidentContext';
 import '../styles/OperationsDashboard.css';
@@ -7,15 +7,19 @@ import { usePlanningDashboard } from '../hooks/usePlanningDashboard';
 import TeamFormModal from '../components/TeamFormModal';
 import AssignmentFormModal from '../components/AssignmentFormModal';
 import BaseModal from '../components/BaseModal';
+import OperationsToolbar from '../components/OperationsToolbar';
+import OperationsTable from '../components/OperationsTable';
+import OperationsMap from '../components/OperationsMap';
 
 const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   const { incidentData, incidentId, responderName, user } = useIncident();
   const operationalPeriodId = propOpId || incidentData?.opPeriodId;
 
   const {
-    teams, assignments, responders, opPeriod, loading, error, setError, setLoading,
+    teams, assignments, responders, opPeriod, loading, error, setError, setLoading, stats,
     fetchDashboardData, updateResourceStatus, assignTeamToAssignment, unassignTeam,
-    deleteAssignment, deleteTeam, detachTeam: disbandTeam, updateTeam, updateAssignment,
+    createTeam, createAssignment, deleteAssignment, deleteTeam,
+    detachTeam: disbandTeam, updateTeam, updateAssignment,
     attachResponderToTeam, detachResponderFromTeam
   } = usePlanningDashboard(supabase, operationalPeriodId);
 
@@ -47,14 +51,49 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   const [broadcastMessage, setBroadcastMessage] = useState('');
   const [currentTime, setCurrentTime] = useState(Date.now());
 
-  const parInterval = opPeriod?.par_check_interval || 0;
+  const contentWrapperRef = useRef(null);
+  const [layoutMode, setLayoutMode] = useState('split'); // table, map, split
 
-  // Keep a live clock for timer displays and overdue calculations
-  useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(Date.now()), 15000);
-    return () => clearInterval(timer);
+  const [splitWidth, setSplitWidth] = useState(50); // percentage for table width in split view
+  const isResizing = useRef(false);
+
+  const handleMouseMove = useCallback((e) => {
+    if (!isResizing.current || !contentWrapperRef.current) return;
+    
+    const containerRect = contentWrapperRef.current.getBoundingClientRect();
+    const newWidth = ((e.clientX - containerRect.left) / containerRect.width) * 100;
+    
+    // Constraints: Keep both panels visible (between 20% and 80%)
+    if (newWidth > 20 && newWidth < 80) {
+      setSplitWidth(newWidth);
+    }
   }, []);
 
+  const stopResizing = useCallback(() => {
+    isResizing.current = false;
+    document.removeEventListener('mousemove', handleMouseMove);
+    document.removeEventListener('mouseup', stopResizing);
+    document.body.style.cursor = 'default';
+    document.body.style.userSelect = 'auto';
+  }, [handleMouseMove]);
+
+  const startResizing = useCallback(() => {
+    isResizing.current = true;
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', stopResizing);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none'; // Prevent text selection during drag
+  }, [handleMouseMove, stopResizing]);
+
+  const sartopoId = opPeriod?.incidents?.sartopo_id;
+  const parInterval = opPeriod?.par_check_interval || 0;
+
+  const commandStaffExists = useMemo(() => (teams || []).some(t => t.type === 'Command Staff'), [teams]);
+
+  /**
+   * Lookups and Derived Data
+   * Defined early so they are available to lifecycles/effects below
+   */
   const formatTimeSince = (timestamp, createdAt) => {
     if (!timestamp && !createdAt) return '—';
     const lastCheckMs = timestamp ? new Date(timestamp).getTime() : new Date(createdAt).getTime();
@@ -70,15 +109,124 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     return `${hours}h ${mins}m ago`;
   };
 
-  /**
-   * Helper to safely extract UUID from prefixed row IDs (asn-xxx or team-xxx)
-   */
   const getRawUuid = (rowId) => {
     if (!rowId) return null;
     if (rowId.startsWith('asn-')) return rowId.slice(4);
     if (rowId.startsWith('team-')) return rowId.slice(5);
     return rowId;
   };
+
+  const leaderById = useMemo(() => {
+    const leaderLookup = {};
+    for (const r of responders) {
+      if (r?.responder_id) {
+        leaderLookup[r.responder_id] = r.name;
+      }
+    }
+    return leaderLookup;
+  }, [responders]);
+
+  const teamById = useMemo(() => {
+    const teamLookup = {};
+    for (const t of teams) {
+      if (t?.team_id) {
+        teamLookup[t.team_id] = t;
+      }
+    }
+    return teamLookup;
+  }, [teams]);
+
+  const assignmentById = useMemo(() => {
+    const lookup = {};
+    for (const a of assignments) {
+      if (a?.assignment_id) {
+        lookup[a.assignment_id] = a;
+      }
+    }
+    return lookup;
+  }, [assignments]);
+
+  const rows = useMemo(() => {
+    const assignmentRows = (assignments || []).map(asnItem => {
+      const matchingTeam = asnItem.team_id ? teamById[asnItem.team_id] : null;
+      return {
+        id: `asn-${asnItem.assignment_id}`,
+        isParOverdue: matchingTeam && matchingTeam.status !== 'Staged' && matchingTeam.type !== 'Command Staff' && parInterval > 0 && (() => {
+          const lastCheck = matchingTeam.last_par_check ? new Date(matchingTeam.last_par_check).getTime() : new Date(matchingTeam.created_at || Date.now()).getTime();
+          const minutesSince = (currentTime - lastCheck) / 60000;
+          return minutesSince > (parInterval + 3);
+        })(),
+        timeSincePar: matchingTeam ? formatTimeSince(matchingTeam.last_par_check, matchingTeam.created_at) : '',
+        tacChannel: asnItem.tac_channel || '—',
+        assignmentId: asnItem.assignment_id,
+        assignmentName: asnItem.name,
+        assignmentType: asnItem.assignment_type || '—',
+        assignmentStatus: asnItem.status,
+        teamName: matchingTeam?.team_name_number || '',
+        teamType: matchingTeam?.type || '',
+        teamLeader: matchingTeam ? leaderById[matchingTeam.leader_responder_id] || 'Unknown' : '',
+        teamStatus: matchingTeam?.status || '',
+        hasBoth: !!matchingTeam,
+        teamId: asnItem.team_id,
+      };
+    });
+
+    const assignmentTeamSet = new Set();
+    (assignments || []).forEach(a => { if (a.team_id) assignmentTeamSet.add(a.team_id); });
+
+    const teamOnlyRows = (teams || []).filter(tItem => !assignmentTeamSet.has(tItem.team_id)).map(tItem => ({
+      id: `team-${tItem.team_id}`,
+      isParOverdue: tItem.status !== 'Staged' && tItem.type !== 'Command Staff' && parInterval > 0 && (() => {
+        const lastCheck = tItem.last_par_check ? new Date(tItem.last_par_check).getTime() : new Date(tItem.created_at || Date.now()).getTime();
+        return (currentTime - lastCheck) / 60000 > (parInterval + 3);
+      })(),
+      timeSincePar: formatTimeSince(tItem.last_par_check, tItem.created_at),
+      tacChannel: '', assignmentId: '', assignmentName: '', assignmentType: '', assignmentStatus: '',
+      teamName: tItem.team_name_number, teamType: tItem.type, teamStatus: tItem.status,
+      teamLeader: leaderById[tItem.leader_responder_id] || 'Unknown', hasBoth: false, teamId: tItem.team_id,
+    }));
+
+    let result = [...assignmentRows, ...teamOnlyRows];
+    if (viewMode === 'Operations') {
+      result = result.filter(r => (r.teamStatus === 'Assigned' || r.teamStatus === 'Deployed') && r.teamType !== 'Command Staff');
+    } else if (viewMode === 'Planning') {
+      result = result.filter(r => !['Completed', 'Incomplete'].includes(r.assignmentStatus) && (r.assignmentStatus === 'Planned' || r.teamStatus === 'Staged') && r.teamType !== 'Command Staff');
+    }
+
+    result = result.filter(row => Object.keys(filters).every(k => !filters[k] || (row[k] || '').toString().toLowerCase().includes(filters[k].toLowerCase())));
+    result.sort((a, b) => {
+      // Custom operational priority sort
+      const getPriority = (row) => {
+        if (row.assignmentStatus === 'Deployed') return 1;
+        if (row.assignmentStatus === 'Assigned') return 2;
+        if (row.assignmentId && !row.teamId) return 3; // Assignment with no team
+        if (!row.assignmentId && row.teamId) return 4; // Team with no assignment
+        if (row.assignmentStatus === 'Incomplete') return 5;
+        if (row.assignmentStatus === 'Completed') return 6;
+        return 7;
+      };
+
+      if (!sortConfig.key) {
+        const pA = getPriority(a);
+        const pB = getPriority(b);
+        if (pA !== pB) return pA - pB;
+        return (a.assignmentName || a.teamName).localeCompare(b.assignmentName || b.teamName);
+      }
+
+      const aVal = (a[sortConfig.key] || '').toString().toLowerCase();
+      const bVal = (b[sortConfig.key] || '').toString().toLowerCase();
+      if (aVal === bVal) return 0;
+      const comparison = aVal < bVal ? -1 : 1;
+      return sortConfig.direction === 'asc' ? comparison : -comparison;
+    });
+    return result;
+  }, [assignments, teams, teamById, leaderById, filters, sortConfig, viewMode, parInterval, currentTime]);
+
+  // Keep a live clock for timer displays and overdue calculations
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(Date.now()), 15000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     fetchDashboardData();
@@ -94,12 +242,6 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   };
 
   const handleStatusUpdate = async (assignmentId, teamId, newStatus) => {
-    if (newStatus === 'Completed' && teamId) {
-      const keepStaged = window.confirm("Assignment Complete. Keep team together (Staged)?\n\n- OK: Keep Staged (available for tasks)\n- Cancel: DISBAND Team (release members)");
-      if (keepStaged) {
-        return updateResourceStatus(assignmentId, teamId, 'Planned');
-      }
-    }
     await updateResourceStatus(assignmentId, teamId, newStatus);
   };
 
@@ -203,7 +345,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       const teamName = team?.team_name_number || 'Unknown Team';
       const asnName = assignment?.name || 'Unknown Assignment';
       
-      await recordAction(`Assigned ${teamName} to ${asnName} via manual menu action`);
+      await recordAction(`Assigned ${teamName} to ${asnName}`);
     } catch (err) {
       // Error is handled by hook
     }
@@ -246,7 +388,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       
       setDraggedItem(null);
       setDropTarget(null);
-      await recordAction(`Assigned ${teamName} to ${asnName} via drag and drop`);
+      await recordAction(`Assigned ${teamName} to ${asnName}`);
     } catch (err) {
        // Error is handled by hook
     }
@@ -277,6 +419,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     try {
       const payload = {
         team_name_number: formData.team_name_number || '',
+        sartopo_color_hex: formData.sartopo_color_hex || '#FF0000',
         type: formData.type || 'Other',
         status: formData.status || 'Staged',
         leader_responder_id: formData.leader_responder_id || null,
@@ -288,16 +431,18 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
         
         // Reconciliation
         const finalIds = formData.responder_ids || [];
+        const roles = formData.responder_roles || {};
         const originalIds = teamById[formData.team_id]?.current_responders?.map(r => r.responder_id) || [];
         const toAdd = finalIds.filter(id => !originalIds.includes(id));
         const toRemove = originalIds.filter(id => !finalIds.includes(id));
 
         await Promise.all([
-          ...toAdd.map(id => attachResponderToTeam(id, formData.team_id)),
+          ...toAdd.map(id => attachResponderToTeam(id, formData.team_id, roles[id])),
+          ...finalIds.filter(id => originalIds.includes(id)).map(id => attachResponderToTeam(id, formData.team_id, roles[id])),
           ...toRemove.map(id => detachResponderFromTeam(id, formData.team_id))
         ]);
       } else {
-        const newTeam = await createTeam({ ...payload, op_period_id: operationalPeriodId, responder_ids: formData.responder_ids });
+        const newTeam = await createTeam({ ...payload, op_period_id: operationalPeriodId, responder_ids: formData.responder_ids, responder_roles: formData.responder_roles });
         if (pendingAssignmentId) await assignTeamToAssignment(newTeam.team_id, pendingAssignmentId);
       }
 
@@ -375,174 +520,6 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     }
   };
 
-  const leaderById = useMemo(() => {
-    const leaderLookup = {};
-    for (const r of responders) {
-      if (r?.responder_id) {
-        leaderLookup[r.responder_id] = r.name;
-      }
-    }
-    return leaderLookup;
-  }, [responders]);
-
-  const teamById = useMemo(() => {
-    const teamLookup = {};
-    for (const t of teams) {
-      if (t?.team_id) {
-        teamLookup[t.team_id] = t;
-      }
-    }
-    return teamLookup;
-  }, [teams]);
-
-  const assignmentById = useMemo(() => {
-    const lookup = {};
-    for (const a of assignments) {
-      if (a?.assignment_id) {
-        lookup[a.assignment_id] = a;
-      }
-    }
-    return lookup;
-  }, [assignments]);
-
-  const rows = useMemo(() => {
-    // Pre-calculate sets to avoid nested lookups in map
-    const assignmentRows = (assignments || []).map(asnItem => {
-      const matchingTeam = asnItem.team_id ? teamById[asnItem.team_id] : null;
-
-      return {
-        id: `asn-${asnItem.assignment_id}`, // Prefixed ID ensures no collision after unassign
-        isParOverdue: matchingTeam && matchingTeam.status !== 'Staged' && parInterval > 0 && (() => {
-          const lastCheck = matchingTeam.last_par_check 
-            ? new Date(matchingTeam.last_par_check).getTime() 
-            : new Date(matchingTeam.created_at || Date.now()).getTime();
-          const minutesSince = (currentTime - lastCheck) / 60000;
-          // Overdue if past interval + 3 minute grace period
-          return minutesSince > (parInterval + 3);
-        })(),
-        timeSincePar: matchingTeam ? formatTimeSince(matchingTeam.last_par_check, matchingTeam.created_at) : '',
-        tacChannel: asnItem.tac_channel || '—',
-        assignmentId: asnItem.assignment_id,
-        assignmentName: asnItem.name,
-        assignmentType: asnItem.assignment_type || '—',
-        assignmentStatus: asnItem.status,
-        teamName: matchingTeam?.team_name_number || '',
-        teamType: matchingTeam?.type || '',
-        teamLeader: matchingTeam ? leaderById[matchingTeam.leader_responder_id] || 'Unknown' : '',
-        teamStatus: matchingTeam?.status || '',
-        hasBoth: !!matchingTeam,
-        teamId: asnItem.team_id,
-      };
-    });
-
-    const assignmentTeamSet = new Set();
-    (assignments || []).forEach(a => { if (a.team_id) assignmentTeamSet.add(a.team_id); });
-
-    const teamOnlyRows = (teams || [])
-      .filter(tItem => {
-        // Show team as a standalone row if it's not linked to any assignment
-        // Hide Disbanded teams from active board
-        return !assignmentTeamSet.has(tItem.team_id) && tItem.status !== 'Disbanded';
-      })
-      .map(tItem => {
-      return {
-          id: `team-${tItem.team_id}`, // Prefixed ID ensures React sees this as a new row type
-          isParOverdue: tItem.status !== 'Staged' && parInterval > 0 && (() => {
-            const lastCheck = tItem.last_par_check 
-              ? new Date(tItem.last_par_check).getTime() 
-              : new Date(tItem.created_at || Date.now()).getTime();
-            const minutesSince = (currentTime - lastCheck) / 60000;
-            return minutesSince > (parInterval + 3);
-          })(),
-          timeSincePar: formatTimeSince(tItem.last_par_check, tItem.created_at),
-          tacChannel: '',
-          assignmentId: '',
-          assignmentName: '',
-          assignmentType: '',
-          assignmentStatus: '',
-          teamName: tItem.team_name_number,
-          teamType: tItem.type,
-          teamStatus: tItem.status,
-          teamLeader: leaderById[tItem.leader_responder_id] || 'Unknown',
-          hasBoth: false,
-          teamId: tItem.team_id,
-      };
-    });
-
-    let result = [...assignmentRows, ...teamOnlyRows];
-
-    // Apply View Mode Filter
-    if (viewMode === 'Operations') {
-      result = result.filter(row => 
-        row.teamStatus === 'Assigned' || row.teamStatus === 'Deployed'
-      );
-    } else if (viewMode === 'Planning') {
-      result = result.filter(row => 
-        !['Completed', 'Incomplete'].includes(row.assignmentStatus) &&
-        (row.assignmentStatus === 'Planned' || row.teamStatus === 'Staged')
-      );
-    }
-
-    // Apply Filters
-    result = result.filter(row => {
-      return Object.keys(filters).every(key => {
-        if (!filters[key]) return true;
-        const val = (row[key] || '').toString().toLowerCase();
-        return val.includes(filters[key].toLowerCase());
-      });
-    });
-
-    // Apply Sorting
-    result.sort((a, b) => {
-      if (!sortConfig.key) {
-        // Default sort: Deployed on top, Completed at bottom
-        const getPriority = (status) => {
-          if (status === 'Deployed') return 1;
-          if (status === 'Assigned') return 2;
-          if (status === 'Planned') return 3;
-          if (status === 'Completed') return 5;
-          if (status === 'Incomplete') return 6;
-          return 4; // team-only staged rows or empty status
-        };
-
-        const pA = getPriority(a.assignmentStatus);
-        const pB = getPriority(b.assignmentStatus);
-
-        if (pA !== pB) return pA - pB;
-
-        if (a.hasBoth && !b.hasBoth) return -1;
-        if (!a.hasBoth && b.hasBoth) return 1;
-        return 0;
-      }
-
-      const aVal = (a[sortConfig.key] || '').toString().toLowerCase();
-      const bVal = (b[sortConfig.key] || '').toString().toLowerCase();
-
-      // Always sort empty values to the bottom regardless of direction
-      if (aVal === '' && bVal !== '') return 1;
-      if (aVal !== '' && bVal === '') return -1;
-      if (aVal === '' && bVal === '') return 0;
-
-      if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
-      if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
-      return 0;
-    });
-
-    return result;
-  }, [assignments, teams, teamById, leaderById, filters, sortConfig, viewMode, parInterval, currentTime]);
-
-  /**
-   * Calculate operations statistics based on current data
-   */
-  const stats = useMemo(() => ({
-    deployed: assignments.filter(a => a.status === 'Deployed').length,
-    planned: assignments.filter(a => a.status === 'Planned').length,
-    stagedTeams: teams.filter(t => t.status === 'Staged').length,
-    stagedResponders: responders.filter(r => r.status === 'Staged').length,
-    completed: assignments.filter(a => a.status === 'Completed').length,
-    incomplete: assignments.filter(a => a.status === 'Incomplete').length,
-  }), [assignments, teams, responders]);
-
   const availableTeams = useMemo(() => teams.filter(t => t.status === 'Staged'), [teams]);
   const availableAssignments = useMemo(() => assignments.filter(a => !a.team_id && a.status === 'Planned'), [assignments]);
 
@@ -591,6 +568,26 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
             <option value="Operations">Operations (Active)</option>
             <option value="Planning">Planning (Staged)</option>
           </select>
+          <div style={{ display: 'flex', gap: '4px', marginLeft: '12px', borderLeft: '1px solid #e2e8f0', paddingLeft: '12px' }}>
+            <button 
+              className={`btn btn-sm ${layoutMode === 'table' ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setLayoutMode('table')}
+            >
+              Table
+            </button>
+            <button 
+              className={`btn btn-sm ${layoutMode === 'split' ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setLayoutMode('split')}
+            >
+              Split
+            </button>
+            <button 
+              className={`btn btn-sm ${layoutMode === 'map' ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setLayoutMode('map')}
+            >
+              Map
+            </button>
+          </div>
           <button 
             className="btn btn-secondary" 
             style={{ 
@@ -624,256 +621,37 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       )}
 
       {!loading && !error && (
-        <div className="operations-table-wrapper">
-          <table className="operations-table">
-            <thead>
-              <tr>
-                <th onClick={() => requestSort('assignmentName')} style={{ cursor: 'pointer' }}>
-                  Assignment Name {sortConfig.key === 'assignmentName' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
-                </th>
-                <th onClick={() => requestSort('assignmentType')} style={{ cursor: 'pointer' }}>
-                  Assignment Type {sortConfig.key === 'assignmentType' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
-                </th>
-                <th onClick={() => requestSort('tacChannel')} style={{ cursor: 'pointer' }}>
-                  TAC {sortConfig.key === 'tacChannel' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
-                </th>
-                <th onClick={() => requestSort('assignmentStatus')} style={{ cursor: 'pointer' }}>
-                  Assignment Status {sortConfig.key === 'assignmentStatus' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
-                </th>
-                <th onClick={() => requestSort('teamName')} style={{ cursor: 'pointer' }}>
-                  Team Name {sortConfig.key === 'teamName' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
-                </th>
-                <th onClick={() => requestSort('teamType')} style={{ cursor: 'pointer' }}>
-                  Team Type {sortConfig.key === 'teamType' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
-                </th>
-                <th onClick={() => requestSort('teamLeader')} style={{ cursor: 'pointer' }}>
-                  Team Leader {sortConfig.key === 'teamLeader' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
-                </th>
-                <th onClick={() => requestSort('teamStatus')} style={{ cursor: 'pointer' }}>
-                  Team Status {sortConfig.key === 'teamStatus' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
-                </th>
-                {parInterval > 0 && (
-                  <th onClick={() => requestSort('timeSincePar')} style={{ cursor: 'pointer' }}>
-                    Last PAR Check {sortConfig.key === 'timeSincePar' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
-                  </th>
-                )}
-                <th>Actions</th>
-              </tr>
-              <tr className="filter-row">
-                {Object.keys(filters).map(key => (
-                  <td key={key}>
-                    <input
-                      type="text"
-                      placeholder="Filter..."
-                      value={filters[key]}
-                      onChange={(e) => handleFilterChange(key, e.target.value)}
-                      onClick={(e) => e.stopPropagation()}
-                      className="column-filter-input"
-                      style={{ width: '100%', padding: '2px 4px', fontSize: '11px', borderRadius: '4px', border: '1px solid #ddd' }}
-                    />
-                  </td>
-                ))}
-                {parInterval > 0 && <td></td>}
-                <td></td>
-                <td></td>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.length === 0 ? (
-                <tr>
-                  <td colSpan="7" className="empty-row">
-                    No assignments or teams found for this operational period.
-                  </td>
-                </tr>
-              ) : rows.map(row => (
-                <tr key={row.id} className={
-                  (row.assignmentStatus === 'Deployed' && row.hasBoth) ? 'row-deployed' :
-                  (row.assignmentStatus === 'Assigned' && row.hasBoth) ? 'row-assigned' :
-                  (row.assignmentStatus === 'Completed' && row.hasBoth) ? 'row-complete' : ''
-                }
-                style={row.isParOverdue ? { backgroundColor: '#fff7ed', borderLeft: '4px solid #f97316' } : {}}>
-                  <td>
-                    {row.assignmentName ? (
-                      <div 
-                        className={`chip assignment-chip ${draggedItem?.id === row.id && draggedItem?.type === 'assignment' ? 'dragging' : ''} ${dropTarget?.id === row.id && dropTarget?.type === 'assignment' ? 'drop-target' : ''} ${row.hasBoth ? 'locked' : ''}`}
-                        draggable={!row.hasBoth}
-                        onDragStart={!row.hasBoth ? (e) => handleDragStart(e, row.id, 'assignment') : undefined}
-                        onDragEnd={!row.hasBoth ? () => { setDraggedItem(null); setDropTarget(null); } : undefined}
-                        onDragOver={!row.hasBoth ? (e) => handleDragOver(e, 'assignment') : undefined}
-                        onDragEnter={!row.hasBoth ? (e) => handleDragEnter(e, row.id, 'assignment') : undefined}
-                        onDragLeave={!row.hasBoth ? () => setDropTarget(null) : undefined}
-                        onDrop={!row.hasBoth ? (e) => handleDrop(e, row.id, 'assignment') : undefined}
-                        onClick={() => openEditAssignmentForm(assignmentById[getRawUuid(row.id)])}
-                      >
-                        {row.assignmentName}
-                      </div>
-                    ) : '—'}
-                  </td>
-                  <td>{row.assignmentType || '—'}</td>
-                  <td>{row.tacChannel || '—'}</td>
-                  <td>
-                    {row.hasBoth ? (
-                      <select 
-                        value={row.assignmentStatus} 
-                        // Correctly extract the full UUID after the 'asn-' prefix
-                        onChange={(e) => handleStatusUpdate(row.id.slice(4), row.teamId, e.target.value)}
-                        className={`status-indicator ${row.assignmentStatus.toLowerCase()} status-select-inline`}
-                      >
-                        <option value="Planned">Planned</option>
-                        <option value="Assigned">Assigned</option>
-                        <option value="Deployed">Deployed</option>
-                        <option value="Completed">Completed</option>
-                        <option value="Incomplete">Incomplete</option>
-                      </select>
-                    ) : row.assignmentStatus ? (
-                        <span className={`status-indicator ${row.assignmentStatus.toLowerCase()}`}>
-                          {row.assignmentStatus}
-                        </span>
-                    ) : '—'}
-                  </td>
-                  <td>
-                    {row.teamName ? (
-                      <div 
-                        className={`chip team-chip ${draggedItem?.id === row.teamId && draggedItem?.type === 'team' ? 'dragging' : ''} ${dropTarget?.id === row.teamId && dropTarget?.type === 'team' ? 'drop-target' : ''} ${row.hasBoth ? 'locked' : ''}`}
-                        draggable={!row.hasBoth}
-                        onDragStart={!row.hasBoth ? (e) => handleDragStart(e, row.teamId, 'team') : undefined}
-                        onDragEnd={!row.hasBoth ? () => { setDraggedItem(null); setDropTarget(null); } : undefined}
-                        onDragOver={!row.hasBoth ? (e) => handleDragOver(e, 'team') : undefined}
-                        onDragEnter={!row.hasBoth ? (e) => handleDragEnter(e, row.teamId, 'team') : undefined}
-                        onDragLeave={!row.hasBoth ? () => setDropTarget(null) : undefined}
-                        onDrop={!row.hasBoth ? (e) => handleDrop(e, row.teamId, 'team') : undefined}
-                        onClick={() => openEditTeamForm(teamById[row.teamId])}
-                      >
-                        {row.teamName}
-                      </div>
-                    ) : '—'}
-                  </td>
-                  <td>{row.teamType || '—'}</td>
-                  <td>{row.teamLeader || '—'}</td>
-                  <td>
-                    {row.teamStatus ? (
-                      <span className={`status-indicator ${row.teamStatus.toLowerCase()}`}>
-                        {row.teamStatus}
-                      </span>
-                    ) : '—'}
-                  </td>
-                  {parInterval > 0 && (
-                    <td>
-                      {row.isParOverdue ? (
-                        <span style={{ 
-                          display: 'inline-flex', 
-                          alignItems: 'center', 
-                          gap: '4px',
-                          backgroundColor: '#dc2626', 
-                          color: 'white', 
-                          padding: '2px 8px', 
-                          borderRadius: '4px', 
-                          fontSize: '11px',
-                          fontWeight: 700,
-                          whiteSpace: 'nowrap'
-                        }}>
-                          {row.timeSincePar}
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                            <circle cx="12" cy="12" r="10"></circle>
-                            <polyline points="12 6 12 12 16 14"></polyline>
-                          </svg>
-                        </span>
-                      ) : (
-                        <span style={{ fontSize: '12px', color: '#64748b' }}>
-                          {row.timeSincePar}
-                        </span>
-                      )}
-                    </td>
-                  )}
-                  <td>
-                    <select 
-                      className="status-update-select"
-                      value=""
-                      onChange={(e) => {
-                        const action = e.target.value;
-                        const rawId = getRawUuid(row.id);
+        <div ref={contentWrapperRef} className={`operations-content-wrapper layout-${layoutMode}`}>
+          {(layoutMode === 'table' || layoutMode === 'split') && (
+            <div className="table-panel" style={layoutMode === 'split' ? { width: `${splitWidth}%`, flexShrink: 0 } : {}}>
+           <OperationsTable 
+              rows={rows} sortConfig={sortConfig} requestSort={requestSort}
+              filters={filters} onFilterChange={handleFilterChange}
+              parInterval={parInterval}
+              onStatusUpdate={(asnId, teamId, status) => handleStatusUpdate(asnId, teamId, status)}
+              onResetPar={handleResetPar} onUnassignTeam={handleUnassignTeam}
+              onEditTeam={(id) => openEditTeamForm(teamById[id])}
+              onEditAssignment={(id) => openEditAssignmentForm(assignmentById[id])}
+              onNewTeam={(asnId) => { setPendingAssignmentId(asnId); setTeamForm({ op_period_id: operationalPeriodId, status: 'Assigned', type: 'Ground Search' }); setShowTeamForm(true); }}
+              onNewAssignment={(teamId) => { setPendingTeamId(teamId); setAssignmentForm({ op_period_id: operationalPeriodId, status: 'Assigned', division: 'A' }); setShowAssignmentForm(true); }}
+              onDeleteAssignment={handleDeleteAssignment} onAssignResource={(row) => { setAssigningRow(row); setSelectedAssignTarget(''); }}
+              draggedItem={draggedItem} dropTarget={dropTarget}
+              onDragStart={handleDragStart} onDragEnd={() => { setDraggedItem(null); setDropTarget(null); }}
+              onDragEnter={handleDragEnter} onDragLeave={() => setDropTarget(null)} onDrop={handleDrop}
+            />
+          </div>
+        )}
+          {layoutMode === 'split' && (
+            <div className="resizer-handle" onMouseDown={startResizing} style={{ width: '10px', cursor: 'col-resize', backgroundColor: '#f1f5f9', borderLeft: '1px solid #e2e8f0', borderRight: '1px solid #e2e8f0', zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div style={{ width: '2px', height: '24px', backgroundColor: '#cbd5e1', borderRadius: '1px' }} />
+            </div>
+          )}
 
-                        if (action === 'edit-team') {
-                          openEditTeamForm(teamById[row.teamId]);
-                        } else if (action === 'edit-assignment') {
-                          openEditAssignmentForm(assignmentById[rawId]);
-                        } else if (action === 'reset-par') {
-                          handleResetPar(row.teamId, row.teamName);
-                        } else if (action === 'unassign') {
-                          handleUnassignTeam(rawId, row.teamId, row.assignmentName, row.teamName);
-                        } else if (action === 'assign-resource') {
-                          setAssigningRow(row);
-                          setSelectedAssignTarget('');
-                        } else if (action === 'edit') {
-                          if (row.teamId) openEditTeamForm(teamById[row.teamId]);
-                          else openEditAssignmentForm(assignmentById[rawId]);
-                        } else if (action === 'new-team') {
-                          // Link new team to current assignment if it exists in this row
-                          setPendingAssignmentId(row.id.startsWith('asn-') ? rawId : null);
-                          setTeamForm({
-                            op_period_id: operationalPeriodId,
-                            team_name_number: '',
-                            status: 'Assigned',
-                            type: 'Ground Search',
-                            leader_responder_id: null,
-                            equipment: [],
-                            responder_ids: []
-                          });
-                          setShowTeamForm(true);
-                        } else if (action === 'new-assignment') {
-                          // Link new assignment to current team if it exists in this row
-                          setPendingTeamId(row.teamId || null);
-                          setAssignmentForm({
-                            op_period_id: operationalPeriodId,
-                            name: '',
-                            status: 'Assigned',
-                            division: 'A',
-                            assignment_type: 'Ground',
-                            assignment_size: 2,
-                            tac_channel: '',
-                            description_narrative: ''
-                          });
-                          setShowAssignmentForm(true);
-                        }
-                        else if (action === 'release') handleReleaseTeam(row.teamId, row.teamName);
-                        else if (action === 'delete') handleDeleteAssignment(rawId, row.assignmentName);
-                      }}
-                    >
-                      <option value="" disabled>Actions...</option>
-                      {row.hasBoth ? (
-                        <>
-                          <option value="edit-team">Edit Team</option>
-                          <option value="edit-assignment">Edit Assignment</option>
-                          <option value="unassign">Unassign Team</option>
-                          {parInterval > 0 && <option value="reset-par">Reset PAR</option>}
-                          <option value="new-team">New Team</option>
-                          <option value="new-assignment">New Assignment</option>
-                        </>
-                      ) : (
-                        <>
-                          <option value="edit">Edit</option>
-                          <option value="assign-resource">
-                            {row.assignmentId ? 'Assign Team' : 'Assign Assignment'}
-                          </option>
-                          <option value="new-team">New Team</option>
-                          <option value="new-assignment">New Assignment</option>
-                          {row.teamId ? (
-                            <>
-                              {parInterval > 0 && <option value="reset-par">Reset PAR</option>}
-                                {row.teamStatus === 'Staged' && <option value="detach">Disband Team</option>}
-                              <option value="release">Release Team</option>
-                            </>
-                          ) : (
-                            <option value="delete">Delete Assignment</option>
-                          )}
-                        </>
-                      )}
-                    </select>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          {(layoutMode === 'map' || layoutMode === 'split') && (
+            <div className="map-panel" style={layoutMode === 'split' ? { flex: 1, minWidth: 0 } : {}}>
+              <OperationsMap loading={loading} assignments={assignments} teams={teams} sartopoId={sartopoId} layoutMode={layoutMode} />
+            </div>
+          )}
         </div>
       )}
 
@@ -909,6 +687,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
           responders={responders}
           loading={loading}
           error={error}
+          commandStaffExists={commandStaffExists}
         />
       )}
 

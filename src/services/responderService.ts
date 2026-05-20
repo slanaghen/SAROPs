@@ -1,5 +1,5 @@
 import { SupabaseClient } from '@supabase/supabase-js';
-import { Responder, ResponderStatus } from '../types/sarops-types';
+import { Responder, ResponderStatus, AccessLevel } from '../types/sarops-types';
 
 /**
  * Responder Service
@@ -67,11 +67,12 @@ export const checkOutResponder = async (
 export const updateResponderStatus = async (
   supabaseClient: SupabaseClient,
   responderId: string,
-  newStatus: ResponderStatus
+  newStatus: ResponderStatus,
+  newAccessLevel: AccessLevel = 'responder' // Default to responder if not specified
 ): Promise<Responder> => {
   const { data, error } = await supabaseClient
     .from('responders')
-    .update({ status: newStatus })
+    .update({ status: newStatus, access_level: newAccessLevel })
     .eq('responder_id', responderId)
     .select()
     .single();
@@ -103,6 +104,26 @@ export const getResponder = async (
   if (error && error.code !== 'PGRST116') {
     // PGRST116 is "no rows" error, which is fine
     throw new Error(`Failed to fetch responder: ${error.message}`);
+  }
+
+  return (data as Responder) || null;
+};
+
+/**
+ * Get responder by Identifier (e.g., badge #, call sign)
+ */
+export const getResponderByIdentifier = async (
+  supabaseClient: SupabaseClient,
+  identifier: string
+): Promise<Responder | null> => {
+  const { data, error } = await supabaseClient
+    .from('responders')
+    .select('*')
+    .eq('identifier', identifier)
+    .maybeSingle();
+
+  if (error && error.code !== 'PGRST116') {
+    throw new Error(`Failed to fetch responder by identifier: ${error.message}`);
   }
 
   return (data as Responder) || null;
@@ -168,7 +189,10 @@ export const assignResponderToTeam = async (
   }
 
   // Update responder status
-  await updateResponderStatus(supabaseClient, responderId, 'Attached');
+  const { error: statusError } = await supabaseClient
+    .from('responders')
+    .update({ status: 'Attached' })
+    .eq('responder_id', responderId);
 
   // Log in responder team history
   const { error: historyError } = await supabaseClient
@@ -204,7 +228,10 @@ export const removeResponderFromTeam = async (
   }
 
   // Update responder status back to Staged
-  await updateResponderStatus(supabaseClient, responderId, 'Staged');
+  const { error: statusError } = await supabaseClient
+    .from('responders')
+    .update({ status: 'Staged' })
+    .eq('responder_id', responderId);
 
   // Log detachment in responder team history
   const { data: historyData, error: historyFetchError } = await supabaseClient
@@ -231,7 +258,7 @@ export const removeResponderFromTeam = async (
 export const getResponderTeamHistory = async (
   supabaseClient: SupabaseClient,
   responderId: string
-): Promise<any[]> => {
+): Promise<{ history_id: string; team_id: string; attached_datetime: string; detached_datetime: string | null; teams: { team_name_number: string; type: string } }[]> => {
   const { data, error } = await supabaseClient
     .from('responder_team_history')
     .select('*, teams(team_name_number, type)')
@@ -251,7 +278,7 @@ export const getResponderTeamHistory = async (
 export const getResponderCurrentTeam = async (
   supabaseClient: SupabaseClient,
   responderId: string
-): Promise<any | null> => {
+): Promise<{ team_id: string; teams: Team } | null> => {
   const { data, error } = await supabaseClient
     .from('team_responders')
     .select('*, teams(*)')

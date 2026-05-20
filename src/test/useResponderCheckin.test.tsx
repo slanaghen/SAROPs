@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { render, act } from '@testing-library/react';
 import { describe, it, expect } from 'vitest';
-import { useResponderCheckin } from './useResponderCheckin';
+import { useResponderCheckin } from '../hooks/useResponderCheckin';
 import { Responder } from '../types/sarops-types';
 
 const HookTest = ({ onReady }: { onReady: (hook: ReturnType<typeof useResponderCheckin>) => void }) => {

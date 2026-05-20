@@ -1,7 +1,7 @@
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import * as matchers from '@testing-library/jest-dom/matchers';
 import { vi, describe, it, expect, afterEach } from 'vitest';
-import ResponderDashboardPage from './ResponderDashboardPage';
+import ResponderDashboardPage from '../pages/ResponderDashboardPage';
 import { useIncident } from '../context/IncidentContext';
 import useResponderTeamAndAssignment from '../hooks/useResponderTeamAndAssignment';
 import { supabase } from '../lib/supabase';
@@ -48,9 +48,7 @@ describe('ResponderDashboardPage', () => {
   it('shows empty state when responder has no team or assignment', () => {
     vi.mocked(useIncident).mockReturnValue({ 
       responderId: 'r1', 
-      setResponderStatus: vi.fn(),
-      setCurrentTeamStatus: vi.fn(),
-      setCurrentAssignmentStatus: vi.fn()
+      accessLevel: 'responder'
     });
     vi.mocked(useResponderTeamAndAssignment).mockReturnValue({
       team: null,
@@ -69,9 +67,7 @@ describe('ResponderDashboardPage', () => {
     
     vi.mocked(useIncident).mockReturnValue({ 
       responderId: 'r1', 
-      setResponderStatus: vi.fn(),
-      setCurrentTeamStatus: vi.fn(),
-      setCurrentAssignmentStatus: vi.fn()
+      accessLevel: 'responder'
     });
     vi.mocked(useResponderTeamAndAssignment).mockReturnValue({
       team: mockTeam,
@@ -88,9 +84,7 @@ describe('ResponderDashboardPage', () => {
   it('renders loading state', () => {
     vi.mocked(useIncident).mockReturnValue({ 
       responderId: 'r1', 
-      setResponderStatus: vi.fn(),
-      setCurrentTeamStatus: vi.fn(),
-      setCurrentAssignmentStatus: vi.fn()
+      accessLevel: 'responder'
     });
     vi.mocked(useResponderTeamAndAssignment).mockReturnValue({
       loading: true,
@@ -108,8 +102,7 @@ describe('ResponderDashboardPage', () => {
     vi.mocked(useIncident).mockReturnValue({ 
       responderId: 'r1', 
       responderName: 'Steve',
-      setCurrentTeamStatus: vi.fn(),
-      setCurrentAssignmentStatus: vi.fn()
+      accessLevel: 'responder'
     });
     vi.mocked(useResponderTeamAndAssignment).mockReturnValue({
       team: mockTeam,
@@ -158,9 +151,7 @@ describe('ResponderDashboardPage', () => {
       responderId: 'r1',
       incidentId: 'inc-123', // Needed for fetchIncidentDetails
       incidentData: { opPeriodId: 'op-123' }, // Needed for fetchIncidentDetails
-      setResponderStatus: vi.fn(),
-      setCurrentTeamStatus: vi.fn(),
-      setCurrentAssignmentStatus: vi.fn()
+      accessLevel: 'responder'
     });
 
     // Mock supabase calls for fetchIncidentDetails and handleParResponse

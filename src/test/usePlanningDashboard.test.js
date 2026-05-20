@@ -1,6 +1,6 @@
 import { renderHook, waitFor, act } from '@testing-library/react';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
-import { usePlanningDashboard } from './usePlanningDashboard';
+import { usePlanningDashboard } from '../hooks/usePlanningDashboard';
 import { assignResponderToTeam, removeResponderFromTeam, updateResponderStatus } from '../services/responderService';
 
 // Mock dependencies
@@ -265,5 +265,30 @@ describe('usePlanningDashboard Hook', () => {
     expect(removeResponderFromTeam).toHaveBeenCalledWith(mockSupabase, responderId, teamId);
     expect(mockSupabase.from).toHaveBeenCalledWith('responders');
     expect(lastQuery.update).toHaveBeenCalledWith({ status: 'Staged' });
+  });
+
+  it('should accurately calculate operational statistics', async () => {
+    const mockTeams = [
+      { team_id: 't1', status: 'Staged' },
+      { team_id: 't2', status: 'Assigned' }
+    ];
+    const mockAsns = [
+      { assignment_id: 'a1', status: 'Deployed' },
+      { assignment_id: 'a2', status: 'Planned' },
+      { assignment_id: 'a3', status: 'Completed' }
+    ];
+
+    mockSupabase.from.mockImplementation((table) => {
+      if (table === 'teams') return createMockQuery(mockTeams);
+      if (table === 'assignments') return createMockQuery(mockAsns);
+      return createMockQuery([]);
+    });
+
+    const { result } = renderHook(() => usePlanningDashboard(mockSupabase, opPeriodId));
+    await act(async () => { await result.current.fetchDashboardData(); });
+
+    expect(result.current.stats.deployed).toBe(1);
+    expect(result.current.stats.stagedTeams).toBe(1);
+    expect(result.current.stats.completed).toBe(1);
   });
 });

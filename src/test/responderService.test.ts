@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { assignResponderToTeam, removeResponderFromTeam } from './responderService';
+import { assignResponderToTeam, removeResponderFromTeam } from '../services/responderService';
 
 const mockSupabase = {
   from: vi.fn(),

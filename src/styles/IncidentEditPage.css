@@ -1,5 +1,5 @@
 .incident-edit-page {
-  max-width: 1100px;
+  max-width: 1300px;
   margin: 0 auto;
   padding: 24px;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
@@ -25,12 +25,12 @@
 
 .incident-form {
   display: grid;
-  gap: 24px;
+  gap: 10px;
 }
 
 .form-column {
   display: grid;
-  gap: 24px;
+  gap: 10px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 

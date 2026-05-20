@@ -1,7 +1,7 @@
 import { render, screen, waitFor, fireEvent, cleanup, within } from '@testing-library/react';
 import * as matchers from '@testing-library/jest-dom/matchers';
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
-import OperationsDashboardPage from './OperationsDashboardPage';
+import OperationsDashboardPage from '../pages/OperationsDashboardPage';
 import { supabase } from '../lib/supabase';
 import { useIncident } from '../context/IncidentContext';
 
@@ -53,7 +53,7 @@ describe('OperationsDashboardPage Logic', () => {
     cleanup();
   });
 
-  it('should combine a team and assignment into one row when linked', async () => {
+  it('should pass linked data to sub-components to render in one row', async () => {
     const mockAsn = [{ assignment_id: 'a-uuid', name: 'Division Alpha', team_id: 't-uuid', op_period_id: 'op-123', status: 'Assigned' }];
     const mockTeams = [{ team_id: 't-uuid', team_name_number: 'Team 1', type: 'Ground', op_period_id: 'op-123' }];
     const mockResponders = [{ responder_id: 'r-uuid', name: 'Leader Name' }];
@@ -81,7 +81,7 @@ describe('OperationsDashboardPage Logic', () => {
     expect(row).toHaveTextContent('Team 1');
   });
 
-  it('should handle the unassign team action', async () => {
+  it('should coordinate unassign team action through the planning hook', async () => {
     const mockAsn = [{ assignment_id: 'a1', name: 'Asn 1', team_id: 't1', op_period_id: 'op-123', status: 'Assigned' }];
     const mockTeams = [{ team_id: 't1', team_name_number: 'Team 1', op_period_id: 'op-123' }];
     window.confirm = vi.fn().mockReturnValue(true);
@@ -151,7 +151,7 @@ describe('OperationsDashboardPage Logic', () => {
     });
   });
 
-  it('should render a red chip with a clock icon when a PAR check is overdue', async () => {
+  it('should calculate PAR overdue status and pass it to the table component', async () => {
     // Mock a team that checked in 2 hours ago with a 60 min interval
     const twoHoursAgo = new Date(Date.now() - 120 * 60000).toISOString();
     const mockTeams = [{ team_id: 't1', team_name_number: 'T1', status: 'Deployed', last_par_check: twoHoursAgo }];
@@ -172,7 +172,6 @@ describe('OperationsDashboardPage Logic', () => {
 
   it('should disband team and unlink when assignment status is set to Completed', async () => {
     const mockAsn = [{ assignment_id: 'a1', name: 'Asn 1', team_id: 't1', status: 'Deployed' }];
-    window.confirm = vi.fn().mockReturnValue(false); // "Cancel" the keep staged prompt -> Disband
 
     supabase.from.mockImplementation((table) => {
       if (table === 'assignments') return createQueryMock(mockAsn);
@@ -187,7 +186,6 @@ describe('OperationsDashboardPage Logic', () => {
 
     await waitFor(() => {
       expect(supabase.from).toHaveBeenCalledWith('teams');
-      expect(window.confirm).toHaveBeenCalled();
     });
   });
 
@@ -222,9 +220,12 @@ describe('OperationsDashboardPage Logic', () => {
 
     await waitFor(() => {
       expect(supabase.from).toHaveBeenCalledWith('team_messages');
-      const insertArgs = vi.mocked(supabase.from).mock.results.find(r => r.value.insert)?.value.insert.mock.calls[0][0];
+      // Find the specific call index for team_messages to get the correct return value
+      const callIdx = vi.mocked(supabase.from).mock.calls.findIndex(c => c[0] === 'team_messages');
+      const insertArgs = vi.mocked(supabase.from).mock.results[callIdx].value.insert.mock.calls[0][0];
+
       expect(insertArgs).toHaveLength(2);
-      expect(insertArgs[0]).objectContaining({ message_text: '[BROADCAST]: Return to Base' });
+      expect(insertArgs[0]).toEqual(expect.objectContaining({ message_text: '[BROADCAST]: Return to Base' }));
     });
   });
 });

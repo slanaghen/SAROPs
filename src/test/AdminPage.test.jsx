@@ -2,7 +2,7 @@ import { render, screen, cleanup, fireEvent, waitFor, act } from '@testing-libra
 import * as matchers from '@testing-library/jest-dom/matchers';
 import { vi, describe, it, expect, afterEach, beforeEach } from 'vitest';
 import { BrowserRouter } from 'react-router-dom';
-import AdminPage from './AdminPage';
+import AdminPage from '../pages/AdminPage';
 import { useIncident } from '../context/IncidentContext';
 import { supabase } from '../lib/supabase'; // Import the actual supabase object to mock it
 

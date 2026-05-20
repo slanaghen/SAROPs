@@ -47,11 +47,16 @@ function App() {
     isAdmin, 
     incidentData, 
     responderName, 
+    responderId,
     responderStatus, 
+    setResponderStatus,
     accessLevel, 
+    setAccessLevel,
     currentTeamStatus,
     currentAssignmentStatus,
-    logout 
+    setCurrentTeamStatus,
+    setCurrentAssignmentStatus,
+    logout
   } = useIncident();
 
   // Request notification permission on first load if checked in
@@ -60,6 +65,81 @@ function App() {
       Notification.requestPermission();
     }
   }, [isActive]);
+
+  // Global Real-time Session Sync
+  // Ensures the top banner and context state reflect DB changes immediately
+  useEffect(() => {
+    if (!isActive || !responderId) return;
+
+    console.debug('🔄 Initializing global session sync for:', responderId);
+    const syncSession = async () => {
+      try {
+        // 1. Fetch latest responder status and access level
+        const { data: resp } = await supabase
+          .from('responders')
+          .select('status, access_level')
+          .eq('responder_id', responderId)
+          .single();
+
+        if (resp) {
+          setResponderStatus(resp.status);
+          if (setAccessLevel) setAccessLevel(resp.access_level);
+        }
+
+        // 2. Fetch latest team and assignment context
+        const { data: membership } = await supabase
+          .from('team_responders')
+          .select('team_id, teams(status, assignments(status))')
+          .eq('responder_id', responderId)
+          .maybeSingle();
+
+        if (membership && membership.teams) {
+          setCurrentTeamStatus(membership.teams.status);
+          const assignments = membership.teams.assignments;
+          const activeAsn = Array.isArray(assignments) ? assignments[0] : assignments;
+          setCurrentAssignmentStatus(activeAsn?.status || null);
+        } else {
+          setCurrentTeamStatus(null);
+          setCurrentAssignmentStatus(null);
+        }
+      } catch (err) {
+        console.error('Session sync error:', err);
+      }
+    };
+
+    syncSession();
+
+    // Force sync when window regains focus (handles sleep/wake issues)
+    window.addEventListener('focus', syncSession);
+
+    // Subscribe to real-time updates for this responder
+    const channel = supabase
+      .channel(`global-session-sync-${responderId}`)
+      .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
+        table: 'responders', 
+        filter: `responder_id=eq.${responderId}` 
+      }, () => {
+        console.debug('📡 Responder record change detected, syncing...');
+        syncSession();
+      })
+      .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
+        table: 'team_responders', 
+        filter: `responder_id=eq.${responderId}` 
+      }, () => {
+        console.debug('📡 Team membership change detected, syncing...');
+        syncSession();
+      })
+      .subscribe();
+
+    return () => {
+      window.removeEventListener('focus', syncSession);
+      supabase.removeChannel(channel);
+    };
+  }, [isActive, responderId, setResponderStatus, setAccessLevel, setCurrentTeamStatus, setCurrentAssignmentStatus]);
 
   // Audio and browser notification for status changes (responder, team, assignment)
   const prevStatusRef = useRef(responderStatus);
@@ -141,7 +221,7 @@ function App() {
               <>
                 {responderName}
                 <span style={{ fontSize: '0.9em', opacity: 0.8, marginLeft: '4px' }}>
-                  ({accessLevel === 'command staff' ? 'Staff' : 'Responder'})
+                  ({(accessLevel === 'command staff' || isAdmin) ? 'Staff' : 'Responder'})
                 </span>
               </>
             ) : (user?.email || 'Guest')}
@@ -167,6 +247,7 @@ function App() {
                   <Link to="/checkin" onClick={() => setMenuOpen(false)}>Check-in</Link>
                   <Link to="/incident-edit" onClick={() => setMenuOpen(false)}>Incident</Link>
                   <Link to="/admin" onClick={() => setMenuOpen(false)}>Administration</Link>
+                  <Link to="/ics" onClick={() => setMenuOpen(false)}>ICS Organization Chart</Link>
                   <Link to="/action-log" onClick={() => setMenuOpen(false)}>Action Log</Link>
                   <div className="dropdown-divider"></div>
                   <Link to="/checkout" onClick={() => setMenuOpen(false)} className="dropdown-item">Check Out</Link>

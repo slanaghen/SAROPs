@@ -1,6 +1,7 @@
 // sarops-types.d.ts
 
 export type AssignmentStatus = 'Planned' | 'Assigned' | 'Deployed' | 'Completed' | 'Incomplete';
+export type AccessLevel = 'responder' | 'command staff';
 export type TeamStatus = 'Staged' | 'Assigned' | 'Deployed' | 'Disbanded';
 export type TeamType = 'Ground Search' | 'UAS Search' | 'Dog Air' | 'Dog Track' | 'Transport' | 'Helicopter' | 'Other';
 export type ResponderStatus = 'Staged' | 'Attached' | 'Assigned' | 'Deployed';
@@ -58,6 +59,7 @@ export interface Responder {
   device_id: string; // Distinct browser/session token for offline tracking
   checkin_datetime: string;
   checkout_datetime: string | null;
+  access_level: AccessLevel;
   status: ResponderStatus;
 }
 
@@ -82,4 +84,12 @@ export interface Clue {
   discovered_by_team_id: string | null;
   discovered_by_responder_id: string | null;
   timestamp: string;
+}
+
+export interface ICSAssignment {
+  ics_assignment_id: string; // UUID Primary Key
+  incident_id: string; // Foreign Key
+  position: string; // e.g., 'ic', 'safety', 'ops'
+  responder_id: string | null; // Foreign Key to Responder
+  assigned_at: string; // ISO Timestamp
 }

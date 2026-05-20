@@ -4,6 +4,16 @@ import { supabase } from '../lib/supabase';
 import { useIncident } from '../context/IncidentContext';
 
 /**
+ * Configuration for available team types. 
+ * Moving this out of the JSX makes the component more extensible.
+ */
+const TEAM_TYPES = [
+  'Hasty', 'Ground Search', 'Vehicle Search', 'Aerial Search', 
+  'Water Search', 'Tracking', 'Dog', 'Avalanche', 
+  'Helicopter', 'Medical', 'Other'
+];
+
+/**
  * Shared Modal for creating and editing Teams.
  */
 const TeamFormModal = ({
@@ -13,14 +23,24 @@ const TeamFormModal = ({
   initialData = {},
   responders = [],
   loading = false,
-  error = null
+  error = null,
+  commandStaffExists = false
 }) => {
   const { responderName, user } = useIncident();
   const staffName = responderName || user?.email || 'Operations';
 
+  // Initialize roles from current responders
+  const initialRoles = {};
+  if (initialData.current_responders) {
+    initialData.current_responders.forEach(r => {
+      initialRoles[r.responder_id] = r.role || '';
+    });
+  }
+
   const [teamForm, setTeamForm] = useState({
     ...initialData,
-    equipment: Array.isArray(initialData.equipment) ? initialData.equipment.join(', ') : (initialData.equipment || '')
+    equipment: Array.isArray(initialData.equipment) ? initialData.equipment.join(', ') : (initialData.equipment || ''),
+    responder_roles: initialRoles
   });
 
   const [messages, setMessages] = useState([]);
@@ -85,11 +105,30 @@ const TeamFormModal = ({
   const handleToggleResponder = (responderId) => {
     const selectedIds = teamForm.responder_ids || [];
     const isSelected = selectedIds.includes(responderId);
+    
+    const newRoles = { ...(teamForm.responder_roles || {}) };
+    if (isSelected) {
+      delete newRoles[responderId];
+    } else {
+      newRoles[responderId] = '';
+    }
+
     setTeamForm({
       ...teamForm,
       responder_ids: isSelected
         ? selectedIds.filter(id => id !== responderId)
         : [...selectedIds, responderId],
+      responder_roles: newRoles
+    });
+  };
+
+  const handleRoleChange = (responderId, role) => {
+    setTeamForm({
+      ...teamForm,
+      responder_roles: {
+        ...(teamForm.responder_roles || {}),
+        [responderId]: role
+      }
     });
   };
 
@@ -127,18 +166,23 @@ const TeamFormModal = ({
 
         <div className="form-row">
           <label htmlFor="team_type">Type</label>
-          <select id="team_type" value={teamForm.type} onChange={e => setTeamForm({ ...teamForm, type: e.target.value })}>
-            <option>Hasty</option>
-            <option>Ground Search</option>
-            <option>Vehicle Search</option>
-            <option>Aerial Search</option>
-            <option>Water Search</option>
-            <option>Tracking</option>
-            <option>Dog</option>
-            <option>Avalanche</option>
-            <option>Helicopter</option>
-            <option>Medical</option>
-            <option>Other</option>
+          <select id="team_type" value={teamForm.type} onChange={e => {
+            const newType = e.target.value;
+            const newRoles = { ...(teamForm.responder_roles || {}) };
+            if (teamForm.leader_responder_id) {
+              const oldLeaderRole = teamForm.type === 'Command Staff' ? 'Incident Commander' : 'Team Leader';
+              if (newRoles[teamForm.leader_responder_id] === oldLeaderRole || !newRoles[teamForm.leader_responder_id]) {
+                newRoles[teamForm.leader_responder_id] = newType === 'Command Staff' ? 'Incident Commander' : 'Team Leader';
+              }
+            }
+            setTeamForm({ ...teamForm, type: newType, responder_roles: newRoles });
+          }}>
+            {TEAM_TYPES.map(type => (
+              <option key={type} value={type}>{type}</option>
+            ))}
+            {(teamForm.type === 'Command Staff' || !commandStaffExists) && (
+              <option value="Command Staff">Command Staff</option>
+            )}
           </select>
         </div>
 
@@ -153,17 +197,28 @@ const TeamFormModal = ({
         </div>
 
         <div className="form-row">
-          <label htmlFor="team_leader">Leader</label>
+          <label htmlFor="team_leader">{teamForm.type === 'Command Staff' ? 'Incident Commander' : 'Leader'}</label>
           <select 
             id="team_leader"
             value={teamForm.leader_responder_id || ''} 
             onChange={e => {
               const leaderId = e.target.value;
+              const oldLeaderId = teamForm.leader_responder_id;
               const currentIds = teamForm.responder_ids || [];
+              const newRoles = { ...(teamForm.responder_roles || {}) };
+              const leaderRole = teamForm.type === 'Command Staff' ? 'Incident Commander' : 'Team Leader';
+              
+              if (oldLeaderId && oldLeaderId !== leaderId && (newRoles[oldLeaderId] === 'Team Leader' || newRoles[oldLeaderId] === 'Incident Commander')) {
+                newRoles[oldLeaderId] = '';
+              }
+              
+              newRoles[leaderId] = leaderRole;
+
               setTeamForm({ 
                 ...teamForm, 
                 leader_responder_id: leaderId,
-                responder_ids: currentIds.includes(leaderId) ? currentIds : [...currentIds, leaderId]
+                responder_ids: currentIds.includes(leaderId) ? currentIds : [...currentIds, leaderId],
+                responder_roles: newRoles
               });
             }}
           >
@@ -182,16 +237,30 @@ const TeamFormModal = ({
             ) : (
               availableResponders.map(r => {
                 const isSelected = (teamForm.responder_ids || []).includes(r.responder_id);
+                const role = (teamForm.responder_roles || {})[r.responder_id] || '';
                 return (
-                  <button
-                    key={r.responder_id}
-                    type="button"
-                    className={`responder-chip ${isSelected ? 'selected' : ''}`}
-                    onClick={() => handleToggleResponder(r.responder_id)}
-                  >
-                    <span>{r.name}</span>
-                    <small>{r.agency || ''}</small>
-                  </button>
+                  <div key={r.responder_id} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                    <button
+                      type="button"
+                      className={`responder-chip ${isSelected ? 'selected' : ''}`}
+                      onClick={() => handleToggleResponder(r.responder_id)}
+                      style={{ flex: 1, textAlign: 'left' }}
+                    >
+                      <span>{r.name}</span>
+                      <small>{r.agency || ''}</small>
+                    </button>
+                    {isSelected && (
+                      <input 
+                        type="text" 
+                        placeholder="Role (optional)" 
+                        value={role}
+                        onChange={(e) => handleRoleChange(r.responder_id, e.target.value)}
+                        style={{ width: '120px', padding: '4px 8px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                        disabled={r.responder_id === teamForm.leader_responder_id}
+                        title={r.responder_id === teamForm.leader_responder_id ? `${teamForm.type === 'Command Staff' ? 'Incident Commander' : 'Leader'} role is fixed` : "Assign a team role"}
+                      />
+                    )}
+                  </div>
                 );
               })
             )}

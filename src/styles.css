@@ -15,7 +15,7 @@ body, html, #root {
 }
 
 .app-shell {
-  max-width: 1400px;
+  max-width: 1600px;
   margin: 0 auto;
   padding: 12px;
 }
@@ -202,7 +202,7 @@ article {
 }
 
 .status-indicator {
-  padding: 2px 8px;
+  padding: 2px 2px;
   border-radius: 4px;
   font-weight: 700;
   font-size: 11px;
@@ -252,7 +252,7 @@ article {
 /* High-Density Compact Overrides */
 .operations-table th,
 .operations-table td {
-  padding: 4px 8px !important;
+  padding: 4px 1px !important;
   font-size: 12px !important;
 }
 

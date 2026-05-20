@@ -2,17 +2,18 @@ import { render, screen } from '@testing-library/react';
 import * as matchers from '@testing-library/jest-dom/matchers';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
-import App from './App';
-import { useIncident } from './context/IncidentContext';
+import App from '../App';
+import { useIncident } from '../context/IncidentContext';
+import { supabase } from '../lib/supabase';
 
 expect.extend(matchers);
 
-vi.mock('./context/IncidentContext', () => ({
+vi.mock('../context/IncidentContext', () => ({
   __esModule: true,
   useIncident: vi.fn(),
 }));
 
-vi.mock('./lib/supabase', () => ({
+vi.mock('../lib/supabase', () => ({
   supabase: {
     auth: {
       getSession: vi.fn().mockResolvedValue({ data: { session: null } }),
@@ -79,5 +80,22 @@ describe('App Component', () => {
     render(<MemoryRouter><App /></MemoryRouter>);
     expect(screen.getByText('Mountain Rescue')).toBeInTheDocument();
     expect(screen.getByText('Steve')).toBeInTheDocument();
+  });
+
+  it('triggers a session sync when the window regains focus', () => {
+    vi.mocked(useIncident).mockReturnValue({
+      isActive: true,
+      responderId: 'res-123',
+      setResponderStatus: vi.fn(),
+      setCurrentTeamStatus: vi.fn(),
+      setCurrentAssignmentStatus: vi.fn(),
+    });
+
+    render(<MemoryRouter><App /></MemoryRouter>);
+    
+    // Simulate window focus
+    window.dispatchEvent(new Event('focus'));
+
+    expect(supabase.from).toHaveBeenCalledWith('responders');
   });
 });

@@ -1,6 +1,6 @@
 .operations-dashboard {
   padding: 24px;
-  max-width: 1280px;
+  max-width: 1600px;
   margin: 0 auto;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
     'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
@@ -75,27 +75,35 @@
 }
 
 .operations-table {
-  width: 100%;
+  width: auto;
   border-collapse: collapse;
-  min-width: 920px;
+  min-width: fit-content;
+  table-layout: auto;
   background: #fff;
 }
 
 .operations-table th,
 .operations-table td {
-  padding: 16px 18px;
+  padding: 4px 1px;
   border-bottom: 1px solid #f0f0f0;
   text-align: left;
   vertical-align: middle;
+  width: 1px;
+  min-width: 1px;
 }
 
 .operations-table th {
+  text-align: center;
   background: #f8fafc;
   color: #2c3e50;
   font-weight: 700;
   font-size: 13px;
   letter-spacing: 0.02em;
   text-transform: uppercase;
+  white-space: normal;
+  line-height: 1.1;
+  vertical-align: bottom;
+  word-break: break-word;
 }
 
 .operations-table tbody tr:hover {
@@ -117,6 +125,7 @@
 .operations-table td {
   color: #202020;
   font-size: 14px;
+  white-space: nowrap;
 }
 
 .empty-row {
@@ -134,8 +143,8 @@
   background-color: #fff;
   color: #374151;
   cursor: pointer;
-  width: 100%;
-  min-width: 90px;
+  width: auto;
+  min-width: 40px;
 }
 
 .status-update-select:hover {
@@ -164,8 +173,8 @@
 
 .chip {
   display: inline-block;
-  padding: 4px 10px;
-  border-radius: 16px;
+  padding: 4px 2px;
+  border-radius: 4px;
   font-weight: 600;
   font-size: 13px;
   cursor: grab;
@@ -216,4 +225,84 @@
   .operations-table {
     min-width: 780px;
   }
+}
+
+.operations-content-wrapper {
+  display: flex;
+  gap: 10px;
+  transition: all 0.3s ease;
+}
+
+.operations-content-wrapper.layout-split {
+  flex-direction: row;
+}
+
+.operations-content-wrapper.layout-split > .table-panel {
+  /* Flex basis is controlled via inline style in the component */
+  min-width: 0;
+}
+
+.operations-content-wrapper.layout-map > .map-panel {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+}
+
+@media (max-width: 1100px) {
+  .operations-content-wrapper.layout-split {
+    flex-direction: column;
+  }
+}
+
+.resizer-handle {
+  width: 4%; /* This creates the visual space (4% of total width) */
+  cursor: col-resize;
+  background: transparent;
+  display: flex;
+  align-self: stretch;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.resizer-handle:hover, .resizer-handle:active {
+  background: rgba(37, 99, 235, 0.05); /* Very subtle highlight in the gutter */
+}
+
+.resizer-handle::after {
+  content: "";
+  height: 40%;
+  width: 4px;
+  background: #cbd5e1; /* The visible gray bar */
+  border: 1px solid #94a3b8;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.resizer-handle:hover::after, .resizer-handle:active::after {
+  background: #3b82f6;
+  border-color: #2563eb;
+  width: 6px;
+}
+
+/* Disable transitions while resizing for instant response */
+.operations-content-wrapper.is-resizing {
+  transition: none !important;
+}
+
+.map-wrapper {
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid #cbd5e1;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.04);
+  background: #fff;
+  height: 650px;
+  width: 100%;
+}
+
+.map-container {
+  height: 100%;
+  width: 100%;
 }

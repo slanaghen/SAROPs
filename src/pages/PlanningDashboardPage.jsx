@@ -25,6 +25,7 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
     assignments,
     responders,
     loading,
+    stats,
     error: hookError,
     fetchDashboardData,
     assignTeamToAssignment,
@@ -82,19 +83,6 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
       // Error is already set in hook state
     }
   };
-
-  /**
-   * Calculate operations statistics based on current data
-   * Same logic as Operations Dashboard for consistency
-   */
-  const stats = useMemo(() => ({
-    deployed: assignments.filter(a => a.status === 'Deployed').length,
-    planned: assignments.filter(a => a.status === 'Planned').length,
-    stagedTeams: teams.filter(t => t.status === 'Staged').length,
-    stagedResponders: responders.filter(r => r.status === 'Staged').length,
-    completed: assignments.filter(a => a.status === 'Completed').length,
-    incomplete: assignments.filter(a => a.status === 'Incomplete').length,
-  }), [assignments, teams, responders]);
 
   if (!operationalPeriodId) {
     return (

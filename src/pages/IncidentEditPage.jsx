@@ -208,7 +208,20 @@ const IncidentEditPage = () => {
 
         if (opError) throw opError;
 
-        // 3. Update global state with real IDs
+                // 3. Create automatic Command Staff team
+        const { error: teamError } = await supabase
+          .from('teams')
+          .insert({
+            op_period_id: opPeriodId,
+            team_name_number: 'Incident Command',
+            sartopo_color_hex: '#0000FF',
+            type: 'Command Staff',
+            status: 'Staged'
+          });
+
+        if (teamError) throw teamError;
+
+        // 4. Update global state with real IDs
         startIncident(incidentId, incident.name, operationalPeriod.op_number, opPeriodId);
       }
 

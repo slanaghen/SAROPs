@@ -31,6 +31,9 @@ const Navigation = () => {
         <Link to="/incident-edit" className={`nav-tab ${path === '/incident-edit' ? 'active' : ''}`}>
           Incident
         </Link>
+        <Link to="/ics" className={`nav-tab ${path === '/ics' ? 'active' : ''}`}>
+          ICS Organization Chart
+        </Link>
         <Link to="/admin" className={`nav-tab ${path === '/admin' ? 'active' : ''}`}>
           Admin
         </Link>
