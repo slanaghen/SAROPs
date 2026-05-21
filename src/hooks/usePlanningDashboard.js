@@ -21,31 +21,19 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
   const [error, setError] = useState(null);
 
   const normalizeAssignment = (assignment) => {
-    const title = assignment.title || assignment.name || '';
-    const segment = assignment.segment || assignment.division || null;
-    const resource_type = assignment.resource_type || assignment.assignment_type || '';
-    const team_size = assignment.team_size ?? assignment.assignment_size ?? null;
-    const frequency_primary = assignment.frequency_primary || assignment.tac_channel || '';
-    const description = assignment.description || assignment.description_narrative || '';
-    const probability_of_detection = assignment.probability_of_detection ?? assignment.pod ?? null;
+    // Primary schema fields now align with SARTopo. 
+    // This mapper ensures backward compatibility with UI props if they haven't switched yet.
+    const title = assignment.title || '';
 
     return {
       ...assignment,
-      name: title,
-      title,
-      division: segment,
-      segment,
-      assignment_type: resource_type,
-      resource_type,
-      assignment_size: team_size,
-      team_size,
-      tac_channel: frequency_primary,
-      frequency_primary,
-      description_narrative: assignment.description_narrative || description,
-      debrief_narrative: assignment.debrief_narrative || description,
-      description,
-      pod: assignment.pod ?? probability_of_detection,
-      probability_of_detection,
+      name: title, // Legacy prop
+      division: assignment.segment, // Legacy prop
+      assignment_type: assignment.resource_type, // Legacy prop
+      assignment_size: assignment.team_size, // Legacy prop
+      tac_channel: assignment.frequency_primary, // Legacy prop
+      description_narrative: assignment.description_narrative || assignment.description, // Legacy prop
+      pod: assignment.pod ?? assignment.probability_of_detection, // Legacy prop
     };
   };
 

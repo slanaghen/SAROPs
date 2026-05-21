@@ -69,7 +69,6 @@ DROP TABLE IF EXISTS clues CASCADE;
 DROP TABLE IF EXISTS team_responders CASCADE;
 DROP TABLE IF EXISTS action_logs CASCADE;
 DROP TABLE IF EXISTS team_messages CASCADE;
-DROP TABLE IF EXISTS ics_assignments CASCADE;
 DROP TABLE IF EXISTS admin_users CASCADE;
 DROP VIEW IF EXISTS team_current_responders CASCADE;
 DROP VIEW IF EXISTS incident_summary CASCADE;
@@ -244,17 +243,6 @@ CREATE TABLE team_messages (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- Table: ics_assignments
--- Stores assignments for ICS roles for a given incident
-CREATE TABLE ics_assignments (
-  ics_assignment_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  incident_id TEXT NOT NULL REFERENCES incidents(incident_id) ON DELETE CASCADE ON UPDATE CASCADE,
-  position TEXT NOT NULL, -- e.g., 'ic', 'safety', 'ops'
-  responder_id UUID REFERENCES responders(responder_id) ON DELETE SET NULL,
-  assigned_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT unique_ics_position_per_incident UNIQUE (incident_id, position)
-);
-
 -- Table: admin_users
 -- Simple table-based auth for system administrators (managed via Admin page)
 CREATE TABLE admin_users (
@@ -377,7 +365,6 @@ RETURNS TRIGGER AS $func$
 DECLARE
     _responder_id UUID;
     is_command_staff_team_member BOOLEAN;
-    has_ics_assignment BOOLEAN;
     target_access_level access_level;
     staff_team_status team_status;
 BEGIN
@@ -403,15 +390,8 @@ BEGIN
 
     is_command_staff_team_member := (staff_team_status IS NOT NULL);
 
-    -- Check if the responder has any ICS assignment
-    SELECT EXISTS (
-        SELECT 1
-        FROM ics_assignments
-        WHERE responder_id = _responder_id
-    ) INTO has_ics_assignment;
-
     -- Determine the target access level
-    IF is_command_staff_team_member OR has_ics_assignment THEN
+    IF is_command_staff_team_member THEN
         target_access_level := 'command staff';
     ELSE
         target_access_level := 'responder';
@@ -507,7 +487,6 @@ ALTER TABLE clues ENABLE ROW LEVEL SECURITY;
 ALTER TABLE team_responders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE action_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE team_messages ENABLE ROW LEVEL SECURITY;
-ALTER TABLE ics_assignments ENABLE ROW LEVEL SECURITY;
 
 -- Helper function to check if the current user is an anonymous responder
 CREATE OR REPLACE FUNCTION is_anonymous_responder()
@@ -644,10 +623,4 @@ CREATE POLICY "Allow authenticated to view messages for their team" ON team_mess
 CREATE POLICY "Allow authenticated to insert messages for their team" ON team_messages
   FOR INSERT TO authenticated WITH CHECK (team_id IN (SELECT team_id FROM team_responders WHERE responder_id IN (SELECT responder_id FROM responders WHERE auth_uid = auth.uid())));
 CREATE POLICY "Admins/Staff can manage all team messages" ON team_messages
-  FOR ALL TO authenticated USING (is_admin_or_command_staff()) WITH CHECK (is_admin_or_command_staff());
-
--- Policies for `ics_assignments`
-CREATE POLICY "Allow authenticated to view ICS assignments in their incident" ON ics_assignments
-  FOR SELECT TO authenticated USING (incident_id IN (SELECT incident_id FROM responders WHERE auth_uid = auth.uid()));
-CREATE POLICY "Admins/Staff can manage all ICS assignments" ON ics_assignments
   FOR ALL TO authenticated USING (is_admin_or_command_staff()) WITH CHECK (is_admin_or_command_staff());

@@ -416,7 +416,7 @@ const IncidentEditPage = () => {
         // Check out all remaining responders
         if (activeResponders.length > 0) {
           await supabase.from('responders')
-            .update({ status: 'Staged', checkout_datetime: now })
+            .update({ status: 'CheckedOut', checkout_datetime: now })
             .eq('incident_id', contextIncidentId)
             .is('checkout_datetime', null);
         }

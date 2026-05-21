@@ -289,14 +289,14 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
 
       if (isStaff && targetIncidentId) {
         const { data: roleData } = await supabase
-          .from('ics_assignments')
-          .select('position')
-          .eq('incident_id', targetIncidentId)
+          .from('team_responders')
+          .select('role, teams!inner(type)')
+          .eq('teams.type', 'Staff')
           .eq('responder_id', finalResponder.responder_id)
           .maybeSingle();
 
         if (roleData) {
-          setIcsRole(roleData.position);
+          setIcsRole(roleData.role);
         }
       }
 

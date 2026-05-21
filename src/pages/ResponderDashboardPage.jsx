@@ -170,12 +170,12 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     const fetchIcsRole = async () => {
       if ((accessLevel === 'command staff' || accessLevel === 'admin') && incidentId && responderId) {
         const { data } = await supabase
-          .from('ics_assignments')
-          .select('position')
-          .eq('incident_id', incidentId)
+          .from('team_responders')
+          .select('role, teams!inner(type)')
+          .eq('teams.type', 'Staff')
           .eq('responder_id', responderId)
           .maybeSingle();
-        if (data) setIcsRole(data.position);
+        if (data) setIcsRole(data.role);
       } else {
         setIcsRole(null);
       }

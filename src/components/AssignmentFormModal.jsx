@@ -27,8 +27,8 @@ const AssignmentFormModal = ({
           <input
             id="asn_name"
             type="text"
-            value={assignmentForm.title || assignmentForm.name || ''}
-            onChange={e => setAssignmentForm({ ...assignmentForm, title: e.target.value, name: e.target.value })}
+            value={assignmentForm.title || ''}
+            onChange={e => setAssignmentForm({ ...assignmentForm, title: e.target.value })}
             placeholder="e.g., AA, AB, Sector 1"
           />
         </div>
@@ -39,8 +39,8 @@ const AssignmentFormModal = ({
             <input
               id="asn_division"
               type="text"
-              value={assignmentForm.segment || assignmentForm.division || ''}
-              onChange={e => setAssignmentForm({ ...assignmentForm, segment: e.target.value, division: e.target.value })}
+              value={assignmentForm.segment || ''}
+              onChange={e => setAssignmentForm({ ...assignmentForm, segment: e.target.value })}
               placeholder="Division or Segment"
               style={{ width: '100%', boxSizing: 'border-box' }}
             />
@@ -51,8 +51,8 @@ const AssignmentFormModal = ({
             <input
               id="asn_size"
               type="number"
-              value={assignmentForm.team_size || assignmentForm.assignment_size || ''}
-              onChange={e => setAssignmentForm({ ...assignmentForm, team_size: e.target.value, assignment_size: e.target.value })}
+              value={assignmentForm.team_size || ''}
+              onChange={e => setAssignmentForm({ ...assignmentForm, team_size: e.target.value })}
               placeholder="Size"
               style={{ width: '100%', boxSizing: 'border-box' }}
             />
@@ -63,8 +63,8 @@ const AssignmentFormModal = ({
             <input
               id="asn_type"
               type="text"
-              value={assignmentForm.resource_type || assignmentForm.assignment_type || ''}
-              onChange={e => setAssignmentForm({ ...assignmentForm, resource_type: e.target.value, assignment_type: e.target.value })}
+              value={assignmentForm.resource_type || ''}
+              onChange={e => setAssignmentForm({ ...assignmentForm, resource_type: e.target.value })}
               placeholder="Type"
               style={{ width: '100%', boxSizing: 'border-box' }}
             />
@@ -75,8 +75,8 @@ const AssignmentFormModal = ({
             <input
               id="asn_tac"
               type="text"
-              value={assignmentForm.frequency_primary || assignmentForm.tac_channel || ''}
-              onChange={e => setAssignmentForm({ ...assignmentForm, frequency_primary: e.target.value, tac_channel: e.target.value })}
+              value={assignmentForm.frequency_primary || ''}
+              onChange={e => setAssignmentForm({ ...assignmentForm, frequency_primary: e.target.value })}
               placeholder="TAC"
               style={{ width: '100%', boxSizing: 'border-box' }}
             />
