@@ -837,7 +837,7 @@ const AdminPage = () => {
                         </td>
                         <td style={{ textAlign: 'right' }}>
                           <button 
-                            onClick={() => handleDeleteAssignment(asn.assignment_id, asn.name)} 
+                            onClick={() => handleDeleteAssignment(asn.assignment_id, asn.title || asn.name)} 
                             className="btn btn-secondary btn-sm" 
                             style={{ color: '#dc2626' }}
                           >

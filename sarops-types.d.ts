@@ -28,13 +28,39 @@ export interface Assignment {
   assignment_id: string; // UUID Primary Key
   op_period_id: string; // Foreign Key
   sartopo_id: string | null; // 1:1 mapping to SARTopo object
-  name: string;
+  title: string;
+  name?: string;
   status: AssignmentStatus;
   is_orphaned: boolean; // True if deleted in SARTopo, preserved until explicitly purged
   team_id: string | null; // Foreign Key to Team
   poa?: number;
   pod?: number;
   debrief_narrative?: string;
+  probability_of_detection?: number;
+
+  // SARTopo aligned fields (new)
+  title?: string;
+  segment?: string | null;
+  resource_type?: string;
+  team_size?: number;
+  frequency_primary?: string;
+  description?: string;
+  probabilityOfDetection?: number;
+  probability_of_detection?: number;
+
+  // Additional metadata
+  team_name?: string;
+  priority?: string;
+  transportation?: string;
+  time_allocated?: string;
+  segmentArea?: string;
+  hazards?: string;
+  preparedBy?: string;
+  folder_id?: string;
+  color?: string;
+  stroke?: string;
+  fill?: string;
+  updated?: string;
 }
 
 export interface Team {

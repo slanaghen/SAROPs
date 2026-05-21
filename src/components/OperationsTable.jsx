@@ -101,7 +101,7 @@ const OperationsTable = ({
                 />
               </td>
             ))}
-            <td style={{ textAlign: 'center' }}></td> {/* For Team Size */}
+            <td style={{ textAlign: 'center' }}></td>
             <td style={{ textAlign: 'center' }}></td>
             {parInterval > 0 && <td style={{ textAlign: 'center' }}></td>}
             <td style={{ textAlign: 'center' }}></td>
@@ -175,7 +175,6 @@ const OperationsTable = ({
               </td>
               <td style={{ textAlign: 'center', fontFamily: 'monospace', fontSize: '12px' }}>{row.leaderIdentifier || '—'}</td>
               <td style={{ textAlign: 'center' }}>{row.teamSize || '—'}</td>
-              {/* Leader ID column is not explicitly requested in the prompt, so it's omitted for now. */}
               <td style={{ textAlign: 'center' }}>
                 {row.teamId ? (
                   <span className={`status-indicator ${row.teamStatus?.toLowerCase() || ''}`}>{row.teamStatus || '—'}</span>

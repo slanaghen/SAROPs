@@ -62,7 +62,7 @@ describe('ResponderDashboardPage', () => {
 
   it('renders team and assignment information when available', () => {
     const mockTeam = { team_name_number: 'Team 1', type: 'Ground', status: 'Assigned' };
-    const mockAsn = { name: 'Area A', status: 'Planned', division: 'A' };
+    const mockAsn = { title: 'Area A', name: 'Area A', status: 'Planned', division: 'A', segment: 'A', probability_of_detection: null };
     
     vi.mocked(useIncident).mockReturnValue({ 
       responderId: 'r1', 
@@ -95,7 +95,7 @@ describe('ResponderDashboardPage', () => {
 
   it('should show Deploy button for leader and cascade Deployed status to team and members', async () => {
     const mockTeam = { team_id: 't1', team_name_number: 'Team 1', leader_responder_id: 'r1', status: 'Assigned' };
-    const mockAsn = { assignment_id: 'a1', name: 'Area A', status: 'Assigned' };
+    const mockAsn = { assignment_id: 'a1', title: 'Area A', name: 'Area A', status: 'Assigned' };
     const mockRefetch = vi.fn();
     
     vi.mocked(useIncident).mockReturnValue({ 

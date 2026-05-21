@@ -14,7 +14,7 @@ const mockTeams = [
   { team_id: 't1', team_name_number: 'Team 1', status: 'Staged', type: 'Other' }
 ];
 const mockAssignments = [
-  { assignment_id: 'a1', name: 'Assignment A', op_period_id: 'op1', status: 'Planned' }
+  { assignment_id: 'a1', title: 'Assignment A', name: 'Assignment A', op_period_id: 'op1', status: 'Planned' }
 ];
 
 afterEach(() => {

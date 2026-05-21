@@ -158,7 +158,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   }, [assignments]);
 
   const rows = useMemo(() => {
-    const assignmentRows = (assignments || []).map(asnItem => {
+      const assignmentRows = (assignments || []).map(asnItem => {
       const matchingTeam = asnItem.team_id ? teamById[asnItem.team_id] : null;
       return {
         id: `asn-${asnItem.assignment_id}`,
@@ -168,10 +168,10 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
           return minutesSince > (parInterval + 3);
         })(),
         timeSincePar: matchingTeam ? formatTimeSince(matchingTeam.last_par_check, matchingTeam.created_at) : '',
-        tacChannel: asnItem.tac_channel || '—',
+        tacChannel: asnItem.frequency_primary || asnItem.tac_channel || '—',
         assignmentId: asnItem.assignment_id,
-        assignmentName: asnItem.name,
-        assignmentType: asnItem.assignment_type || '—',
+        assignmentName: asnItem.title || asnItem.name,
+        assignmentType: asnItem.resource_type || asnItem.assignment_type || '—',
         assignmentStatus: asnItem.status,
         teamName: matchingTeam?.team_name_number || '',
         teamType: matchingTeam?.type || '',
@@ -361,7 +361,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       const team = teamById[teamId];
       const assignment = assignmentById[getRawUuid(assignmentId)];
       const teamName = team?.team_name_number || 'Unknown Team';
-      const asnName = assignment?.name || 'Unknown Assignment';
+      const asnName = assignment?.title || assignment?.name || 'Unknown Assignment';
       
     } catch (err) {
       // Error is handled by hook
@@ -401,7 +401,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       const team = teamById[teamId];
       const assignment = assignmentById[assignmentId];
       const teamName = team?.team_name_number || 'Unknown Team';
-      const asnName = assignment?.name || 'Unknown Assignment';
+      const asnName = assignment?.title || assignment?.name || 'Unknown Assignment';
       
       setDraggedItem(null);
       setDropTarget(null);
@@ -428,10 +428,11 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     setPendingTeamId(null);
     setAssignmentForm({
       op_period_id: operationalPeriodId,
-      division: 'A',
-      name: '',
-      assignment_type: 'Ground',
-      assignment_size: 2,
+      segment: 'A',
+      title: '',
+      resource_type: 'Ground',
+      team_size: 2,
+      frequency_primary: '',
       status: 'Planned'
     });
     setShowAssignmentForm(true);
@@ -503,14 +504,14 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     try {
       const payload = {
         op_period_id: operationalPeriodId,
-        name: formData.name || '',
+        title: formData.title || formData.name || '',
         status: pendingTeamId ? 'Assigned' : (formData.status || 'Planned'),
-        division: formData.division || '',
-        assignment_type: formData.assignment_type || '',
-        assignment_size: formData.assignment_size ? parseInt(formData.assignment_size, 10) : null,
-        tac_channel: formData.tac_channel || '',
-        description_narrative: formData.description_narrative || '',
-        pod: formData.pod ? parseInt(formData.pod, 10) : null,
+        segment: formData.segment || formData.division || '',
+        resource_type: formData.resource_type || formData.assignment_type || '',
+        team_size: formData.team_size ? parseInt(formData.team_size, 10) : (formData.assignment_size ? parseInt(formData.assignment_size, 10) : null),
+        frequency_primary: formData.frequency_primary || formData.tac_channel || '',
+        description: formData.description || formData.description_narrative || '',
+        probability_of_detection: (formData.probability_of_detection ?? (formData.pod ? parseInt(formData.pod, 10) : null)),
         debrief_narrative: formData.debrief_narrative || '',
         team_id: targetTeamId,
         is_orphaned: formData.is_orphaned || false
@@ -675,7 +676,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
               openNewAssignmentForm={openNewAssignmentForm}
               onEditAssignment={(id) => openEditAssignmentForm(assignmentById[id])}
               onNewTeam={(asnId) => { setPendingAssignmentId(asnId); setTeamForm({ op_period_id: operationalPeriodId, status: 'Assigned', type: 'Ground Search' }); setShowTeamForm(true); }}
-              onNewAssignment={(teamId) => { setPendingTeamId(teamId); setAssignmentForm({ op_period_id: operationalPeriodId, status: 'Assigned', division: 'A' }); setShowAssignmentForm(true); }}
+                onNewAssignment={(teamId) => { setPendingTeamId(teamId); setAssignmentForm({ op_period_id: operationalPeriodId, status: 'Assigned', segment: 'A' }); setShowAssignmentForm(true); }}
               onDeleteAssignment={handleDeleteAssignment} onAssignResource={(row) => { setAssigningRow(row); setSelectedAssignTarget(''); }}
               draggedItem={draggedItem} dropTarget={dropTarget}
               onDragStart={handleDragStart} onDragEnd={() => { setDraggedItem(null); setDropTarget(null); }}
@@ -853,7 +854,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
               <option value="" disabled>Choose a resource...</option>
               {assigningRow.assignmentId ? 
                 availableTeams.map(t => <option key={t.team_id} value={t.team_id}>{t.team_name_number} ({t.type})</option>) :
-                availableAssignments.map(a => <option key={a.assignment_id} value={a.assignment_id}>{a.name} ({a.division})</option>)
+                availableAssignments.map(a => <option key={a.assignment_id} value={a.assignment_id}>{a.title || a.name} ({a.segment || a.division})</option>)
               }
             </select>
           </div>

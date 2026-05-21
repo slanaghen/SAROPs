@@ -9,11 +9,11 @@ expect.extend(matchers);
 // implementations (different realms), causing strict instanceof checks to fail.
 // Ensure the runtime uses the same constructors on both `window` and `globalThis`.
 if (typeof window !== 'undefined') {
-  if (typeof window.AbortController !== 'undefined') {
-    globalThis.AbortController = window.AbortController;
+  if (typeof globalThis.AbortController !== 'undefined') {
+    window.AbortController = globalThis.AbortController;
   }
-  if (typeof window.AbortSignal !== 'undefined') {
-    globalThis.AbortSignal = window.AbortSignal;
+  if (typeof globalThis.AbortSignal !== 'undefined') {
+    window.AbortSignal = globalThis.AbortSignal;
   }
 }
 
@@ -56,7 +56,20 @@ vi.mock('@googlemaps/js-api-loader', () => {
   };
   const MockMap = vi.fn(() => mockMapInstance);
   const mockLoaderInstance = {
-    importLibrary: vi.fn((lib) => (lib === 'maps' ? Promise.resolve({ Map: MockMap }) : Promise.resolve({}))),
+    importLibrary: vi.fn((lib) => {
+      if (lib === 'maps') {
+        if (typeof window !== 'undefined') {
+          window.google = {
+            maps: {
+              event: { addListenerOnce: vi.fn() },
+              ControlPosition: { TOP_LEFT: 1 }
+            }
+          };
+        }
+        return Promise.resolve({ Map: MockMap });
+      }
+      return Promise.resolve({});
+    }),
     setOptions: vi.fn(),
   };
   const MockLoader = vi.fn(() => mockLoaderInstance);

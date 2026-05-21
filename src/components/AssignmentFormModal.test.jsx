@@ -15,15 +15,23 @@ describe('AssignmentFormModal', () => {
     onClose: vi.fn(),
     onSave: vi.fn(),
     initialData: {
+      title: 'AA',
+      segment: 'A',
       division: 'A',
       name: 'AA',
+      resource_type: 'Ground',
       assignment_type: 'Ground',
+      team_size: 2,
       assignment_size: 2,
+      frequency_primary: 'TAC 1',
       tac_channel: 'TAC 1',
+      description: 'Test narrative',
       description_narrative: 'Test narrative',
       status: 'Planned',
       poa: 50,
+      probabilityOfDetection: 0,
       pod: 0,
+      probability_of_detection: 0,
       debrief_narrative: ''
     }
   };
@@ -36,7 +44,7 @@ describe('AssignmentFormModal', () => {
 
   it('enforces character limit on description narrative', () => {
     render(<AssignmentFormModal {...defaultProps} />);
-    const textarea = screen.getByLabelText(/Description Narrative/i);
+    const textarea = screen.getByLabelText(/Description/i);
     
     const longText = 'a'.repeat(600);
     fireEvent.change(textarea, { target: { value: longText } });

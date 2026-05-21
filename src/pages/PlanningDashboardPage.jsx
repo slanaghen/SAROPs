@@ -45,9 +45,9 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
   const getNextAssignmentName = (division) => {
     if (!assignments || assignments.length === 0) return `${division}A`;
     
-    const divisionAssignments = assignments.filter(a => a.division === division);
+    const segmentAssignments = assignments.filter(a => (a.segment || a.division) === division);
     const usedSuffixes = new Set(
-      divisionAssignments
+      segmentAssignments
         .map(a => {
           if (a.name && a.name.startsWith(division) && a.name.length === division.length + 1) {
             return a.name.slice(division.length);

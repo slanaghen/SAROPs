@@ -187,8 +187,11 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
 
   useEffect(() => {
     if (assignment) {
-      setPodValue(assignment.pod !== null && assignment.pod !== undefined ? String(assignment.pod) : '');
-      setDebriefValue(assignment.debrief_narrative || '');
+      setPodValue(assignment.probability_of_detection !== null && assignment.probability_of_detection !== undefined
+        ? String(assignment.probability_of_detection)
+        : (assignment.pod !== null && assignment.pod !== undefined ? String(assignment.pod) : '')
+      );
+      setDebriefValue(assignment.description || assignment.debrief_narrative || '');
     }
   }, [assignment]);
 
@@ -335,8 +338,8 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       const { error: updateErr } = await supabase
         .from('assignments')
         .update({ 
-          pod: podValue === '' ? null : parseInt(podValue, 10),
-          debrief_narrative: debriefValue.trim()
+          probability_of_detection: podValue === '' ? null : parseInt(podValue, 10),
+          description: debriefValue.trim()
         })
         .eq('assignment_id', assignment.assignment_id);
 
@@ -363,8 +366,8 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
         .update({ 
           status: 'Completed',
           team_id: null,
-          pod: podValue === '' ? null : parseInt(podValue, 10),
-          debrief_narrative: debriefValue.trim()
+          probability_of_detection: podValue === '' ? null : parseInt(podValue, 10),
+          description: debriefValue.trim()
         })
         .eq('assignment_id', assignment.assignment_id);
       
@@ -631,7 +634,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       {(assignment || accessLevel === 'command staff' || accessLevel === 'admin') && (
         <div className="dashboard-section assignment-info">
           <SectionHeader
-            title={accessLevel === 'command staff' || accessLevel === 'admin' ? 'ICS Assignment' : `Team Assignment: ${assignment?.name}`} 
+            title={accessLevel === 'command staff' || accessLevel === 'admin' ? 'ICS Assignment' : `Team Assignment: ${assignment?.title || assignment?.name}`} 
             sectionKey="assignment" 
           />
           {isExpanded.assignment && (
@@ -654,36 +657,36 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
                 {assignment.status}
               </span>
             </div>
-            {assignment.division && (
+            {(assignment.segment || assignment.division) && (
               <div>
                 <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Division</label>
-                <div style={{ fontSize: '15px', fontWeight: 500 }}>{assignment.division}</div>
+                <div style={{ fontSize: '15px', fontWeight: 500 }}>{assignment.segment || assignment.division}</div>
               </div>
             )}
-            {assignment.assignment_type && (
+            {(assignment.resource_type || assignment.assignment_type) && (
               <div>
                 <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Assignment Type</label>
-                <div style={{ fontSize: '15px', fontWeight: 500 }}>{assignment.assignment_type}</div>
+                <div style={{ fontSize: '15px', fontWeight: 500 }}>{assignment.resource_type || assignment.assignment_type}</div>
               </div>
             )}
-            {assignment.assignment_size && (
+            {(assignment.team_size || assignment.assignment_size) && (
               <div>
                 <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Size</label>
-                <div style={{ fontSize: '15px', fontWeight: 500 }}>{assignment.assignment_size}</div>
+                <div style={{ fontSize: '15px', fontWeight: 500 }}>{assignment.team_size ?? assignment.assignment_size}</div>
               </div>
             )}
-            {assignment.tac_channel && (
+            {(assignment.frequency_primary || assignment.tac_channel) && (
               <div>
                 <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>TAC Channel</label>
-                <div style={{ fontSize: '15px', fontWeight: 500 }}>{assignment.tac_channel}</div>
+                <div style={{ fontSize: '15px', fontWeight: 500 }}>{assignment.frequency_primary || assignment.tac_channel}</div>
               </div>
             )}
           </div>
 
-          {assignment.description_narrative && (
+          {(assignment.description || assignment.description_narrative) && (
             <div style={{ marginBottom: '12px' }}>
               <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Description</label>
-              <p style={{ margin: 0, fontSize: '14px', lineHeight: '1.5' }}>{assignment.description_narrative}</p>
+              <p style={{ margin: 0, fontSize: '14px', lineHeight: '1.5' }}>{assignment.description || assignment.description_narrative}</p>
             </div>
           )}
 
@@ -701,7 +704,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
                     style={{ width: '100px', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
                   />
                 ) : (
-                  <span>{assignment.pod !== null && assignment.pod !== undefined ? `${assignment.pod}%` : '—'}</span>
+                  <span>{assignment.probability_of_detection !== null && assignment.probability_of_detection !== undefined ? `${assignment.probability_of_detection}%` : (assignment.pod !== null && assignment.pod !== undefined ? `${assignment.pod}%` : '—')}</span>
                 )}
               </div>
 
@@ -715,7 +718,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
                     style={{ width: '100%', minHeight: '80px', padding: '8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '13px' }}
                   />
                 ) : (
-                  <p style={{ margin: 0, fontSize: '13px' }}>{assignment.debrief_narrative || '—'}</p>
+                  <p style={{ margin: 0, fontSize: '13px' }}>{assignment.description || assignment.debrief_narrative || '—'}</p>
                 )}
               </div>
 

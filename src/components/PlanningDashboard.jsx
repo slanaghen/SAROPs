@@ -72,6 +72,7 @@ const PlanningDashboard = ({
 
   const handleDragEnter = (e, id, type) => {
     if (draggedItem && draggedItem.type !== type) {
+      e.preventDefault();
       setDropTarget({ id, type });
     }
   };
@@ -94,7 +95,7 @@ const PlanningDashboard = ({
           if (onTeamAssigned) {
             await onTeamAssigned({ teamId, assignmentId, team, assignment });
           }
-          setSuccessMessage(`Team "${team.team_name_number}" assigned to "${assignment.name}"`);
+          setSuccessMessage(`Team "${team.team_name_number}" assigned to "${assignment.title || assignment.name}"`);
           setTimeout(() => setSuccessMessage(null), 3000);
         } catch (err) {
           setError(err.message || 'Failed to assign team');
@@ -203,19 +204,26 @@ const PlanningDashboard = ({
   const openNewAssignmentForm = () => {
     setAssignmentForm({
       op_period_id: operationalPeriodId,
-      division: defaultNewAssignmentDivision,
+      segment: defaultNewAssignmentDivision,
+      title: defaultNewAssignmentName,
       name: defaultNewAssignmentName,
-      assignment_type: defaultNewAssignmentType,
-      assignment_size: defaultNewAssignmentSize,
+      resource_type: defaultNewAssignmentType,
+      team_size: defaultNewAssignmentSize,
+      frequency_primary: '',
       tac_channel: '',
+      description: '',
       description_narrative: '',
+      probabilityOfDetection: '',
+      probability_of_detection: null,
+      pod: '',
+      debrief_narrative: '',
       status: 'Planned',
     });
     setShowAssignmentForm(true);
   };
 
   const openEditAssignmentForm = (assignment) => {
-    console.log('📝 Opening Assignment Editor for:', assignment.name);
+    console.log('📝 Opening Assignment Editor for:', assignment.title || assignment.name);
     setAssignmentForm({
       ...assignment
     });
@@ -269,14 +277,14 @@ const PlanningDashboard = ({
   };
 
   const handleDeleteAssignment = async (assignment) => {
-    if (!window.confirm(`Are you sure you want to delete assignment "${assignment.name}"? This action cannot be undone.`)) return;
+    if (!window.confirm(`Are you sure you want to delete assignment "${assignment.title || assignment.name}"? This action cannot be undone.`)) return;
 
     try {
       setLoading(true);
       if (deleteAssignment) {
         await deleteAssignment(assignment.assignment_id);
         
-        setSuccessMessage(`Assignment "${assignment.name}" deleted`);
+        setSuccessMessage(`Assignment "${assignment.title || assignment.name}" deleted`);
         setTimeout(() => setSuccessMessage(null), 3000);
       }
     } catch (err) {
@@ -606,18 +614,18 @@ const PlanningDashboard = ({
                   tabIndex={0}
                 >
                   <div className="assignment-header" style={{ gap: '8px', justifyContent: 'flex-start', alignItems: 'center', flexWrap: 'wrap' }}>
-                    <div className="assignment-name clickable-name" style={{ marginRight: '4px' }}>{assignment.name}</div>
-                    {assignment.assignment_type && <div className="team-type" style={{ background: '#f1f5f9', color: '#475569' }}>{assignment.assignment_type}</div>}
-                    <span style={{ fontSize: '11px', color: '#64748b' }}>Size: {assignment.assignment_size}</span>
+                    <div className="assignment-name clickable-name" style={{ marginRight: '4px' }}>{assignment.title || assignment.name}</div>
+                    {(assignment.resource_type || assignment.assignment_type) && <div className="team-type" style={{ background: '#f1f5f9', color: '#475569' }}>{assignment.resource_type || assignment.assignment_type}</div>}
+                    <span style={{ fontSize: '11px', color: '#64748b' }}>Size: {assignment.team_size ?? assignment.assignment_size}</span>
                     <div className={`assignment-status ${assignment.status.toLowerCase()}`}>
                       {assignment.status}
                     </div>
                   </div>
 
-                  {assignment.description_narrative && (
+                  {(assignment.description || assignment.description_narrative) && (
                     <div className="assignment-details" style={{ marginTop: '4px' }}>
                       <div style={{ fontSize: '12px', color: '#475569', lineHeight: '1.4' }}>
-                        {assignment.description_narrative}
+                        {assignment.description || assignment.description_narrative}
                       </div>
                     </div>
                   )}

@@ -23,15 +23,17 @@ vi.mock('../lib/supabase', () => ({
 }));
 
 const createMockChain = (resolvedValue = { error: null, data: null }) => ({
-  insert: vi.fn().mockResolvedValue(resolvedValue),
-  update: vi.fn().mockResolvedValue(resolvedValue),
+  insert: vi.fn().mockReturnThis(),
+  update: vi.fn().mockReturnThis(),
+  delete: vi.fn().mockReturnThis(),
   eq: vi.fn().mockReturnThis(),
   select: vi.fn().mockReturnThis(),
   order: vi.fn().mockReturnThis(),
-  maybeSingle: vi.fn().mockResolvedValue(resolvedValue),
-  single: vi.fn().mockResolvedValue(resolvedValue),
-  in: vi.fn().mockResolvedValue(resolvedValue),
-  is: vi.fn().mockResolvedValue(resolvedValue),
+  maybeSingle: vi.fn().mockReturnThis(),
+  single: vi.fn().mockReturnThis(),
+  in: vi.fn().mockReturnThis(),
+  is: vi.fn().mockReturnThis(),
+  then: vi.fn((onFulfilled) => Promise.resolve(resolvedValue).then(onFulfilled)),
 });
 
 afterEach(cleanup);
@@ -167,18 +169,18 @@ describe('IncidentEditPage', () => {
     const mockTableChains = {};
     mockFrom.mockImplementation((table) => {
       if (!mockTableChains[table]) {
-        mockTableChains[table] = createMockChain();
-      }
-      // Configure specific behavior for each table's chain
-      if (table === 'assignments') {
-        mockTableChains[table].in.mockResolvedValue({ data: [{ status: 'Deployed' }] }); // Mock active assignments
-      } else if (table === 'responders') {
-        mockTableChains[table].is.mockResolvedValue({ data: [{ id: 'r1' }] }); // Mock active responders
+        let data = null;
+        if (table === 'assignments') data = [{ status: 'Deployed' }, { status: 'Assigned' }];
+        if (table === 'responders') data = [{ id: 'r1' }];
+        mockTableChains[table] = createMockChain({ data, error: null });
       }
       return mockTableChains[table];
     });
 
-    const router = createMemoryRouter([{ path: "/", element: <IncidentEditPage /> }]);
+    const router = createMemoryRouter([
+      { path: "/", element: <IncidentEditPage /> },
+      { path: "/checkin", element: <div>Check-in Page</div> }
+    ]);
     await act(async () => {
       render(<RouterProvider router={router} />);
     });
@@ -186,7 +188,7 @@ describe('IncidentEditPage', () => {
     fireEvent.click(await screen.findByText(/End Incident/i));
 
     await waitFor(() => {
-      expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('1 active assignments and 1 responders'));
+      expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('2 active assignments and 1 responders'));
       expect(mockFrom).toHaveBeenCalledWith('teams'); // Disband teams step
       expect(mockTableChains.teams.update).toHaveBeenCalledWith(expect.objectContaining({ status: 'Disbanded' }));
       expect(mockTableChains.assignments.update).toHaveBeenCalledTimes(2); // Two updates for assignments (Deployed -> Incomplete, Assigned -> Planned)

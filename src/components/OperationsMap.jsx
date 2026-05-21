@@ -33,16 +33,23 @@ const OperationsMap = ({
           version: "weekly"
         });
         const { Map } = await loader.importLibrary("maps");
-        map.current = new Map(mapContainer.current, {
-          center: { lat: 40.0150, lng: -105.2705 },
-          zoom: 13,
-          mapTypeId: 'terrain',
-          fullscreenControl: false,
-          streetViewControl: false,
-          mapTypeControlOptions: { position: window.google.maps.ControlPosition.TOP_LEFT }
-        });
-
-        window.google.maps.event.addListenerOnce(map.current, 'idle', syncMapData);
+        
+        // Defer map initialization slightly to ensure DOM is fully ready
+        setTimeout(() => {
+          map.current = new Map(mapContainer.current, {
+            center: { lat: 40.0150, lng: -105.2705 },
+            zoom: 13,
+            mapTypeId: 'terrain',
+            fullscreenControl: false,
+            streetViewControl: false,
+            mapTypeControlOptions: { 
+              position: window.google?.maps?.ControlPosition?.TOP_LEFT 
+            }
+          });
+          if (window.google?.maps?.event) {
+            window.google.maps.event.addListenerOnce(map.current, 'idle', syncMapData);
+          }
+        }, 0); // Use setTimeout with 0 delay
       } catch (e) {
         setMapError(true);
       }

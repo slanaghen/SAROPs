@@ -69,7 +69,7 @@ describe('usePlanningDashboard Hook', () => {
 
   it('should fetch dashboard data successfully', async () => {
     const mockTeams = [{ team_id: 't1', team_name_number: 'Team 1', op_period_id: opPeriodId, status: 'Staged' }];
-    const mockAsns = [{ assignment_id: 'a1', name: 'Asn A', op_period_id: opPeriodId, team_id: null }];
+    const mockAsns = [{ assignment_id: 'a1', title: 'Asn A', name: 'Asn A', op_period_id: opPeriodId, team_id: null }];
     const mockResponders = [{ responder_id: 'r1', name: 'Steve' }];
 
     mockSupabase.from.mockImplementation((table) => {
@@ -86,7 +86,7 @@ describe('usePlanningDashboard Hook', () => {
     });
 
     expect(result.current.teams).toEqual(mockTeams);
-    expect(result.current.assignments).toEqual(mockAsns);
+    expect(result.current.assignments[0]).toMatchObject(mockAsns[0]);
     expect(result.current.stagedTeams).toHaveLength(1);
     expect(result.current.availableAssignments).toHaveLength(1);
   });
@@ -118,7 +118,7 @@ describe('usePlanningDashboard Hook', () => {
   it('should handle assignment of a team to an assignment', async () => {
     // Setup initial state with a team and an assignment
     const mockTeams = [{ team_id: 't1', team_name_number: 'Team 1', status: 'Staged' }];
-    const mockAsns = [{ assignment_id: 'a1', name: 'Asn A', team_id: null, status: 'Planned' }];
+    const mockAsns = [{ assignment_id: 'a1', title: 'Asn A', name: 'Asn A', team_id: null, status: 'Planned' }];
     
     mockSupabase.from.mockImplementation((table) => {
       if (table === 'assignments') return createMockQuery({ ...mockAsns[0], team_id: 't1', status: 'Assigned' });
@@ -198,7 +198,7 @@ describe('usePlanningDashboard Hook', () => {
   });
 
   it('should create and update assignments', async () => {
-    const asn = { assignment_id: 'a1', name: 'Area 1' };
+    const asn = { assignment_id: 'a1', title: 'Area 1', name: 'Area 1' };
     mockSupabase.from.mockImplementation((table) => {
       if (table === 'assignments') return createMockQuery(asn);
       if (table === 'action_logs') return createMockQuery({});
@@ -211,7 +211,7 @@ describe('usePlanningDashboard Hook', () => {
       await result.current.createAssignment({ name: 'Area 1' });
     });
     
-    expect(result.current.assignments).toContainEqual(asn);
+    expect(result.current.assignments).toContainEqual(expect.objectContaining(asn));
 
     const updates = { name: 'Area 1 Updated' };
     mockSupabase.from.mockImplementation((table) => {

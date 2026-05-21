@@ -28,7 +28,7 @@ BEGIN
     END IF;
 
     -- 2. Create 15 Assignments
-    INSERT INTO assignments (op_period_id, name, assignment_type, description_narrative, tac_channel, status)
+    INSERT INTO assignments (op_period_id, title, resource_type, description, frequency_primary, status)
     VALUES
     (latest_op_id, 'Hasty 1', 'Hasty', 'Rapid search of primary trail corridor', 'TAC 1', 'Planned'),
     (latest_op_id, 'Hasty 2', 'Hasty', 'Rapid search of north creek bed', 'TAC 1', 'Planned'),

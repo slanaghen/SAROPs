@@ -55,7 +55,7 @@ describe('OperationsDashboardPage Logic', () => {
   });
 
   it('should pass linked data to sub-components to render in one row', async () => {
-    const mockAsn = [{ assignment_id: 'a-uuid', name: 'Division Alpha', team_id: 't-uuid', op_period_id: 'op-123', status: 'Assigned' }];
+      const mockAsn = [{ assignment_id: 'a-uuid', title: 'Division Alpha', name: 'Division Alpha', team_id: 't-uuid', op_period_id: 'op-123', status: 'Assigned' }];
     const mockTeams = [{ team_id: 't-uuid', team_name_number: 'Team 1', type: 'Ground', op_period_id: 'op-123' }];
     const mockResponders = [{ responder_id: 'r-uuid', name: 'Leader Name' }];
 
@@ -83,7 +83,7 @@ describe('OperationsDashboardPage Logic', () => {
   });
 
   it('should coordinate unassign team action through the planning hook', async () => {
-    const mockAsn = [{ assignment_id: 'a1', name: 'Asn 1', team_id: 't1', op_period_id: 'op-123', status: 'Assigned' }];
+      const mockAsn = [{ assignment_id: 'a1', title: 'Asn 1', name: 'Asn 1', team_id: 't1', op_period_id: 'op-123', status: 'Assigned' }];
     const mockTeams = [{ team_id: 't1', team_name_number: 'Team 1', op_period_id: 'op-123' }];
     window.confirm = vi.fn().mockReturnValue(true);
 
@@ -107,7 +107,7 @@ describe('OperationsDashboardPage Logic', () => {
   });
 
   it('should open the team form when "New Team" is selected for an assignment', async () => {
-    const mockAsn = [{ assignment_id: 'a1', name: 'Unassigned Asn', team_id: null, op_period_id: 'op-123' }];
+      const mockAsn = [{ assignment_id: 'a1', title: 'Unassigned Asn', name: 'Unassigned Asn', team_id: null, op_period_id: 'op-123' }];
     
     supabase.from.mockImplementation((table) => {
       let data = (table === 'assignments') ? mockAsn : [];
@@ -173,7 +173,7 @@ describe('OperationsDashboardPage Logic', () => {
   });
 
   it('should disband team and unlink when assignment status is set to Completed', async () => {
-    const mockAsn = [{ assignment_id: 'a1', name: 'Asn 1', team_id: 't1', status: 'Deployed', type: 'Ground' }];
+    const mockAsn = [{ assignment_id: 'a1', title: 'Asn 1', name: 'Asn 1', team_id: 't1', status: 'Deployed', type: 'Ground' }];
 
     supabase.from.mockImplementation((table) => {
       if (table === 'assignments') return createQueryMock(mockAsn);

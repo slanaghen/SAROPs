@@ -94,8 +94,8 @@ describe('PlanningDashboardPage', () => {
     vi.mocked(usePlanningDashboard).mockReturnValue({
       teams: [],
       assignments: [
-        { division: 'A', name: 'AA' },
-        { division: 'A', name: 'AB' }
+        { division: 'A', name: 'AA', title: 'AA' },
+        { division: 'A', name: 'AB', title: 'AB' }
       ],
       responders: [],
       loading: false,
@@ -126,7 +126,7 @@ describe('PlanningDashboardPage', () => {
   it('should handle division suffixes at the end of the alphabet (AZ -> AA)', () => {
     vi.mocked(useIncident).mockReturnValue({ incidentData: { opPeriodId: 'op-123' } });
     vi.mocked(usePlanningDashboard).mockReturnValue({
-      assignments: [{ division: 'A', name: 'AZ' }],
+      assignments: [{ division: 'A', name: 'AZ', title: 'AZ' }],
       teams: [], responders: [], loading: false, fetchDashboardData: vi.fn(),
       stats: mockStats,
     });

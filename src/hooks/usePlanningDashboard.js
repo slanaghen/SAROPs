@@ -20,6 +20,35 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  const normalizeAssignment = (assignment) => {
+    const title = assignment.title || assignment.name || '';
+    const segment = assignment.segment || assignment.division || null;
+    const resource_type = assignment.resource_type || assignment.assignment_type || '';
+    const team_size = assignment.team_size ?? assignment.assignment_size ?? null;
+    const frequency_primary = assignment.frequency_primary || assignment.tac_channel || '';
+    const description = assignment.description || assignment.description_narrative || '';
+    const probability_of_detection = assignment.probability_of_detection ?? assignment.pod ?? null;
+
+    return {
+      ...assignment,
+      name: title,
+      title,
+      division: segment,
+      segment,
+      assignment_type: resource_type,
+      resource_type,
+      assignment_size: team_size,
+      team_size,
+      tac_channel: frequency_primary,
+      frequency_primary,
+      description_narrative: assignment.description_narrative || description,
+      debrief_narrative: assignment.debrief_narrative || description,
+      description,
+      pod: assignment.pod ?? probability_of_detection,
+      probability_of_detection,
+    };
+  };
+
   const { incidentId, responderName, user, responderId, setResponderStatus, setAccessLevel } = useIncident();
   const userName = responderName || user?.email || 'System';
 
@@ -58,7 +87,7 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
       if (opRes.error) throw opRes.error;
 
       setTeams(Array.isArray(teamsRes.data) ? teamsRes.data : []);
-      setAssignments(Array.isArray(assignmentsRes.data) ? assignmentsRes.data : []);
+      setAssignments(Array.isArray(assignmentsRes.data) ? assignmentsRes.data.map(normalizeAssignment) : []);
       setResponders(Array.isArray(respondersRes.data) ? respondersRes.data : []);
       setOpPeriod(opRes.data || null);
     } catch (err) {
@@ -427,17 +456,29 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
       setLoading(true);
       const payload = {
         op_period_id: operationalPeriodId,
-        name: assignmentPayload.name || '',
         status: assignmentPayload.status || 'Planned',
         team_id: assignmentPayload.team_id || null,
-        division: assignmentPayload.division || '',
-        assignment_type: assignmentPayload.assignment_type || '',
-        assignment_size: assignmentPayload.assignment_size ? parseInt(assignmentPayload.assignment_size, 10) : null,
-        tac_channel: assignmentPayload.tac_channel || '',
-        description_narrative: assignmentPayload.description_narrative || '',
-        pod: assignmentPayload.pod ? parseInt(assignmentPayload.pod, 10) : null,
-        debrief_narrative: assignmentPayload.debrief_narrative || '',
-        is_orphaned: false
+        title: assignmentPayload.title || assignmentPayload.name || '',
+        segment: assignmentPayload.segment || assignmentPayload.division || null,
+        resource_type: assignmentPayload.resource_type || assignmentPayload.assignment_type || '',
+        team_size: assignmentPayload.team_size ? parseInt(assignmentPayload.team_size, 10) : (assignmentPayload.assignment_size ? parseInt(assignmentPayload.assignment_size, 10) : null),
+        frequency_primary: assignmentPayload.frequency_primary || assignmentPayload.tac_channel || '',
+        description: assignmentPayload.description || assignmentPayload.description_narrative || assignmentPayload.debrief_narrative || '',
+        probability_of_detection: assignmentPayload.probabilityOfDetection ? parseInt(assignmentPayload.probabilityOfDetection, 10) : (assignmentPayload.pod ? parseInt(assignmentPayload.pod, 10) : null),
+        is_orphaned: false,
+
+        // Additional metadata
+        team_name: assignmentPayload.team_name || null,
+        priority: assignmentPayload.priority || null,
+        transportation: assignmentPayload.transportation || null,
+        time_allocated: assignmentPayload.time_allocated || null,
+        segment_area: assignmentPayload.segmentArea || null,
+        hazards: assignmentPayload.hazards || null,
+        prepared_by: assignmentPayload.preparedBy || null,
+        folder_id: assignmentPayload.folder_id || null,
+        color: assignmentPayload.color || null,
+        stroke: assignmentPayload.stroke || null,
+        fill: assignmentPayload.fill || null
       };
 
       console.info('📡 Submitting New Assignment:', payload);
@@ -451,12 +492,12 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
       if (error) throw error;
       if (!data) throw new Error('No assignment data returned from server');
 
-      await recordAction(`Created assignment "${assignmentPayload.name}". Division: ${assignmentPayload.division}, Type: ${assignmentPayload.assignment_type}, Status: ${assignmentPayload.status}.`);
+      await recordAction(`Created assignment "${assignmentPayload.title || assignmentPayload.name || ''}". Division: ${assignmentPayload.division || assignmentPayload.segment}, Type: ${assignmentPayload.assignment_type || assignmentPayload.resource_type}, Status: ${assignmentPayload.status}.`);
 
       // Atomic state update then background refresh
-      setAssignments(prev => [...prev, data]);
+      setAssignments(prev => [...prev, normalizeAssignment(data)]);
       fetchDashboardData(); 
-      return data;
+      return normalizeAssignment(data);
     } catch (err) {
       const errorMsg = err.message || 'Failed to create assignment';
       setError(errorMsg);
@@ -473,17 +514,31 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
     try {
       setLoading(true);
       const payload = {
-        name: updates.name || '',
         status: updates.status || 'Planned',
-        division: updates.division || '',
-        assignment_type: updates.assignment_type || '',
-        assignment_size: updates.assignment_size ? parseInt(updates.assignment_size, 10) : null,
-        tac_channel: updates.tac_channel || '',
-        description_narrative: updates.description_narrative || '',
-        pod: updates.pod ? parseInt(updates.pod, 10) : null,
-        debrief_narrative: updates.debrief_narrative || '',
         team_id: updates.team_id || null,
-        is_orphaned: updates.is_orphaned || false
+        is_orphaned: updates.is_orphaned || false,
+
+        // SARTopo fields
+        title: updates.title || updates.name || '',
+        segment: updates.segment || updates.division || null,
+        resource_type: updates.resource_type || updates.assignment_type || '',
+        team_size: updates.team_size ? parseInt(updates.team_size, 10) : (updates.assignment_size ? parseInt(updates.assignment_size, 10) : null),
+        frequency_primary: updates.frequency_primary || updates.tac_channel || '',
+        description: updates.description || updates.description_narrative || updates.debrief_narrative || '',
+        probability_of_detection: updates.probabilityOfDetection ? parseInt(updates.probabilityOfDetection, 10) : (updates.pod ? parseInt(updates.pod, 10) : null),
+
+        // Additional metadata
+        team_name: updates.team_name || null,
+        priority: updates.priority || null,
+        transportation: updates.transportation || null,
+        time_allocated: updates.time_allocated || null,
+        segment_area: updates.segmentArea || null,
+        hazards: updates.hazards || null,
+        prepared_by: updates.preparedBy || null,
+        folder_id: updates.folder_id || null,
+        color: updates.color || null,
+        stroke: updates.stroke || null,
+        fill: updates.fill || null
       };
 
       console.info('📡 Updating Assignment:', assignmentId, payload);
@@ -496,6 +551,7 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
         .maybeSingle();
 
       if (error) throw error;
+      const normalizedData = normalizeAssignment(data);
 
       const oldAsn = assignments.find(a => a.assignment_id === assignmentId);
       const changes = [];
@@ -507,7 +563,7 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
         });
       }
       const changeLog = changes.length > 0 ? ` Details: ${changes.join(', ')}` : '';
-      await recordAction(`Updated assignment "${payload.name}".${changeLog}`);
+      await recordAction(`Updated assignment "${payload.title || payload.name || ''}".${changeLog}`);
 
       // Synchronize linked team status and reset PAR timer if status changed
       if (updates.team_id) {
