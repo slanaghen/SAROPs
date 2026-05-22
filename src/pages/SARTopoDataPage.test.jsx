@@ -15,6 +15,9 @@ const fromMock = {
   select: vi.fn().mockReturnThis(),
   eq: vi.fn().mockReturnThis(),
   maybeSingle: vi.fn().mockResolvedValue({ data: { sartopo_id: 'MAP123' }, error: null }),
+  insert: vi.fn(() => ({
+    select: vi.fn().mockResolvedValue({ data: [], error: null }),
+  })),
   upsert: vi.fn(() => ({
     select: vi.fn().mockResolvedValue({ data: [{ assignment_id: 'assign-1' }], error: null }),
   })),
@@ -99,9 +102,15 @@ describe('SARTopoDataPage', () => {
     expect(await screen.findByText(/Map Features \(1\)/i)).toBeInTheDocument();
     const syncBtn = await screen.findByText('Sync Assignment Features');
     
-    // Verify the button is disabled and does not trigger synchronization
-    expect(syncBtn).toBeDisabled();
-    fireEvent.click(syncBtn);
-    expect(fromMock.upsert).not.toHaveBeenCalled();
+    // Requirement: Verify synchronization triggers and sends correct data
+    expect(syncBtn).not.toBeDisabled();
+    await waitFor(() => expect(fromMock.upsert).toHaveBeenCalled());
+    expect(fromMock.upsert.mock.calls[0][0][0]).toMatchObject({
+      op_period_id: mockOpPeriodId,
+      sartopo_id: 'feature-1',
+      title: 'Clue 1',
+      resource_type: 'Search Team',
+      priority: 'High'
+    });
   });
 });
