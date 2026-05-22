@@ -1,10 +1,10 @@
 // sarops-types.d.ts
 
 export type AssignmentStatus = 'Planned' | 'Assigned' | 'Deployed' | 'Completed' | 'Incomplete';
-export type AccessLevel = 'responder' | 'command staff';
+export type AccessLevel = 'responder' | 'command staff' | 'admin';
 export type TeamStatus = 'Staged' | 'Assigned' | 'Deployed' | 'Disbanded';
-export type TeamType = 'Ground Search' | 'UAS Search' | 'Dog Air' | 'Dog Track' | 'Transport' | 'Helicopter' | 'Other';
-export type ResponderStatus = 'Staged' | 'Attached' | 'Assigned' | 'Deployed';
+export type TeamType = 'Hasty' | 'Ground' | 'Vehicle' | 'Aerial' | 'Water' | 'Tracking' | 'Dog' | 'Avalanche' | 'Transport' | 'Helicopter' | 'Medical' | 'Staff' | 'Other';
+export type ResponderStatus = 'Staged' | 'Attached' | 'Assigned' | 'Deployed' | 'CheckedOut';
 
 export interface Incident {
   incident_id: string; // UUID Primary Key
@@ -19,48 +19,40 @@ export interface OperationalPeriod {
   incident_id: string; // Foreign Key
   op_number: number;
   start_datetime: string;
-  end_datetime: string; // Locked Snapshot when OP ends
+  end_datetime: string | null; // Locked Snapshot when OP ends
   situation_narrative: string;
   situational_awareness_narrative: string;
+  par_check_interval: number;
 }
 
 export interface Assignment {
   assignment_id: string; // UUID Primary Key
   op_period_id: string; // Foreign Key
   sartopo_id: string | null; // 1:1 mapping to SARTopo object
-  title: string;
-  name?: string;
   status: AssignmentStatus;
-  is_orphaned: boolean; // True if deleted in SARTopo, preserved until explicitly purged
-  team_id: string | null; // Foreign Key to Team
-  poa?: number;
-  pod?: number;
-  debrief_narrative?: string;
-  probability_of_detection?: number;
-
-  // SARTopo aligned fields (new)
-  title?: string;
+  title: string;
   segment?: string | null;
   resource_type?: string;
   team_size?: number;
   frequency_primary?: string;
   description?: string;
-  probabilityOfDetection?: number;
+  debrief_narrative?: string;
   probability_of_detection?: number;
-
-  // Additional metadata
   team_name?: string;
   priority?: string;
   transportation?: string;
   time_allocated?: string;
-  segmentArea?: string;
+  segment_area?: string;
   hazards?: string;
-  preparedBy?: string;
+  prepared_by?: string;
   folder_id?: string;
   color?: string;
   stroke?: string;
   fill?: string;
-  updated?: string;
+  is_orphaned: boolean;
+  team_id: string | null; // Foreign Key to Team
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface Team {
@@ -71,8 +63,10 @@ export interface Team {
   type: TeamType;
   status: TeamStatus; // Cascades status changes down to attached Responders
   leader_responder_id: string | null; // Foreign Key to Responder
-  current_responders: string[]; // Array of Responder_ID for active dashboard use
+  current_responders: Partial<Responder>[]; // Array of Responder details for active dashboard use
   equipment: string[]; // Free-text array for general gear
+  last_par_check: string | null;
+  par_status: string | null;
 }
 
 export interface Responder {

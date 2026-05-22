@@ -10,7 +10,7 @@ const skillsList = [
   "Swiftwater", "Dive", "Avalanche", "Boat", "Helicopter", "Rope Rescue", 
   "Litter", "Medical", "Other"
 ];
-const ACCESS_LEVELS = ["responder", "command staff"];
+const ACCESS_LEVELS = ["responder", "command staff", "admin"];
 const STATUS_LIST = ["Staged", "Attached", "Assigned", "Deployed", "CheckedOut"];
 
 

@@ -191,4 +191,14 @@ describe('TeamFormModal', () => {
     render(<TeamFormModal {...defaultProps} responders={mixedStatusResponders} />);
     expect(screen.getByText('Responder 3')).toBeInTheDocument();
   });
+
+  it('normalizes legacy "Search" suffixes in team type on load', () => {
+    const legacyProps = {
+      ...defaultProps,
+      initialData: { ...defaultProps.initialData, type: 'Vehicle Search' }
+    };
+    render(<TeamFormModal {...legacyProps} />);
+    
+    expect(screen.getByLabelText(/Type/i)).toHaveValue('Vehicle');
+  });
 });

@@ -359,4 +359,64 @@ describe('OperationsDashboardPage Logic', () => {
     // so we verify the data mapping logic in handleDrop
     expect(teamCell).toBeInTheDocument();
   });
+
+  it('filters rows correctly using the unified team search input', async () => {
+    const mockTeams = [
+      { team_id: 't1', team_name_number: 'Team Alpha', type: 'Ground', leader_responder_id: 'r1', status: 'Assigned' },
+      { team_id: 't2', team_name_number: 'Team Bravo', type: 'Dog', leader_responder_id: 'r2', status: 'Assigned' }
+    ];
+    const mockResponders = [
+      { responder_id: 'r1', name: 'Steve', identifier: 'K9-1', status: 'Assigned' },
+      { responder_id: 'r2', name: 'Bob', identifier: 'RADIO-2', status: 'Assigned' }
+    ];
+
+    // Mock the hook result directly to ensure consistent data and avoid state leakage from previous tests
+    vi.mocked(usePlanningDashboard).mockReturnValue({
+      assignments: [],
+      teams: mockTeams,
+      responders: mockResponders,
+      opPeriod: { par_check_interval: 60 },
+      loading: false,
+      error: null,
+      setError: vi.fn(),
+      setLoading: vi.fn(),
+      stats: {
+        teams: { staged: 0, assigned: 2, deployed: 0, total: 2 },
+        assignments: { planned: 0, assigned: 0, deployed: 0, complete: 0, incomplete: 0, total: 0 },
+        responders: { staged: 0, attached: 0, assigned: 2, deployed: 0, total: 2 }
+      },
+      fetchDashboardData: vi.fn(),
+      updateResourceStatus: vi.fn(),
+      assignTeamToAssignment: vi.fn(),
+      unassignTeam: vi.fn(),
+      createTeam: vi.fn(),
+      createAssignment: vi.fn(),
+      deleteAssignment: vi.fn(),
+      deleteTeam: vi.fn(),
+      detachTeam: vi.fn(),
+      updateTeam: vi.fn(),
+      updateAssignment: vi.fn(),
+      attachResponderToTeam: vi.fn(),
+      detachResponderFromTeam: vi.fn()
+    });
+
+    render(<OperationsDashboardPage />);
+    await waitFor(() => expect(screen.getByText('Team Alpha')).toBeInTheDocument());
+
+    const teamSearch = screen.getAllByPlaceholderText('Search...')[1];
+
+    // 1. Search by Team Name
+    fireEvent.change(teamSearch, { target: { value: 'Alpha' } });
+    expect(screen.getByText('Team Alpha')).toBeInTheDocument();
+    expect(screen.queryByText('Team Bravo')).not.toBeInTheDocument();
+
+    // 2. Search by Leader Name
+    fireEvent.change(teamSearch, { target: { value: 'Bob' } });
+    expect(screen.queryByText('Team Alpha')).not.toBeInTheDocument();
+    expect(screen.getByText('Team Bravo')).toBeInTheDocument();
+
+    // 3. Search by Leader ID
+    fireEvent.change(teamSearch, { target: { value: 'K9-1' } });
+    expect(screen.getByText('Team Alpha')).toBeInTheDocument();
+  });
 });

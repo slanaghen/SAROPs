@@ -72,4 +72,29 @@ describe('PlanningDashboard Selection', () => {
       }));
     });
   });
+
+  it('filters the responder list correctly using the unified search input', () => {
+    const mockResponders = [
+      { responder_id: 'r1', name: 'Sarah Miller', agency: 'K9 Unit', special_skills: 'Air Scent', status: 'Staged', identifier: 'K9-1' },
+      { responder_id: 'r2', name: 'James Chen', agency: 'UAS Ops', special_skills: 'UAS', status: 'Staged', identifier: 'PILOT-1' }
+    ];
+    render(<PlanningDashboard {...defaultProps} responders={mockResponders} />);
+    
+    const searchInput = screen.getByPlaceholderText(/Search name, ID, agency or skills/i);
+
+    // Search by Skill
+    fireEvent.change(searchInput, { target: { value: 'UAS' } });
+    expect(screen.getByText('James Chen')).toBeInTheDocument();
+    expect(screen.queryByText('Sarah Miller')).not.toBeInTheDocument();
+
+    // Search by Agency
+    fireEvent.change(searchInput, { target: { value: 'K9' } });
+    expect(screen.queryByText('James Chen')).not.toBeInTheDocument();
+    expect(screen.getByText('Sarah Miller')).toBeInTheDocument();
+
+    // Clear Search
+    fireEvent.click(screen.getByText('Clear'));
+    expect(screen.getByText('James Chen')).toBeInTheDocument();
+    expect(screen.getByText('Sarah Miller')).toBeInTheDocument();
+  });
 });

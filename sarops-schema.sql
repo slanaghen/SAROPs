@@ -144,7 +144,7 @@ CREATE TABLE teams (
 -- Ensure only one Staff team per operational period
 CREATE UNIQUE INDEX idx_one_staff_per_op 
 ON teams (op_period_id) 
-WHERE type = 'Staff';
+WHERE type = 'Staff' AND status != 'Disbanded';
 
 -- Table: assignments
 -- Tasks or objectives assigned to teams
@@ -192,6 +192,11 @@ CREATE TABLE responder_team_history (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT responder_team_history_valid_dates CHECK (detached_datetime IS NULL OR detached_datetime >= attached_datetime)
 );
+
+-- Ensure a responder can only be attached to one team at a time in the history log
+CREATE UNIQUE INDEX idx_responder_active_team 
+ON responder_team_history (responder_id) 
+WHERE (detached_datetime IS NULL);
 
 -- Table: clues
 -- Evidence and findings discovered during the incident

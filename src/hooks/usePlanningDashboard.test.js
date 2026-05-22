@@ -290,4 +290,19 @@ describe('usePlanningDashboard Hook', () => {
     expect(result.current.assignments[0].title).toBe('Untitled Assignment');
     expect(result.current.assignments[0].segment).toBe('');
   });
+
+  it('should throw an error and set state if team name uniqueness check fails', async () => {
+    const existingTeam = { team_id: 'existing-id', team_name_number: 'Team Alpha' };
+    mockSupabase.from.mockImplementation((table) => {
+      if (table === 'teams') return {
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        maybeSingle: vi.fn().mockResolvedValue({ data: existingTeam, error: null })
+      };
+      return createMockQuery([]);
+    });
+
+    const { result } = renderHook(() => usePlanningDashboard(mockSupabase, opPeriodId));
+    await expect(result.current.createTeam({ team_name_number: 'Team Alpha' })).rejects.toThrow(/already exists/i);
+  });
 });
