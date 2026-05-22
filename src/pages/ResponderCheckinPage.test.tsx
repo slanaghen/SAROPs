@@ -167,4 +167,29 @@ describe('ResponderCheckinPage Routing', () => {
       // Note: Add a console.error spy if you want to verify the error was logged
     });
   });
+
+  it('should prevent moving to confirmation if required fields are missing', async () => {
+    // Mock incidents to allow render
+    vi.mocked(supabase.from).mockImplementation((table: string) => {
+      if (table === 'incidents') {
+        return {
+          select: vi.fn().mockReturnThis(), is: vi.fn().mockReturnThis(), order: vi.fn().mockResolvedValue({ data: [] })
+        };
+      }
+      return { select: vi.fn().mockReturnThis(), then: (cb: any) => Promise.resolve({ data: [] }).then(cb) };
+    });
+
+    render(<MemoryRouter><ResponderCheckinPage /></MemoryRouter>);
+    
+    await screen.findByLabelText(/Full Name/i);
+
+    // Submit empty form
+    const continueBtn = screen.getByRole('button', { name: /Continue to Confirmation/i });
+    fireEvent.click(continueBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Please select an active incident/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/Confirm Your Information/i)).not.toBeInTheDocument();
+  });
 });

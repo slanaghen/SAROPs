@@ -4,14 +4,18 @@ export type AssignmentStatus = 'Planned' | 'Assigned' | 'Deployed' | 'Completed'
 export type AccessLevel = 'responder' | 'command staff' | 'admin';
 export type TeamStatus = 'Staged' | 'Assigned' | 'Deployed' | 'Disbanded';
 export type TeamType = 'Hasty' | 'Ground' | 'Vehicle' | 'Aerial' | 'Water' | 'Tracking' | 'Dog' | 'Avalanche' | 'Transport' | 'Helicopter' | 'Medical' | 'Staff' | 'Other';
-export type ResponderStatus = 'Staged' | 'Attached' | 'Assigned' | 'Deployed' | 'CheckedOut';
+export type ResponderStatus = 'Staged' | 'Attached' | 'Assigned' | 'Deployed' | 'CheckedOut' | 'Cleared';
 
 export interface Incident {
-  incident_id: string; // UUID Primary Key
+  incident_id: string; // TEXT Primary Key (Incident Number)
   name: string;
   number: string;
+  sartopo_id?: string | null;
+  notes?: string | null;
   start_datetime: string; // ISO Timestamp
   end_datetime: string | null;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface OperationalPeriod {
@@ -23,6 +27,8 @@ export interface OperationalPeriod {
   situation_narrative: string;
   situational_awareness_narrative: string;
   par_check_interval: number;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface Assignment {
@@ -50,7 +56,7 @@ export interface Assignment {
   stroke?: string;
   fill?: string;
   is_orphaned: boolean;
-  team_id: string | null; // Foreign Key to Team
+  team_id: string | null; // The UUID of the team currently tasked with this assignment
   created_at?: string;
   updated_at?: string;
 }
@@ -69,6 +75,10 @@ export interface Team {
   par_status: string | null;
 }
 
+/**
+ * Represents a checked-in personnel record.
+ * device_id is used for session recovery and identifying unique browser instances.
+ */
 export interface Responder {
   responder_id: string; // UUID Primary Key
   name: string;
@@ -79,6 +89,7 @@ export interface Responder {
   device_id: string; // Distinct browser/session token for offline tracking
   checkin_datetime: string;
   checkout_datetime: string | null;
+  last_seen_at?: string; // Optional: for real-time presence tracking
   access_level: AccessLevel;
   status: ResponderStatus;
 }
@@ -95,21 +106,11 @@ export interface Clue {
   clue_id: string; // UUID Primary Key
   incident_id: string; // Foreign Key
   sartopo_marker_id: string | null;
-  coordinates: {
-    latitude: number;
-    longitude: number;
-  };
+  latitude: number;
+  longitude: number;
   description: string;
   photo_url: string; // Local storage URI or Cloud bucket URL
   discovered_by_team_id: string | null;
   discovered_by_responder_id: string | null;
   timestamp: string;
-}
-
-export interface ICSAssignment {
-  ics_assignment_id: string; // UUID Primary Key
-  incident_id: string; // Foreign Key
-  position: string; // e.g., 'ic', 'safety', 'ops'
-  responder_id: string | null; // Foreign Key to Responder
-  assigned_at: string; // ISO Timestamp
 }

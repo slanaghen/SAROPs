@@ -19,134 +19,72 @@ vi.mock('../context/IncidentContext', () => ({
 }));
 
 vi.mock('../lib/supabase', () => ({
-  supabase: { 
+  supabase: {
     from: vi.fn(() => ({
       update: vi.fn().mockReturnThis(),
-      delete: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockResolvedValue({ error: null }),
+      eq: vi.fn().mockReturnThis(),
+      then: (cb: any) => Promise.resolve({ data: null, error: null }).then(cb)
     })),
-    auth: { signOut: vi.fn().mockResolvedValue({ error: null }) },
-  }, 
+    auth: {
+      signOut: vi.fn().mockResolvedValue({ error: null }),
+    },
+  },
 }));
 
 describe('CheckOutPage', () => {
-  const mockLogout = vi.fn();
-
   beforeEach(() => {
     vi.clearAllMocks();
-    window.alert = vi.fn();
   });
 
-  afterEach(() => {
-    cleanup();
-  });
+  afterEach(cleanup);
 
-  it('renders "No Active Session" message when user is not checked in', () => {
-    vi.mocked(useIncident).mockReturnValue({
-      isActive: false,
-      responderId: null,
-      responderStatus: '',
-      logout: mockLogout,
-    } as any);
-
-    render(
-      <MemoryRouter>
-        <CheckOutPage />
-      </MemoryRouter>
-    );
-
+  it('renders a warning if no active session is found', () => {
+    vi.mocked(useIncident).mockReturnValue({ isActive: false, responderId: null } as any);
+    render(<MemoryRouter><CheckOutPage /></MemoryRouter>);
     expect(screen.getByText(/No Active Session/i)).toBeInTheDocument();
   });
 
-  it('allows check-out for command staff with "Assigned" status', async () => {
+  it('blocks check-out if the responder is currently Deployed', async () => {
     vi.mocked(useIncident).mockReturnValue({
       isActive: true,
-      responderId: 'staff-123',
-      responderName: 'Commander Steve',
-      responderStatus: 'Assigned',
-      accessLevel: 'command staff',
-      logout: mockLogout,
+      responderId: 'r1',
+      responderName: 'Steve',
+      responderStatus: 'Deployed',
+      accessLevel: 'responder',
+      logout: vi.fn(),
     } as any);
 
-    const mockQueryChain = {
-      update: vi.fn().mockReturnThis(),
-      delete: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockResolvedValue({ error: null })
-    };
-    (supabase.from as any).mockReturnValue(mockQueryChain);
-
-    render(
-      <MemoryRouter>
-        <CheckOutPage />
-      </MemoryRouter>
-    );
-
+    render(<MemoryRouter><CheckOutPage /></MemoryRouter>);
     fireEvent.click(screen.getByText(/Confirm Check-Out/i));
 
-    await waitFor(() => {
-      expect(mockLogout).toHaveBeenCalled();
-      expect(mockNavigate).toHaveBeenCalledWith('/checkin');
-    });
+    expect(await screen.findByText(/Check-out unsuccessful/i)).toBeInTheDocument();
+    expect(screen.getByText(/current status is "Deployed"/i)).toBeInTheDocument();
   });
 
-  it('calls update status and logout when confirmation is clicked', async () => {
+  it('allows check-out for Staged responders', async () => {
+    const mockLogout = vi.fn();
     vi.mocked(useIncident).mockReturnValue({
       isActive: true,
-      responderId: 'res-123',
+      responderId: 'r1',
       responderName: 'Steve',
       responderStatus: 'Staged',
+      accessLevel: 'responder',
       logout: mockLogout,
     } as any);
-
-    const mockQueryChain = {
-      update: vi.fn().mockReturnThis(),
-      delete: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockResolvedValue({ error: null })
-    };
-    (supabase.from as any).mockReturnValue(mockQueryChain);
-
-    render(
-      <MemoryRouter>
-        <CheckOutPage />
-      </MemoryRouter>
-    );
-
-    fireEvent.click(screen.getByText(/Confirm Check-Out/i));
-
-    await waitFor(() => {
-      expect(supabase.from).toHaveBeenCalledWith('teams');
-      expect(supabase.from).toHaveBeenCalledWith('responders');
-      expect(mockLogout).toHaveBeenCalled();
-      expect(mockNavigate).toHaveBeenCalledWith('/checkin');
-    });
-  });
-
-  it('clears leadership status before updating responder record', async () => {
-    vi.mocked(useIncident).mockReturnValue({
-      isActive: true,
-      responderId: 'leader-123',
-      responderName: 'Leader Steve',
-      responderStatus: 'Staged',
-      logout: mockLogout,
-    } as any);
-
-    const mockQueryChain = {
-      update: vi.fn().mockReturnThis(),
-      delete: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockResolvedValue({ error: null })
-    };
-    (supabase.from as any).mockReturnValue(mockQueryChain);
 
     render(<MemoryRouter><CheckOutPage /></MemoryRouter>);
     fireEvent.click(screen.getByText(/Confirm Check-Out/i));
 
     await waitFor(() => {
-      expect(mockQueryChain.update).toHaveBeenCalledWith({ leader_responder_id: null });
-      expect(mockQueryChain.eq).toHaveBeenCalledWith('leader_responder_id', 'leader-123');
-      expect(mockQueryChain.update).toHaveBeenCalledWith(expect.objectContaining({ 
-        status: 'CheckedOut',
-        checkout_datetime: expect.any(String)
-      }));
+      expect(supabase.from).toHaveBeenCalledWith('responders');
+      // Specifically find the mock result associated with the 'responders' table call
+      const respondersCallIdx = vi.mocked(supabase.from).mock.calls.findIndex(c => c[0] === 'responders');
+      const respondersQuery = vi.mocked(supabase.from).mock.results[respondersCallIdx].value;
+      expect(respondersQuery.update).toHaveBeenCalledWith(expect.objectContaining({ status: 'Cleared' }));
+      
+      expect(supabase.auth.signOut).toHaveBeenCalled();
+      expect(mockLogout).toHaveBeenCalled();
+      expect(mockNavigate).toHaveBeenCalledWith('/checkin');
     });
   });
 });

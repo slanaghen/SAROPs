@@ -194,7 +194,7 @@ const AdminPage = () => {
       const { error: updateError } = await supabase
         .from('responders')
         .update({ 
-          status: 'CheckedOut',
+          status: 'Cleared',
           checkout_datetime: now
         })
         .eq('responder_id', id);
@@ -207,7 +207,7 @@ const AdminPage = () => {
       }
 
       const responder = allResponders.find(r => r.responder_id === id);
-      await recordAction(`Admin checked out responder "${responder?.name || 'Unknown'}" (ID: ${id}). Fields modified: status="CheckedOut", checkout_datetime="${now}".`);
+      await recordAction(`Admin checked out responder "${responder?.name || 'Unknown'}" (ID: ${id}). Fields modified: status="Cleared", checkout_datetime="${now}".`);
 
       setSuccess('Responder checked out.');
       fetchAllResponders();
@@ -245,7 +245,7 @@ const AdminPage = () => {
 
       if (updateError) throw updateError;
 
-      await recordAction(`Admin disbanded team "${name}" (ID: ${id}, Type: ${type}). Fields modified: status="Disbanded", last_par_check=null. All members status set to "Staged".`);
+      await recordAction(`Admin disbanded team "${name}" (ID: ${id}, Type: ${type}). Fields modified: status="Disbanded", last_par_check=null. All members status are "Staged".`);
       setSuccess('Team disbanded.');
       fetchAllTeams();
       fetchAllResponders(); // Refresh responders as their status changed

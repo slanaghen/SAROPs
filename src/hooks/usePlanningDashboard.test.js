@@ -305,4 +305,165 @@ describe('usePlanningDashboard Hook', () => {
     const { result } = renderHook(() => usePlanningDashboard(mockSupabase, opPeriodId));
     await expect(result.current.createTeam({ team_name_number: 'Team Alpha' })).rejects.toThrow(/already exists/i);
   });
+
+  it('should provide correctly filtered computed properties for dashboard columns', async () => {
+    const mockTeams = [
+      { team_id: 't1', status: 'Staged' },
+      { team_id: 't2', status: 'Assigned' }
+    ];
+    const mockAsns = [
+      { assignment_id: 'a1', team_id: 't2', is_orphaned: false },
+      { assignment_id: 'a2', team_id: null, is_orphaned: false },
+      { assignment_id: 'a3', team_id: null, is_orphaned: true }
+    ];
+    const mockResponders = [
+      { responder_id: 'r1', status: 'Staged' },
+      { responder_id: 'r2', status: 'Attached' }
+    ];
+
+    mockSupabase.from.mockImplementation((table) => {
+      if (table === 'teams') return createMockQuery(mockTeams);
+      if (table === 'assignments') return createMockQuery(mockAsns);
+      if (table === 'responders') return createMockQuery(mockResponders);
+      return createMockQuery([]);
+    });
+
+    const { result } = renderHook(() => usePlanningDashboard(mockSupabase, opPeriodId));
+    await act(async () => { await result.current.fetchDashboardData(); });
+
+    // Verify Staged Teams list (Staged status)
+    expect(result.current.stagedTeams).toHaveLength(1);
+    expect(result.current.stagedTeams[0].team_id).toBe('t1');
+
+    // Verify Available Assignments (No team_id AND not orphaned)
+    expect(result.current.availableAssignments).toHaveLength(1);
+    expect(result.current.availableAssignments[0].assignment_id).toBe('a2');
+
+    // Verify Available Responders (Staged status)
+    expect(result.current.availableResponders).toHaveLength(1);
+    expect(result.current.availableResponders[0].responder_id).toBe('r1');
+  });
+
+  it('should exclude teams from available list if their status is not Staged', async () => {
+    const mixedTeams = [
+      { team_id: 't-staged', status: 'Staged' },
+      { team_id: 't-assigned', status: 'Assigned' },
+      { team_id: 't-disbanded', status: 'Disbanded' }
+    ];
+
+    mockSupabase.from.mockImplementation((table) => {
+      if (table === 'teams') return createMockQuery(mixedTeams);
+      return createMockQuery([]);
+    });
+
+    const { result } = renderHook(() => usePlanningDashboard(mockSupabase, opPeriodId));
+    await act(async () => { await result.current.fetchDashboardData(); });
+
+    expect(result.current.stagedTeams).toHaveLength(1);
+    expect(result.current.stagedTeams[0].team_id).toBe('t-staged');
+  });
+
+  it('should exclude assignments from available list if they are orphaned or already have a team', async () => {
+    const mixedAsns = [
+      { assignment_id: 'valid', team_id: null, is_orphaned: false },
+      { assignment_id: 'assigned', team_id: 'some-team', is_orphaned: false },
+      { assignment_id: 'orphaned', team_id: null, is_orphaned: true }
+    ];
+
+    mockSupabase.from.mockImplementation((table) => {
+      if (table === 'assignments') return createMockQuery(mixedAsns);
+      return createMockQuery([]);
+    });
+
+    const { result } = renderHook(() => usePlanningDashboard(mockSupabase, opPeriodId));
+    await act(async () => { await result.current.fetchDashboardData(); });
+
+    expect(result.current.availableAssignments).toHaveLength(1);
+    expect(result.current.availableAssignments[0].assignment_id).toBe('valid');
+  });
+
+  it('should handle unassigning a team from an assignment', async () => {
+    const mockAsn = { assignment_id: 'a1', team_id: 't1', status: 'Assigned' };
+    const mockTeam = { team_id: 't1', status: 'Assigned' };
+
+    // Mock the chain of updates for unassignment.
+    // fetchDashboardData expects arrays to correctly populate state.
+    mockSupabase.from.mockImplementation((table) => {
+      if (table === 'assignments') return createMockQuery([mockAsn]);
+      if (table === 'teams') return createMockQuery([mockTeam]);
+      if (table === 'action_logs') return createMockQuery({});
+      return createMockQuery([]);
+    });
+
+    const { result } = renderHook(() => usePlanningDashboard(mockSupabase, opPeriodId));
+
+    // Populate the hook's local state by fetching data first.
+    // The unassignTeam logic relies on the current state to find the target assignment.
+    await act(async () => {
+      await result.current.fetchDashboardData();
+    });
+
+    await act(async () => {
+      await result.current.unassignTeam('a1');
+    });
+
+    expect(mockSupabase.from).toHaveBeenCalledWith('assignments');
+    expect(mockSupabase.from).toHaveBeenCalledWith('teams');
+    // Ensure the action is logged for the audit trail
+    expect(mockSupabase.from).toHaveBeenCalledWith('action_logs');
+  });
+
+  it('should update the role if a responder is already attached to the team', async () => {
+    const responderId = 'r1';
+    const teamId = 't1';
+    const existingMembership = { responder_id: responderId, team_id: teamId, role: 'Member' };
+    
+    mockSupabase.from.mockImplementation((table) => {
+      if (table === 'team_responders') {
+        return {
+          select: vi.fn().mockReturnThis(),
+          match: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          maybeSingle: vi.fn().mockResolvedValue({ data: existingMembership, error: null }),
+          update: vi.fn().mockReturnThis(),
+          then: (cb) => Promise.resolve({ data: null, error: null }).then(cb)
+        };
+      }
+      return createMockQuery({});
+    });
+
+    const { result } = renderHook(() => usePlanningDashboard(mockSupabase, opPeriodId));
+
+    await act(async () => {
+      await result.current.attachResponderToTeam(responderId, teamId, 'Medic');
+    });
+
+    expect(mockSupabase.from).toHaveBeenCalledWith('team_responders');
+    expect(assignResponderToTeam).not.toHaveBeenCalled();
+  });
+
+  it('assignTeamToAssignment should record a detailed entry in the action log', async () => {
+    const mockAsn = { assignment_id: 'a1', title: 'Grid Alpha', status: 'Planned' };
+    const mockTeam = { team_id: 't1', team_name_number: 'Team 1', status: 'Staged' };
+    
+    mockSupabase.from.mockImplementation((table) => {
+      if (table === 'assignments') return createMockQuery([mockAsn]);
+      if (table === 'teams') return createMockQuery([mockTeam]);
+      if (table === 'action_logs') return createMockQuery({});
+      return createMockQuery([]);
+    });
+
+    const { result } = renderHook(() => usePlanningDashboard(mockSupabase, opPeriodId));
+    
+    await act(async () => {
+      await result.current.fetchDashboardData();
+    });
+
+    await act(async () => {
+      await result.current.assignTeamToAssignment('t1', 'a1');
+    });
+
+    // Ensure the action_logs table was targeted
+    expect(mockSupabase.from).toHaveBeenCalledWith('action_logs');
+  });
 });

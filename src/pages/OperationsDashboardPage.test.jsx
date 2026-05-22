@@ -34,6 +34,8 @@ describe('OperationsDashboardPage Logic', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
+    localStorage.setItem('sarops_layout_mode', 'split'); // Force default layout for consistent testing
     // Set a default mock for useIncident that allows the dashboard to render
     vi.mocked(useIncident).mockReturnValue({
       incidentData: { opPeriodId: 'op-123', name: 'Mock Incident' },
@@ -418,5 +420,91 @@ describe('OperationsDashboardPage Logic', () => {
     // 3. Search by Leader ID
     fireEvent.change(teamSearch, { target: { value: 'K9-1' } });
     expect(screen.getByText('Team Alpha')).toBeInTheDocument();
+  });
+
+  it('filters rows correctly using the localized assignment search input', async () => {
+    const mockAsns = [
+      { assignment_id: 'a1', title: 'Grid Alpha', status: 'Assigned', op_period_id: 'op-123' },
+      { assignment_id: 'a2', title: 'Creek Sweep', status: 'Planned', op_period_id: 'op-123' }
+    ];
+
+    // Define a full mock object to avoid state leakage from previous tests
+    vi.mocked(usePlanningDashboard).mockReturnValue({
+      assignments: mockAsns,
+      teams: [],
+      responders: [],
+      opPeriod: { par_check_interval: 60 },
+      loading: false,
+      error: null,
+      setError: vi.fn(),
+      setLoading: vi.fn(),
+      stats: {
+        teams: { staged: 0, assigned: 0, deployed: 0, total: 0 },
+        assignments: { planned: 1, assigned: 1, deployed: 0, complete: 0, incomplete: 0, total: 2 },
+        responders: { staged: 0, attached: 0, assigned: 0, deployed: 0, total: 0 }
+      },
+      fetchDashboardData: vi.fn(),
+      updateResourceStatus: vi.fn(),
+      assignTeamToAssignment: vi.fn(),
+      unassignTeam: vi.fn(),
+      createTeam: vi.fn(),
+      createAssignment: vi.fn(),
+      deleteAssignment: vi.fn(),
+      deleteTeam: vi.fn(),
+      detachTeam: vi.fn(),
+      updateTeam: vi.fn(),
+      updateAssignment: vi.fn(),
+      attachResponderToTeam: vi.fn(),
+      detachResponderFromTeam: vi.fn()
+    });
+
+    render(<OperationsDashboardPage />);
+    const asnSearch = screen.getAllByPlaceholderText('Search...')[0];
+
+    fireEvent.change(asnSearch, { target: { value: 'Creek' } });
+    expect(screen.getByText('Creek Sweep')).toBeInTheDocument();
+    expect(screen.queryByText('Grid Alpha')).not.toBeInTheDocument();
+  });
+
+  it('triggers manual PAR reset for a team', async () => {
+    const mockTeams = [{ team_id: 't1', team_name_number: 'Team 1', status: 'Deployed' }];
+    // Define a full mock object to satisfy component destructuring
+    vi.mocked(usePlanningDashboard).mockReturnValue({
+      assignments: [],
+      teams: mockTeams,
+      responders: [],
+      opPeriod: { par_check_interval: 60 },
+      loading: false,
+      error: null,
+      setError: vi.fn(),
+      setLoading: vi.fn(),
+      stats: {
+        teams: { staged: 0, assigned: 1, deployed: 0, total: 1 },
+        assignments: { planned: 0, assigned: 0, deployed: 0, complete: 0, incomplete: 0, total: 0 },
+        responders: { staged: 0, attached: 0, assigned: 0, deployed: 0, total: 0 }
+      },
+      fetchDashboardData: vi.fn(),
+      updateResourceStatus: vi.fn(),
+      assignTeamToAssignment: vi.fn(),
+      unassignTeam: vi.fn(),
+      createTeam: vi.fn(),
+      createAssignment: vi.fn(),
+      deleteAssignment: vi.fn(),
+      deleteTeam: vi.fn(),
+      detachTeam: vi.fn(),
+      updateTeam: vi.fn(),
+      updateAssignment: vi.fn(),
+      attachResponderToTeam: vi.fn(),
+      detachResponderFromTeam: vi.fn()
+    });
+
+    render(<OperationsDashboardPage />);
+    await waitFor(() => screen.getByText('Team 1'));
+
+    const row = screen.getByText('Team 1').closest('tr');
+    const actions = within(row).getByDisplayValue('Actions...');
+    fireEvent.change(actions, { target: { value: 'reset-par' } });
+
+    expect(supabase.from).toHaveBeenCalledWith('teams');
   });
 });

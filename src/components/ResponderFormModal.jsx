@@ -11,7 +11,7 @@ const skillsList = [
   "Litter", "Medical", "Other"
 ];
 const ACCESS_LEVELS = ["responder", "command staff", "admin"];
-const STATUS_LIST = ["Staged", "Attached", "Assigned", "Deployed", "CheckedOut"];
+const STATUS_LIST = ["Staged", "Attached", "Assigned", "Deployed", "CheckedOut", "Cleared"];
 
 
 /**

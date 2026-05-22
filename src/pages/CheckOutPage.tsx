@@ -36,11 +36,11 @@ const CheckOutPage: React.FC = () => {
 
       if (leaderError) throw leaderError;
 
-      // Transition responder to CheckedOut status rather than deleting
-      // This preserves the incident history and action logs
+      // Mark responder as 'Cleared' for the active incident session.
+      // This preserves historical records while removing them from active staging lists.
       const { error: dbError } = await supabase //
         .from('responders')
-        .update({ status: 'CheckedOut', checkout_datetime: new Date().toISOString() })
+        .update({ status: 'Cleared', checkout_datetime: new Date().toISOString() })
         .eq('responder_id', responderId);
 
       if (dbError) throw dbError;

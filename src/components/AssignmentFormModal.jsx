@@ -1,13 +1,6 @@
 import React, { useState, useEffect } from 'react';
-
-/**
- * Resource types matching the Team Type enumerated values.
- */
-const RESOURCE_TYPES = [
-  'Hasty', 'Ground', 'Vehicle', 'Aerial', 
-  'Water', 'Tracking', 'Dog', 'Avalanche', 
-  'Helicopter', 'Medical', 'Other'
-];
+import { RESOURCE_TYPES } from '../constants/operationalConstants';
+import { normalizeResourceTypeName } from '../utils/dataNormalization';
 
 /**
  * Shared Modal for creating and editing Assignments.
@@ -20,29 +13,15 @@ const AssignmentFormModal = ({
   loading = false,
   error = null
 }) => {
-  /**
-   * Normalizes resource type to handle legacy "Search" suffix during transitions.
-   */
-  const normalizeType = (type) => {
-    if (!type) return 'Ground';
-    const mapping = {
-      'Ground Search': 'Ground',
-      'Vehicle Search': 'Vehicle',
-      'Water Search': 'Water',
-      'Aerial Search': 'Aerial'
-    };
-    return mapping[type] || type;
-  };
-
   const [assignmentForm, setAssignmentForm] = useState({
     ...initialData,
-    resource_type: normalizeType(initialData.resource_type)
+    resource_type: normalizeResourceTypeName(initialData.resource_type)
   });
 
   useEffect(() => {
     setAssignmentForm({
       ...initialData,
-      resource_type: normalizeType(initialData.resource_type)
+      resource_type: normalizeResourceTypeName(initialData.resource_type)
     });
   }, [initialData]);
 

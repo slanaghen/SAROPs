@@ -309,7 +309,7 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
       }
 
       // If operational period provided, show team assignment or staff confirmation
-      const isStaff = (finalResponder.access_level === 'command staff');
+      const isStaff = finalResponder.access_level === 'command staff' || finalResponder.access_level === 'admin';
 
       if (isStaff && targetIncidentId) {
         const { data: roleData } = await supabase

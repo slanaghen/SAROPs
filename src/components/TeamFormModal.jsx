@@ -2,21 +2,8 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import BaseModal from './BaseModal';
 import { supabase } from '../lib/supabase';
 import { useIncident } from '../context/IncidentContext';
-
-/**
- * Configuration for available team types. 
- * Moving this out of the JSX makes the component more extensible.
- */
-const TEAM_TYPES = [
-  'Hasty', 'Ground', 'Vehicle', 'Aerial', 
-  'Water', 'Tracking', 'Dog', 'Avalanche', 
-  'Helicopter', 'Medical', 'Other'
-];
-
-/**
- * Predefined roles for Staff teams
- */
-const STAFF_PREDEFINED_ROLES = ['Incident Commander', 'Operations', 'Planning', 'Logistics', 'PIO', 'Safety', 'Liaison'];
+import { TEAM_TYPES, STAFF_PREDEFINED_ROLES } from '../constants/operationalConstants';
+import { normalizeResourceTypeName } from '../utils/dataNormalization';
 
 /**
  * Shared Modal for creating and editing Teams.
@@ -34,20 +21,6 @@ const TeamFormModal = ({
   const { responderName, user } = useIncident();
   const staffName = responderName || user?.email || 'Operations';
 
-  /**
-   * Normalizes team type to handle legacy "Search" suffix during transitions.
-   */
-  const normalizeType = (type) => {
-    if (!type) return 'Ground';
-    const mapping = {
-      'Ground Search': 'Ground',
-      'Vehicle Search': 'Vehicle',
-      'Water Search': 'Water',
-      'Aerial Search': 'Aerial'
-    };
-    return mapping[type] || type;
-  };
-
   const getInitialState = (data) => {
     const roles = { ...(data.responder_roles || {}) };
     if (data.current_responders) {
@@ -57,7 +30,7 @@ const TeamFormModal = ({
     }
     return {
       ...data,
-      type: normalizeType(data.type),
+      type: normalizeResourceTypeName(data.type),
       equipment: Array.isArray(data.equipment) ? data.equipment.join(', ') : (data.equipment || ''),
       responder_roles: roles
     };
@@ -304,7 +277,7 @@ const TeamFormModal = ({
               className="responder-pool" 
               onDrop={handleDropOnPool} // Add drop handler for the pool
               onDragOver={(e) => e.preventDefault()} // Allow drops on the pool
-              style={{ flex: 1, minHeight: '300px', background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px dashed #cbd5e1' }}
+              style={{ flex: 1, minHeight: '200px', background: '#f8fafc', padding: '12px', borderRadius: '12px', border: '1px dashed #cbd5e1' }}
             >
               <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '12px' }}>Staged Responders</label>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', maxHeight: '250px', overflowY: 'auto' }}>
@@ -314,7 +287,7 @@ const TeamFormModal = ({
                     draggable
                     onDragStart={(e) => e.dataTransfer.setData('responderId', r.responder_id)}
                     className="chip team-chip"
-                    style={{ cursor: 'grab', padding: '8px 12px', background: '#fff', border: '1px solid #d9d9d9', borderRadius: '6px', fontSize: '12px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}
+                    style={{ cursor: 'grab', padding: '4px 8px', background: '#fff', border: '1px solid #d9d9d9', borderRadius: '6px', fontSize: '12px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}
                   >
                     <div style={{ fontWeight: 600 }}>{r.name}</div>
                     <div style={{ opacity: 0.7, fontSize: '10px' }}>
@@ -334,8 +307,8 @@ const TeamFormModal = ({
               <table className="operations-table" style={{ width: '100%', minWidth: 'auto', border: '1px solid #e2e8f0', background: '#fff' }}>
                 <thead>
                   <tr style={{ background: '#f8fafc' }}>
-                    <th style={{ width: '60%', textAlign: 'left', padding: '8px 12px', fontSize: '12px' }}>Team Member</th>
-                    <th style={{ width: '40%', textAlign: 'left', padding: '8px 12px', fontSize: '12px' }}>Role / Position</th>
+                    <th style={{ width: '60%', textAlign: 'left', padding: '4px 10px', fontSize: '12px' }}>Team Member</th>
+                    <th style={{ width: '40%', textAlign: 'left', padding: '4px 10px', fontSize: '12px' }}>Role / Position</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -351,13 +324,13 @@ const TeamFormModal = ({
                         onDragOver={(e) => e.preventDefault()}
                         style={{ borderBottom: '1px solid #f1f5f9' }}
                       >
-                        <td style={{ padding: '8px 12px', height: '58px' }}>
+                        <td style={{ padding: '4px 10px', height: '38px' }}>
                           {r ? (
                             <div 
                               className="chip team-chip"
                               draggable="true"
                               onDragStart={(e) => e.dataTransfer.setData('responderId', r.responder_id)}
-                              style={{ display: 'inline-block', padding: '6px 10px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '6px', fontSize: '12px', cursor: 'grab' }}
+                              style={{ display: 'inline-block', padding: '3px 8px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '6px', fontSize: '12px', cursor: 'grab' }}
                             >
                               <div style={{ fontWeight: 600 }}>{r.name}</div>
                               <div style={{ opacity: 0.7, fontSize: '10px' }}>{r.agency}</div>
@@ -381,13 +354,13 @@ const TeamFormModal = ({
                       onDragOver={(e) => e.preventDefault()}
                       style={{ borderBottom: '1px solid #f1f5f9' }}
                     >
-                      <td style={{ padding: '8px 12px', height: '58px' }}>
+                      <td style={{ padding: '4px 10px', height: '38px' }}>
                         {teamForm.leader_responder_id ? (
                           <div 
                             className="chip team-chip"
                             draggable="true"
                             onDragStart={(e) => e.dataTransfer.setData('responderId', teamForm.leader_responder_id)}
-                            style={{ display: 'inline-block', padding: '6px 10px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', fontSize: '12px', cursor: 'grab' }}
+                            style={{ display: 'inline-block', padding: '3px 8px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', fontSize: '12px', cursor: 'grab' }}
                           >
                             <div style={{ fontWeight: 600 }}>
                               {responders.find(r => r.responder_id === teamForm.leader_responder_id)?.name}
@@ -417,7 +390,7 @@ const TeamFormModal = ({
                             className="chip team-chip"
                             draggable="true"
                             onDragStart={(e) => e.dataTransfer.setData('responderId', id)}
-                            style={{ display: 'inline-block', padding: '6px 10px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '6px', fontSize: '12px', cursor: 'grab' }}
+                            style={{ display: 'inline-block', padding: '3px 8px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '6px', fontSize: '12px', cursor: 'grab' }}
                           >
                             <div style={{ fontWeight: 600 }}>{r.name}</div>
                             <div style={{ opacity: 0.7, fontSize: '10px' }}>
@@ -440,7 +413,7 @@ const TeamFormModal = ({
 
                   {/* Blank Row Placeholder */}
                   <tr onDrop={handleDropMember} onDragOver={(e) => e.preventDefault()} style={{ background: '#fcfcfc' }}>
-                    <td style={{ padding: '8px 12px', height: '58px', textAlign: 'center', color: '#94a3b8', fontStyle: 'italic', fontSize: '12px' }} colSpan={2}>
+                    <td style={{ padding: '4px 10px', height: '38px', textAlign: 'center', color: '#94a3b8', fontStyle: 'italic', fontSize: '12px' }} colSpan={2}>
                       Drop chips here to add members...
                     </td>
                   </tr>

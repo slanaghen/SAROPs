@@ -5,7 +5,7 @@ import {
   markClueAsSynced,
   markClueWithSyncError,
   OfflineClue,
-} from './offlineClueDB';
+} from '../utils/offlineClueDB';
 
 /**
  * Sync service for offline clues
@@ -38,7 +38,7 @@ export interface SyncResult {
 /**
  * Sync all offline clues to Supabase
  */
-export const syncOffllineClues = async (
+export const syncOfflineClues = async (
   supabaseClient: SupabaseClient,
   onProgress?: (progress: SyncProgress) => void
 ): Promise<SyncResult> => {
@@ -151,7 +151,7 @@ export const setupAutoSync = (
     console.log('Back online, syncing offline clues...');
     
     try {
-      const result = await syncOffllineClues(supabaseClient);
+      const result = await syncOfflineClues(supabaseClient);
       
       if (result.synced > 0) {
         console.log(`Successfully synced ${result.synced} clues`);

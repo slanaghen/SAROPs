@@ -247,7 +247,7 @@ describe('ResponderDashboardPage', () => {
 
     render(<ResponderDashboardPage />);
     
-    const overdueChip = screen.getByText(/ago/i).closest('span'); // Specifically find the "Xh Xm ago" chip
+    const overdueChip = screen.getByTitle('Click to reset PAR');
     fireEvent.click(overdueChip);
 
     await waitFor(() => {
@@ -301,6 +301,7 @@ describe('ResponderDashboardPage', () => {
     
     const mockTeam = { 
       team_id: 't1', 
+      team_name_number: 'Team 1',
       status: 'Assigned', 
       last_par_check: sixtyFiveMinsAgo 
     };
@@ -326,7 +327,9 @@ describe('ResponderDashboardPage', () => {
     
     await waitFor(() => {
       expect(screen.getByText(/Check-in Required!/i)).toBeInTheDocument();
-      expect(screen.getByText(/PAR OVERDUE/i)).toBeInTheDocument();
+      // Visual parity update: text was replaced by the duration badge
+      // Use getAllByText as the duration now appears in both the header badge and the reset chip
+      expect(screen.getAllByText(/1h 5m ago/i).length).toBeGreaterThanOrEqual(1);
     });
   });
 
@@ -366,22 +369,23 @@ describe('ResponderDashboardPage', () => {
     const now = Date.now();
     
     // 1. Less than a minute
-    let mockTeam = { status: 'Assigned', last_par_check: new Date(now - 30000).toISOString() }; // 30s ago
+    let mockTeam = { team_name_number: 'Team 1', status: 'Assigned', type: 'Ground', last_par_check: new Date(now - 30000).toISOString() }; // 30s ago
     vi.mocked(useResponderTeamAndAssignment).mockReturnValue({ team: mockTeam, loading: false, refetch: mockRefetch });
     const { rerender } = render(<ResponderDashboardPage />);
     expect(screen.getByText('just now')).toBeInTheDocument();
 
     // 2. Multiple minutes
-    mockTeam = { ...mockTeam, last_par_check: new Date(now - 15 * 60000).toISOString() }; // 15m ago
+    mockTeam = { team_name_number: 'Team 1', status: 'Assigned', type: 'Ground', last_par_check: new Date(now - 15 * 60000).toISOString() }; // 15m ago
     vi.mocked(useResponderTeamAndAssignment).mockReturnValue({ team: mockTeam, loading: false, refetch: mockRefetch });
     rerender(<ResponderDashboardPage />);
     expect(screen.getByText('15m ago')).toBeInTheDocument();
 
     // 3. Hours and minutes
-    mockTeam = { ...mockTeam, last_par_check: new Date(now - 145 * 60000).toISOString() }; // 2h 25m ago
+    mockTeam = { team_name_number: 'Team 1', status: 'Assigned', type: 'Ground', last_par_check: new Date(now - 145 * 60000).toISOString() }; // 2h 25m ago
     vi.mocked(useResponderTeamAndAssignment).mockReturnValue({ team: mockTeam, loading: false, refetch: mockRefetch });
     rerender(<ResponderDashboardPage />);
-    expect(screen.getByText('2h 25m ago')).toBeInTheDocument();
+    // When overdue, the duration text appears in both the section badge and the reset chip
+    expect(screen.getAllByText('2h 25m ago').length).toBeGreaterThanOrEqual(2);
   });
 
   it('updates the message list when a real-time message event is received', async () => {
@@ -470,5 +474,149 @@ describe('ResponderDashboardPage', () => {
       );
     });
     alertSpy.mockRestore();
+  });
+
+  it('should allow a leader to update assignment POD and debrief narrative', async () => {
+    const mockTeam = { team_id: 't1', team_name_number: 'Team 1', leader_responder_id: 'r1', status: 'Deployed' };
+    const mockAsn = { assignment_id: 'a1', status: 'Deployed', title: 'Task 1' };
+    const mockRefetch = vi.fn();
+
+    vi.mocked(useResponderTeamAndAssignment).mockReturnValue({
+      team: mockTeam,
+      assignment: mockAsn,
+      loading: false,
+      refetch: mockRefetch,
+    });
+
+    supabase.from.mockImplementation(() => createSupabaseMock([mockAsn]));
+
+    render(<ResponderDashboardPage />);
+    
+    const podInput = screen.getByPlaceholderText('0-100');
+    const debriefArea = screen.getByPlaceholderText(/Enter findings/i);
+
+    fireEvent.change(podInput, { target: { value: '85' } });
+    fireEvent.change(debriefArea, { target: { value: 'Found tracks' } });
+
+    const saveBtn = screen.getByRole('button', { name: /Save Mission Data/i });
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => {
+      expect(supabase.from).toHaveBeenCalledWith('assignments');
+      // Find the update call and verify data payload
+      const updateCall = vi.mocked(supabase.from).mock.results.find(r => r.value.update && r.value.update.mock.calls.length > 0).value;
+      expect(updateCall.update).toHaveBeenCalledWith(expect.objectContaining({
+        probability_of_detection: 85,
+        debrief_narrative: 'Found tracks'
+      }));
+      expect(mockRefetch).toHaveBeenCalled();
+    });
+  });
+
+  it('prompts for confirmation and calls removeResponderFromTeam when leaving a team', async () => {
+    const mockTeam = { team_id: 't1', team_name_number: 'Team Alpha', status: 'Assigned' };
+    const mockRefetch = vi.fn();
+    
+    vi.mocked(useResponderTeamAndAssignment).mockReturnValue({
+      team: mockTeam,
+      assignment: null,
+      loading: false,
+      refetch: mockRefetch,
+    });
+
+    // Mock window confirm
+    const confirmSpy = vi.spyOn(window, 'confirm').mockImplementation(() => true);
+    
+    render(<ResponderDashboardPage />);
+    
+    const leaveBtn = screen.getByRole('button', { name: /Leave Team/i });
+    fireEvent.click(leaveBtn);
+
+    expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('leave team "Team Alpha"'));
+    
+    await waitFor(() => {
+      expect(supabase.from).toHaveBeenCalledWith('team_responders');
+      // Check if delete was called (part of removeResponderFromTeam)
+      const calls = vi.mocked(supabase.from).mock.results;
+      const deleteCall = calls.find(r => r.value.delete);
+      expect(deleteCall).toBeDefined();
+    });
+    confirmSpy.mockRestore();
+  });
+
+  it('should successfully send a message to Command', async () => {
+    const mockTeam = { team_id: 't1', team_name_number: 'Team 1', leader_responder_id: 'r1', status: 'Assigned' };
+    
+    vi.mocked(useResponderTeamAndAssignment).mockReturnValue({
+      team: mockTeam, assignment: null, loading: false, refetch: vi.fn()
+    });
+
+    // Mock successful message insertion
+    const mockInsert = vi.fn().mockReturnThis();
+    supabase.from.mockImplementation((table) => {
+      if (table === 'team_messages') {
+        const mock = createSupabaseMock([]);
+        mock.insert = mockInsert;
+        mock.single = vi.fn().mockResolvedValue({ data: { id: 'm1', message_text: 'Test' }, error: null });
+        return mock;
+      }
+      return createSupabaseMock([]);
+    });
+
+    render(<ResponderDashboardPage />);
+
+    const input = screen.getByPlaceholderText(/Send message to Command/i);
+    fireEvent.change(input, { target: { value: 'Requesting radio check' } });
+    fireEvent.submit(input.closest('form'));
+
+    await waitFor(() => {
+      expect(mockInsert).toHaveBeenCalledWith(expect.objectContaining({ message_text: 'Requesting radio check' }));
+    });
+  });
+
+  it('should update PAR status to "Contact me" when that button is clicked', async () => {
+    const mockTeam = { team_id: 't1', team_name_number: 'Team 1', status: 'Assigned' };
+    const mockRefetch = vi.fn();
+
+    vi.mocked(useResponderTeamAndAssignment).mockReturnValue({
+      team: mockTeam, assignment: null, loading: false, refetch: mockRefetch,
+    });
+
+    render(<ResponderDashboardPage />);
+    const contactBtn = screen.getByRole('button', { name: /Contact Command/i });
+    fireEvent.click(contactBtn);
+
+    await waitFor(() => {
+      const updateCall = vi.mocked(supabase.from).mock.results.find(r => r.value.update && r.value.update.mock.calls.length > 0).value;
+      expect(updateCall.update).toHaveBeenCalledWith(expect.objectContaining({
+        par_status: 'Contact me'
+      }));
+    });
+  });
+
+  it('allows a non-leader to leave a team when assigned but not deployed', async () => {
+    const mockTeam = { team_id: 't1', team_name_number: 'Team Alpha', leader_responder_id: 'OTHER_LEADER', status: 'Assigned' };
+    const mockRefetch = vi.fn();
+    
+    vi.mocked(useResponderTeamAndAssignment).mockReturnValue({
+      team: mockTeam,
+      assignment: { status: 'Assigned' },
+      loading: false,
+      refetch: mockRefetch,
+    });
+
+    window.confirm = vi.fn().mockReturnValue(true);
+    
+    render(<ResponderDashboardPage />);
+    
+    const leaveBtn = screen.getByRole('button', { name: /Leave Team/i });
+    expect(leaveBtn).not.toBeDisabled();
+    
+    fireEvent.click(leaveBtn);
+
+    await waitFor(() => {
+      expect(supabase.from).toHaveBeenCalledWith('team_responders');
+      expect(mockRefetch).toHaveBeenCalled();
+    });
   });
 });

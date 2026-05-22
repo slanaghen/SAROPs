@@ -16,7 +16,7 @@ import {
   getOfflineStorageStats,
   OfflineClue,
   SyncLogEntry,
-} from './offlineClueDB';
+} from '../utils/offlineClueDB';
 
 export interface UseOfflineCluesReturn {
   // Data

@@ -44,7 +44,7 @@ export const checkOutResponder = async (
     .from('responders')
     .update({
       checkout_datetime: checkoutTime,
-      status: 'CheckedOut' as ResponderStatus,
+      status: 'Cleared' as ResponderStatus,
     })
     .eq('responder_id', responderId)
     .select()

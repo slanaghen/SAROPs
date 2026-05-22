@@ -1,6 +1,9 @@
 -- SAROps PostgreSQL Schema for Supabase
 -- Generated from sarops-types.d.ts
 
+-- Enable pgcrypto for secure password hashing
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 -- ============================================================================
 -- ENUM TYPES
 -- ============================================================================
@@ -45,7 +48,8 @@ CREATE TYPE responder_status AS ENUM (
   'Attached',
   'Assigned',
   'Deployed',
-  'CheckedOut'
+  'CheckedOut',
+  'Cleared'
 );
 
 DROP TYPE IF EXISTS access_level CASCADE;
@@ -253,7 +257,7 @@ CREATE TABLE team_messages (
 CREATE TABLE admin_users (
   email TEXT PRIMARY KEY,
   username TEXT NOT NULL,
-  password TEXT NOT NULL, -- In a real app, use Supabase Auth; this matches AdminPage.jsx logic
+  password TEXT NOT NULL, -- Store as crypt(password, gen_salt('bf'))
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 -- ============================================================================
@@ -406,16 +410,17 @@ BEGIN
     END IF;
 
     -- Update the responder's access_level and status if they are different
-    -- Ensure staff members are marked as 'Assigned' if their team is 'Assigned'
+    -- Ensure staff members are marked as 'Assigned' if their team is 'Assigned'.
+    -- Critical: Preserve 'admin' level if it already exists.
     UPDATE responders
-    SET access_level = target_access_level,
+    SET access_level = CASE WHEN access_level = 'admin' THEN 'admin'::access_level ELSE target_access_level END,
         status = CASE 
             WHEN is_command_staff_team_member AND staff_team_status = 'Assigned' THEN 'Assigned'::responder_status 
             ELSE status 
         END
     WHERE responder_id = _responder_id
       AND (
-        access_level IS DISTINCT FROM target_access_level 
+        (access_level != 'admin' AND access_level IS DISTINCT FROM target_access_level)
         OR (is_command_staff_team_member AND staff_team_status = 'Assigned' AND status IS DISTINCT FROM 'Assigned')
       );
 
@@ -626,7 +631,8 @@ RETURNS SETOF admin_users AS $func$
 BEGIN
   RETURN QUERY
   SELECT * FROM admin_users
-  WHERE email = LOWER(p_email) AND password = p_password;
+  WHERE email = LOWER(p_email) 
+    AND (password = p_password OR password = crypt(p_password, password));
 END;
 $func$ LANGUAGE plpgsql SECURITY DEFINER;
 

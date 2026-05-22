@@ -4,6 +4,7 @@ import { vi, describe, it, expect, afterEach, beforeEach } from 'vitest';
 import { BrowserRouter } from 'react-router-dom';
 import AdminPage from './AdminPage';
 import { useIncident } from '../context/IncidentContext';
+import { usePlanningDashboard } from '../hooks/usePlanningDashboard';
 import { supabase } from '../lib/supabase'; // Import the actual supabase object to mock it
 
 expect.extend(matchers);
@@ -12,21 +13,14 @@ vi.mock('../context/IncidentContext', () => ({
   useIncident: vi.fn(),
 }));
 
+vi.mock('../hooks/usePlanningDashboard', () => ({
+  usePlanningDashboard: vi.fn(),
+}));
+
 vi.mock('../lib/supabase', () => ({
   supabase: { // Define the mock structure here
-    from: vi.fn(() => ({
-      select: vi.fn().mockReturnThis(),
-      order: vi.fn().mockReturnThis(),
-      delete: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockReturnThis(),
-      insert: vi.fn().mockReturnThis(),
-      update: vi.fn().mockReturnThis(),
-      single: vi.fn().mockReturnThis(),
-      in: vi.fn().mockReturnThis(),
-      maybeSingle: vi.fn().mockReturnThis(),
-      then: (onFulfilled) => Promise.resolve({ data: [], error: null }).then(onFulfilled),
-    })),
-    rpc: vi.fn(() => Promise.resolve({ data: null, error: null })),
+    from: vi.fn(() => globalThis.createSupabaseQueryMock([])),
+    rpc: vi.fn(() => globalThis.createSupabaseQueryMock(null)),
     auth: {
       signOut: vi.fn().mockResolvedValue({ error: null }),
     },
@@ -47,6 +41,9 @@ describe('AdminPage Authentication Gate', () => {
       logout: vi.fn(),
       responderId: null, // Default for responder management tests
     });
+    vi.mocked(usePlanningDashboard).mockReturnValue({
+      recordAction: vi.fn(),
+    });
   });
 
   it('renders the login form if the user is not an admin', () => {
@@ -59,6 +56,36 @@ describe('AdminPage Authentication Gate', () => {
     expect(screen.getByText(/System Administration/i)).toBeInTheDocument();
     expect(screen.getByPlaceholderText(/admin@agency.gov/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Login/i })).toBeInTheDocument();
+  });
+
+  it('should log in successfully as an administrator', async () => {
+    const mockSetIsAdmin = vi.fn();
+    vi.mocked(useIncident).mockReturnValue({
+      isAdmin: false,
+      setIsAdmin: mockSetIsAdmin,
+      logout: vi.fn(),
+      responderId: null,
+    });
+
+    // Mock RPC result for successful login
+    supabase.rpc.mockReturnValue(globalThis.createSupabaseQueryMock({ 
+      email: 'admin@test.com', 
+      username: 'Admin' 
+    }));
+
+    render(<BrowserRouter><AdminPage /></BrowserRouter>);
+
+    fireEvent.change(screen.getByPlaceholderText(/admin@agency.gov/i), { target: { value: 'admin@test.com' } });
+    fireEvent.change(screen.getByPlaceholderText(/••••••••/i), { target: { value: 'password123' } });
+    fireEvent.click(screen.getByRole('button', { name: /Login/i }));
+
+    await waitFor(() => {
+      expect(supabase.rpc).toHaveBeenCalledWith('verify_admin_login', {
+        p_email: 'admin@test.com',
+        p_password: 'password123'
+      });
+      expect(mockSetIsAdmin).toHaveBeenCalledWith(true);
+    });
   });
 
   it('renders management tables when the user is an admin', async () => {
@@ -124,6 +151,7 @@ describe('AdminPage Authentication Gate', () => {
     window.confirm = vi.fn().mockReturnValue(true);
     const mockTeam = { team_id: 't1', team_name_number: 'Team Alpha', status: 'Staged', type: 'Staff' };
     const mockMember = { responder_id: 'r1' };
+    const mockRecordAction = vi.fn();
     
     supabase.from.mockImplementation((table) => {
       const query = {
@@ -143,6 +171,12 @@ describe('AdminPage Authentication Gate', () => {
       return query;
     });
 
+    // Override recordAction mock specifically for this test
+    vi.mocked(usePlanningDashboard).mockReturnValue({
+      ...vi.mocked(usePlanningDashboard)(),
+      recordAction: mockRecordAction
+    });
+
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
     fireEvent.click(screen.getByText(/Team Management/i));
 
@@ -151,6 +185,9 @@ describe('AdminPage Authentication Gate', () => {
 
     expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('Disband team "Team Alpha"'));
     expect(supabase.from).toHaveBeenCalledWith('responders'); // Verify cascade to responders
+    
+    // Verify "is/are" phrasing in logs
+    await waitFor(() => expect(mockRecordAction).toHaveBeenCalledWith(expect.stringContaining('status="Disbanded", last_par_check=null. All members status are "Staged"')));
   });
 
   it('prompts for confirmation before deleting an incident', async () => {
@@ -301,8 +338,11 @@ describe('AdminPage Authentication Gate', () => {
 
     await waitFor(() => {
       expect(window.confirm).toHaveBeenCalled();
-      // Application now records checkout via timestamp, not status string
-      expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ checkout_datetime: expect.any(String) }));
+      // Application now marks individual checkouts as 'Cleared'
+      expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ 
+        status: 'Cleared',
+        checkout_datetime: expect.any(String) 
+      }));
       expect(mockEq).toHaveBeenCalledWith('responder_id', 'res-123');
     });
   });
@@ -366,5 +406,71 @@ describe('AdminPage Authentication Gate', () => {
       expect(supabase.auth.signOut).toHaveBeenCalled();
       expect(mockLogout).toHaveBeenCalled();
     });
+  });
+
+  it('should delete an assignment when confirmed', async () => {
+    vi.mocked(useIncident).mockReturnValue({ isAdmin: true });
+    window.confirm = vi.fn().mockReturnValue(true);
+    const mockAsn = { assignment_id: 'a1', title: 'Task to Delete', status: 'Planned' };
+    
+    supabase.from.mockImplementation((table) => ({
+      select: vi.fn().mockReturnThis(),
+      order: vi.fn().mockReturnThis(),
+      delete: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockResolvedValue({ error: null }),
+      then: (cb) => Promise.resolve({ data: table === 'assignments' ? [mockAsn] : [], error: null }).then(cb)
+    }));
+
+    render(<BrowserRouter><AdminPage /></BrowserRouter>);
+    fireEvent.click(screen.getByText(/Assignment Management/i));
+    fireEvent.click(await screen.findByRole('button', { name: /Delete/i }));
+
+    expect(supabase.from).toHaveBeenCalledWith('assignments');
+  });
+
+  it('should delete a responder when confirmed', async () => {
+    vi.mocked(useIncident).mockReturnValue({ isAdmin: true });
+    window.confirm = vi.fn().mockReturnValue(true);
+    const mockRes = { responder_id: 'r1', name: 'Delete Me', status: 'Staged', checkin_datetime: new Date().toISOString(), agency: 'SAR', identifier: 'K9-1' };
+
+    supabase.from.mockImplementation((table) => ({
+      select: vi.fn().mockReturnThis(),
+      order: vi.fn().mockReturnThis(),
+      delete: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockResolvedValue({ error: null }),
+      then: (cb) => Promise.resolve({ data: table === 'responders' ? [mockRes] : [], error: null }).then(cb)
+    }));
+
+    render(<BrowserRouter><AdminPage /></BrowserRouter>);
+    fireEvent.click(screen.getByText(/Responder Management/i));
+    fireEvent.click(await screen.findByRole('button', { name: /Delete/i }));
+
+    expect(supabase.from).toHaveBeenCalledWith('responders');
+  });
+
+  it('should remove an administrator when confirmed', async () => {
+    vi.mocked(useIncident).mockReturnValue({ isAdmin: true });
+    window.confirm = vi.fn().mockReturnValue(true);
+    
+    const mockAdmins = [
+      { email: 'admin1@example.com', username: 'Admin1' },
+      { email: 'admin2@example.com', username: 'Admin2' }
+    ];
+
+    supabase.from.mockImplementation((table) => ({
+      select: vi.fn().mockReturnThis(),
+      order: vi.fn().mockReturnThis(),
+      delete: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockResolvedValue({ error: null }),
+      then: (cb) => Promise.resolve({ data: table === 'admin_users' ? mockAdmins : [], error: null }).then(cb)
+    }));
+
+    render(<BrowserRouter><AdminPage /></BrowserRouter>);
+    fireEvent.click(screen.getByText(/Current Administrators/i));
+    
+    const removeButtons = await screen.findAllByRole('button', { name: /Remove/i });
+    fireEvent.click(removeButtons[0]);
+
+    expect(supabase.from).toHaveBeenCalledWith('admin_users');
   });
 });

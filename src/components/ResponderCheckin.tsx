@@ -3,16 +3,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { supabase } from '../lib/supabase';
 import { Responder, ResponderStatus, AccessLevel } from '../types/sarops-types';
 import { getResponderByIdentifier } from '../services/responderService';
+import { SKILLS_LIST } from '../constants/operationalConstants';
 import '../styles/ResponderCheckin.css';
-
-/**
- * Configurable Skills/Capabilities List
- */
-export const SKILLS_LIST = [
-  "Air Scent Dog", "Trail Dog", "UAS", "Vehicle", "Snowmobile", "UTV", 
-  "Swiftwater", "Dive", "Avalanche", "Boat", "Helicopter", "Rope Rescue", 
-  "Litter", "Medical", "Other"
-];
 
 /**
  * ResponderCheckin Component
@@ -109,25 +101,25 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
    * Used for offline tracking and identifying which device a responder is using
    */
   const generateDeviceId = (): string => {
-    // Create a device identifier based on browser info + timestamp + random
-    const browserInfo = `${navigator.userAgent}${navigator.language}`;
-    const timestamp = Date.now().toString(36);
-    const random = Math.random().toString(36).substring(2, 11);
-    return `device_${timestamp}_${random}`;
+    // Prioritize standard UUIDs for device identification where available
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+      return `dev_${crypto.randomUUID()}`;
+    }
+    return `device_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 11)}`;
   };
 
   /**
    * Handle form input changes
    */
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    const target = e.target;
-    const name = target.name;
+    const { name, type } = e.target;
     let processedValue: any;
 
-    if (target instanceof HTMLSelectElement && target.multiple) {
-      processedValue = Array.from(target.selectedOptions).map(opt => opt.value).filter(v => v !== '').join(', ');
+    if (type === 'select-multiple') {
+      const select = e.target as HTMLSelectElement;
+      processedValue = Array.from(select.selectedOptions).map(opt => opt.value).filter(v => v !== '').join(', ');
     } else {
-      const { value, type, checked } = target as HTMLInputElement;
+      const { value, checked } = e.target as HTMLInputElement;
       processedValue = type === 'checkbox' ? checked : (name === 'cell_phone' ? formatPhoneNumber(value) : value);
     }
 
@@ -186,8 +178,8 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
     // This is important if they were assigned an ICS role before checking in
     try {
       const existingResponder = await getResponderByIdentifier(supabase, data.identifier.trim());
-      if (existingResponder && existingResponder.access_level === 'command staff') {
-        initialAccessLevel = 'command staff';
+      if (existingResponder && (existingResponder.access_level === 'command staff' || existingResponder.access_level === 'admin')) {
+        initialAccessLevel = existingResponder.access_level;
         initialStatus = 'Assigned'; // Command staff are 'Assigned' by default
       }
     } catch (e) {
@@ -336,7 +328,7 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
 
         {/* Main Form */}
         {!showConfirmation ? (
-          <form onSubmit={handleSubmit} className="checkin-form">
+          <form onSubmit={handleSubmit} className="checkin-form" noValidate>
             <div className="form-group">
               <label htmlFor="name">Full Name *</label>
               <input
@@ -466,7 +458,7 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
               <button
                 type="submit"
                 className="btn btn-primary btn-large"
-                disabled={displayLoading || !selectedIncidentId}
+                disabled={displayLoading}
                 aria-busy={displayLoading}
                 style={{ width: '100%', marginBottom: '12px' }}
               >

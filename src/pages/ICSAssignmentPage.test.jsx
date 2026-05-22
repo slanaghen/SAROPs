@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, cleanup, within } from '@testing-library/react';
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import ICSAssignmentPage from './ICSAssignmentPage';
 import { useIncident } from '../context/IncidentContext';
@@ -114,5 +114,61 @@ describe('ICSAssignmentPage', () => {
       expect(screen.getByText(/Steve/)).toBeInTheDocument(); 
       expect(screen.getByText(/Bob/)).toBeInTheDocument();   
     });
+  });
+
+  it('correctly maps roles containing "finance" to the Admin / Finance box', async () => {
+    const mockStaffTeam = {
+      type: 'Staff',
+      current_responders: [
+        { responder_id: 'r2', role: 'Finance Section Chief' }
+      ]
+    };
+
+    vi.mocked(usePlanningDashboard).mockReturnValue({
+      teams: [mockStaffTeam],
+      responders: mockResponders,
+      loading: false,
+      fetchDashboardData: vi.fn(),
+    });
+
+    render(<ICSAssignmentPage />);
+    await waitFor(() => expect(screen.getByText(/Bob/)).toBeInTheDocument());
+  });
+
+  it('renders loading state when fetching data', () => {
+    vi.mocked(usePlanningDashboard).mockReturnValue({
+      teams: [], responders: [], loading: true, error: null, fetchDashboardData: vi.fn(),
+    });
+    render(<ICSAssignmentPage />);
+    expect(screen.getByText(/Loading organization data/i)).toBeInTheDocument();
+  });
+
+  it('renders error message when hook returns an error', () => {
+    vi.mocked(usePlanningDashboard).mockReturnValue({
+      teams: [], responders: [], loading: false, error: 'Failed to fetch', fetchDashboardData: vi.fn(),
+    });
+    render(<ICSAssignmentPage />);
+    expect(screen.getByText(/Failed to fetch/i)).toBeInTheDocument();
+  });
+
+  it('renders "mapping" data correctly even if some responders are missing from local state', async () => {
+    const mockStaffTeam = {
+      type: 'Staff',
+      current_responders: [
+        { responder_id: 'UNKNOWN_ID', role: 'Safety Officer' }
+      ]
+    };
+
+    vi.mocked(usePlanningDashboard).mockReturnValue({
+      teams: [mockStaffTeam],
+      responders: [], // Empty responders list
+      loading: false,
+      fetchDashboardData: vi.fn(), // Add this to prevent TypeError
+    });
+
+    render(<ICSAssignmentPage />);
+    // Box for Safety Officer should be empty/placeholder rather than crashing
+    const box = screen.getByText(/Safety Officer/i).closest('.ics-box');
+    expect(within(box).queryByText(/SAR/)).not.toBeInTheDocument();
   });
 });

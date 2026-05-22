@@ -61,19 +61,19 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
 
   // Memoized PAR status and time formatting to ensure visual parity with Operations page
   const { parRequired, timeSinceLastPar } = useMemo(() => {
-    if (!team || !parInterval || team.status === 'Staged') {
+    if (!team || !parInterval) {
       return { parRequired: false, timeSinceLastPar: '' };
     }
 
     const lastCheckMs = team.last_par_check 
       ? new Date(team.last_par_check).getTime() 
-      : new Date(team.created_at).getTime();
+      : new Date(team.created_at || Date.now()).getTime();
     
     const diffMs = currentTime - lastCheckMs;
     const minutesSince = diffMs / 60000;
 
-    // Same logic as OperationsDashboard: parInterval + 3 min grace
-    const required = parInterval > 0 && minutesSince > (parInterval + 3);
+    // Same logic as OperationsDashboard: parInterval + 3 min grace. Staged and Staff teams are exempt.
+    const required = team.status !== 'Staged' && team.type !== 'Staff' && parInterval > 0 && minutesSince > (parInterval + 3);
 
     let displayTime = 'Never';
     if (team.last_par_check) {
@@ -158,6 +158,28 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       supabase.removeChannel(channel);
     };
   }, [responderId, refetch]);
+
+  // Real-time subscription to detect changes to the team itself (like Command resetting PAR)
+  useEffect(() => {
+    if (!team?.team_id) return;
+
+    const channel = supabase
+      .channel(`responder-team-data-sync-${team.team_id}`)
+      .on('postgres_changes', { 
+        event: 'UPDATE', 
+        schema: 'public', 
+        table: 'teams', 
+        filter: `team_id=eq.${team.team_id}` 
+      }, () => {
+        console.log('📡 Team data change detected (e.g. PAR reset)');
+        refetch();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [team?.team_id, refetch]);
 
   useEffect(() => {
     const fetchResponders = async () => {
@@ -557,7 +579,29 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
           <SectionHeader
             title={accessLevel === 'command staff' || accessLevel === 'admin' ? 'Staff Status' : `Your Team: ${team?.team_name_number}`} 
             sectionKey="team" 
-            showBadge={parRequired && <span className="status-indicator incomplete" style={{ fontSize: '9px' }}>PAR OVERDUE</span>}
+            showBadge={parRequired && (
+              <span 
+                className="status-indicator incomplete" 
+                style={{ 
+                  display: 'inline-flex', 
+                  alignItems: 'center', 
+                  gap: '4px',
+                  backgroundColor: '#dc2626', 
+                  color: 'white', 
+                  padding: '2px 8px', 
+                  borderRadius: '4px', 
+                  fontSize: '9px',
+                  fontWeight: 700,
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                {timeSinceLastPar}
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <polyline points="12 6 12 12 16 14"></polyline>
+                </svg>
+              </span>
+            )}
           />
 
           {isExpanded.team && (

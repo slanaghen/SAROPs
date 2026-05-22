@@ -60,7 +60,16 @@ export const useTeamActions = ({
         ]);
       }
 
-      await recordAction(`Created team "${teamPayload.team_name_number}".`);
+      const membersInfo = (teamPayload.responder_ids || [])
+        .map(id => {
+          const responder = responders.find(r => r.responder_id === id);
+          const role = teamPayload.responder_roles?.[id];
+          return `${responder?.name || 'Unknown'} (${role || 'Member'})`;
+        })
+        .join(', ');
+      const actionMessage = `Created team "${teamPayload.team_name_number}" (Type: ${teamPayload.type}, Status: ${teamPayload.status}).` +
+        (membersInfo ? ` Members: ${membersInfo}.` : '');
+      await recordAction(actionMessage);
       await fetchDashboardData();
       return data;
     } catch (err) {
@@ -135,7 +144,7 @@ export const useTeamActions = ({
     }
   }, [supabaseClient, fetchDashboardData]);
 
-  const updateTeam = useCallback(async (teamId, updates) => {
+  const updateTeam = useCallback(async (teamId, updates, originalMemberIds = [], finalResponderIds = [], responder_roles = {}) => {
     try {
       setLoading(true);
 
@@ -156,7 +165,22 @@ export const useTeamActions = ({
 
       const { data, error } = await supabaseClient.from('teams').update(updates).eq('team_id', teamId).select().single();
       if (error) throw error;
-      await recordAction(`Updated team details.`);
+
+      // Reconcile responder attachments here
+      const toAdd = finalResponderIds.filter(id => !originalMemberIds.includes(id));
+      const toRemove = originalMemberIds.filter(id => !finalResponderIds.includes(id));
+      const existing = finalResponderIds.filter(id => originalMemberIds.includes(id)); // Responders whose roles might have changed
+
+      await Promise.all([
+        ...toAdd.map(id => attachResponderToTeam(id, teamId, responder_roles[id])),
+        ...existing.map(id => attachResponderToTeam(id, teamId, responder_roles[id])), // Update role for existing members
+        ...toRemove.map(id => detachResponderFromTeam(id, teamId))
+      ]);
+
+      const membersInfo = (finalResponderIds || []).map(id => { /* ... same as createTeam ... */ }).join(', ');
+      const actionMessage = `Updated team "${updates.team_name_number || data.team_name_number}" (ID: ${teamId}, Type: ${updates.type || data.type}, Status: ${updates.status || data.status}).` +
+        (membersInfo ? ` Members: ${membersInfo}.` : '');
+      await recordAction(actionMessage);
       await fetchDashboardData();
       return data;
     } catch (err) {

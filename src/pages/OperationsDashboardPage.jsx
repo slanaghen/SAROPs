@@ -36,7 +36,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   const [pendingTeamId, setPendingTeamId] = useState(null);
 
   const [draggedItem, setDraggedItem] = useState(null); // { id, type }
-  const [viewMode, setViewMode] = useState('All'); // Options: 'All', 'Operations', 'Planning'
+  const [viewMode, setViewMode] = useState(() => localStorage.getItem('sarops_view_mode') || 'All'); 
   const [dropTarget, setDropTarget] = useState(null); // { id, type }
   const [assigningRow, setAssigningRow] = useState(null); // Stores the row object being manually assigned
   const [selectedAssignTarget, setSelectedAssignTarget] = useState('');
@@ -45,10 +45,16 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   const [currentTime, setCurrentTime] = useState(Date.now());
 
   const contentWrapperRef = useRef(null);
-  const [layoutMode, setLayoutMode] = useState('split'); // table, map, split
+  const [layoutMode, setLayoutMode] = useState(() => localStorage.getItem('sarops_layout_mode') || 'split');
 
   const [splitWidth, setSplitWidth] = useState(50); // percentage for table width in split view
   const isResizing = useRef(false);
+
+  // Persist layout choices when they change
+  useEffect(() => {
+    localStorage.setItem('sarops_view_mode', viewMode);
+    localStorage.setItem('sarops_layout_mode', layoutMode);
+  }, [viewMode, layoutMode]);
 
   const handleMouseMove = useCallback((e) => {
     if (!isResizing.current || !contentWrapperRef.current) return;
@@ -84,10 +90,20 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   const commandStaffExists = useMemo(() => (teams || []).some(t => t.type === 'Staff'), [teams]);
 
   /**
-   * Lookups and Derived Data
-   * Defined early so they are available to lifecycles/effects below
+   * Shared Helper: Calculates if a team is overdue for a PAR check.
    */
-  const formatTimeSince = (timestamp, createdAt) => {
+  const checkIsParOverdue = useCallback((team, interval) => {
+    if (!team || team.status === 'Staged' || team.type === 'Staff' || interval <= 0) return false;
+    const lastCheck = team.last_par_check ? new Date(team.last_par_check).getTime() : new Date(team.created_at || Date.now()).getTime();
+    const minutesSince = (currentTime - lastCheck) / 60000;
+    // Threshold: interval + 3 minute grace period
+    return minutesSince > (interval + 3);
+  }, [currentTime]);
+
+  /**
+   * Shared Helper: Formats relative time strings for UI display.
+   */
+  const formatTimeSince = useCallback((timestamp, createdAt) => {
     if (!timestamp && !createdAt) return '—';
     const lastCheckMs = timestamp ? new Date(timestamp).getTime() : new Date(createdAt).getTime();
     const diffMs = currentTime - lastCheckMs;
@@ -100,7 +116,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     const hours = Math.floor(totalMinutes / 60);
     const mins = totalMinutes % 60;
     return `${hours}h ${mins}m ago`;
-  };
+  }, [currentTime]);
 
   const getRawUuid = (rowId) => {
     if (!rowId) return null;
@@ -154,11 +170,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       const matchingTeam = asnItem.team_id ? teamById[asnItem.team_id] : null;
       return {
         id: `asn-${asnItem.assignment_id}`,
-        isParOverdue: matchingTeam && matchingTeam.status !== 'Staged' && matchingTeam.type !== 'Staff' && parInterval > 0 && (() => {
-          const lastCheck = matchingTeam.last_par_check ? new Date(matchingTeam.last_par_check).getTime() : new Date(matchingTeam.created_at || Date.now()).getTime();
-          const minutesSince = (currentTime - lastCheck) / 60000;
-          return minutesSince > (parInterval + 3);
-        })(),
+        isParOverdue: checkIsParOverdue(matchingTeam, parInterval),
         timeSincePar: matchingTeam ? formatTimeSince(matchingTeam.last_par_check, matchingTeam.created_at) : '',
         tacChannel: asnItem.frequency_primary || '—',
         assignmentId: asnItem.assignment_id,
@@ -182,10 +194,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
 
     const teamOnlyRows = (teams || []).filter(tItem => !assignmentTeamSet.has(tItem.team_id)).map(tItem => ({
       id: `team-${tItem.team_id}`,
-      isParOverdue: tItem.status !== 'Staged' && tItem.type !== 'Staff' && parInterval > 0 && (() => {
-        const lastCheck = tItem.last_par_check ? new Date(tItem.last_par_check).getTime() : new Date(tItem.created_at || Date.now()).getTime();
-        return (currentTime - lastCheck) / 60000 > (parInterval + 3);
-      })(),
+      isParOverdue: checkIsParOverdue(tItem, parInterval),
       timeSincePar: formatTimeSince(tItem.last_par_check, tItem.created_at),
       tacChannel: '', assignmentId: '', assignmentName: '', assignmentType: '', assignmentStatus: '',
       teamName: tItem.team_name_number, teamType: tItem.type, teamStatus: tItem.status,
@@ -519,20 +528,11 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       };
 
       if (formData.team_id) {
-        await updateTeam(formData.team_id, payload);
-        
-        // Reconciliation
         const finalIds = formData.responder_ids || [];
         const roles = formData.responder_roles || {};
         const originalIds = teamById[formData.team_id]?.current_responders?.map(r => r.responder_id) || [];
-        const toAdd = finalIds.filter(id => !originalIds.includes(id));
-        const toRemove = originalIds.filter(id => !finalIds.includes(id));
-
-        await Promise.all([
-          ...toAdd.map(id => attachResponderToTeam(id, formData.team_id, roles[id])),
-          ...finalIds.filter(id => originalIds.includes(id)).map(id => attachResponderToTeam(id, formData.team_id, roles[id])),
-          ...toRemove.map(id => detachResponderFromTeam(id, formData.team_id))
-        ]);
+        // Reconciliation is now handled within updateTeam
+        await updateTeam(formData.team_id, payload, originalIds, finalIds, roles);
       } else {
         const newTeam = await createTeam({ ...payload, op_period_id: operationalPeriodId, responder_ids: formData.responder_ids, responder_roles: formData.responder_roles });
         if (pendingAssignmentId) await assignTeamToAssignment(newTeam.team_id, pendingAssignmentId);

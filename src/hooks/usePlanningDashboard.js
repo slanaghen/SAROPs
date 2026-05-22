@@ -34,7 +34,11 @@ export const usePlanningDashboard = (supabaseClient, operationalPeriodId) => {
       frequency_primary: assignment.frequency_primary || '',
       description: assignment.description || '',
       debrief_narrative: assignment.debrief_narrative || '',
-      probability_of_detection: assignment.probability_of_detection ?? null,
+      probability_of_detection: (
+        assignment.probability_of_detection !== undefined && 
+        assignment.probability_of_detection !== null && 
+        assignment.probability_of_detection !== ''
+      ) ? Number(assignment.probability_of_detection) : null,
       priority: assignment.priority || 'Medium',
       hazards: assignment.hazards || '',
       team_name: assignment.team_name || ''
