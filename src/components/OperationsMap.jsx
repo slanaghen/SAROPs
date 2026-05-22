@@ -18,8 +18,13 @@ const OperationsMap = ({
   }, [assignments, teams, sartopoId]);
 
   useEffect(() => {
-    if (loading || !mapContainer.current || map.current) return;
+    if (loading || !mapContainer.current || map.current || mapError) return;
 
+    let isMounted = true;
+    let timeoutId = null;
+
+    // Capture the current element reference to ensure stability 
+    // through the asynchronous loading and timeout process.
     const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
     if (!apiKey || apiKey === 'YOUR_GOOGLE_MAPS_API_KEY') {
       setMapError(true);
@@ -28,15 +33,23 @@ const OperationsMap = ({
 
     const initMap = async () => {
       try {
+        const el = mapContainer.current;
         const loader = new Loader({
           apiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '',
           version: "weekly"
         });
         const { Map } = await loader.importLibrary("maps");
         
-        // Defer map initialization slightly to ensure DOM is fully ready
-        setTimeout(() => {
-          map.current = new Map(mapContainer.current, {
+        if (!isMounted || !el || !document.body.contains(el)) return;
+
+        // Defer map initialization to ensure DOM layout is fully stable
+        timeoutId = setTimeout(() => {
+          // Final safety checks: Verify element is still in document and has valid dimensions
+          // to prevent Google Maps IntersectionObserver crashes.
+          if (!isMounted || !el || !document.body.contains(el) || el.clientWidth === 0 || el.clientHeight === 0) return;
+          if (map.current) return; // Prevent double initialization
+
+          map.current = new Map(el, {
             center: { lat: 40.0150, lng: -105.2705 },
             zoom: 13,
             mapTypeId: 'terrain',
@@ -47,21 +60,33 @@ const OperationsMap = ({
             }
           });
           if (window.google?.maps?.event) {
-            window.google.maps.event.addListenerOnce(map.current, 'idle', syncMapData);
+            window.google.maps.event.addListenerOnce(map.current, 'idle', () => {
+              if (isMounted) syncMapData();
+            });
           }
         }, 0); // Use setTimeout with 0 delay
       } catch (e) {
-        setMapError(true);
+        if (isMounted) setMapError(true);
       }
     };
 
     initMap();
-    return () => { map.current = null; };
-  }, [loading, syncMapData]);
+    return () => { 
+      isMounted = false;
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [loading, mapError]); // Remove syncMapData from deps to prevent re-init loops
+
+  // Separate effect to handle data synchronization once the map is initialized
+  useEffect(() => {
+    if (map.current && !loading) {
+      syncMapData();
+    }
+  }, [assignments, teams, sartopoId, loading, syncMapData]);
 
   // Trigger resize when layoutMode or split width changes
   useEffect(() => {
-    if (map.current && typeof window.google !== 'undefined') {
+    if (map.current && window.google?.maps?.event?.trigger) {
       window.google.maps.event.trigger(map.current, "resize");
     }
   }, [layoutMode, assignments, teams]);

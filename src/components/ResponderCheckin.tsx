@@ -143,8 +143,8 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
    * Validate form data
    */
   const validateForm = (data = formData): boolean => {
-    if (incidents.length > 0 && !selectedIncidentId) {
-      setInternalError('Please select an active incident');
+    if (!selectedIncidentId) {
+      setInternalError('Please select an active incident or create a new one to continue');
       return false;
     }
     if (!data.name?.trim()) {
@@ -507,7 +507,7 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
 
               <div className="detail-item">
                 <span className="detail-label">Access Level:</span>
-                <span className="detail-value">Responder</span>
+                <span className="detail-value" style={{ textTransform: 'capitalize' }}>{displayResponder.access_level || 'Responder'}</span>
               </div>
 
               {displayResponder.special_skills ? (

@@ -4,8 +4,10 @@ const OperationsTable = ({
   rows, 
   sortConfig, 
   requestSort, 
-  filters, 
-  onFilterChange, 
+  assignmentFilter,
+  onAssignmentFilterChange,
+  teamFilter,
+  onTeamFilterChange,
   parInterval,
   onStatusUpdate,
   onResetPar,
@@ -23,6 +25,7 @@ const OperationsTable = ({
   dropTarget,
   onDragStart,
   onDragEnd,
+  onDragOver,
   onDragEnter,
   onDragLeave,
   onDrop
@@ -33,16 +36,32 @@ const OperationsTable = ({
         <thead>
           <tr className="group-header-row">
             <th colSpan="4" style={{ textAlign: 'center', padding: '8px 12px', background: '#f8fafc', color: '#64748b', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px' }}>
                 Assignment
+                <input 
+                  type="text" 
+                  placeholder="Search..." 
+                  value={assignmentFilter}
+                  onChange={(e) => onAssignmentFilterChange(e.target.value)}
+                  style={{ height: '24px', padding: '0 8px', fontSize: '11px', borderRadius: '4px', border: '1px solid #cbd5e1', width: '100px', textTransform: 'none' }}
+                  onClick={(e) => e.stopPropagation()}
+                />
                 <button className="btn btn-primary btn-sm" onClick={openNewAssignmentForm} style={{ height: '24px', fontSize: '10px', padding: '0 8px', minWidth: '0', width: 'auto', flex: 'none' }}>
                   New
                 </button>
               </div>
             </th>
             <th colSpan={parInterval > 0 ? 7 : 6} style={{ textAlign: 'center', padding: '8px 12px', background: '#f8fafc', borderLeft: '1px solid #e2e8f0', color: '#64748b', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px' }}>
                 Team
+                <input 
+                  type="text" 
+                  placeholder="Search..." 
+                  value={teamFilter}
+                  onChange={(e) => onTeamFilterChange(e.target.value)}
+                  style={{ height: '24px', padding: '0 8px', fontSize: '11px', borderRadius: '4px', border: '1px solid #cbd5e1', width: '100px', textTransform: 'none' }}
+                  onClick={(e) => e.stopPropagation()}
+                />
                 <button className="btn btn-primary btn-sm" onClick={openNewTeamForm} style={{ height: '24px', fontSize: '10px', padding: '0 8px', minWidth: '0', width: 'auto', flex: 'none' }}>
                   New
                 </button>
@@ -88,24 +107,6 @@ const OperationsTable = ({
             )}
             <th style={{ width: '90px' }}>Actions</th>
           </tr>
-          <tr className="filter-row">
-            {['assignmentName', 'assignmentType', 'tacChannel', 'assignmentStatus', 'teamName', 'teamType', 'teamLeader', 'leaderIdentifier'].map(key => (
-              <td key={key} style={{ textAlign: 'center' }}>
-                <input
-                  type="text"
-                  placeholder="Filter..."
-                  value={filters[key] || ''}
-                  onChange={(e) => onFilterChange(key, e.target.value)}
-                  className="column-filter-input"
-                  style={{ width: '100%', padding: '2px 4px', fontSize: '11px', borderRadius: '4px', border: '1px solid #ddd' }}
-                />
-              </td>
-            ))}
-            <td style={{ textAlign: 'center' }}></td>
-            <td style={{ textAlign: 'center' }}></td>
-            {parInterval > 0 && <td style={{ textAlign: 'center' }}></td>}
-            <td style={{ textAlign: 'center' }}></td>
-          </tr>
         </thead>
         <tbody>
           {rows.length === 0 ? (
@@ -116,17 +117,19 @@ const OperationsTable = ({
               (row.assignmentStatus === 'Assigned' && row.hasBoth) ? 'row-assigned' :
               (row.assignmentStatus === 'Completed' && row.hasBoth) ? 'row-complete' : ''
             } style={row.isParOverdue ? { backgroundColor: '#fff7ed', borderLeft: '4px solid #f97316' } : {}}>
-              <td style={{ textAlign: 'center' }}>
+              <td 
+                style={{ textAlign: 'center' }}
+                onDragOver={(e) => onDragOver(e, row.id, 'assignment')}
+                onDragEnter={(e) => onDragEnter(e, row.id, 'assignment')}
+                onDragLeave={onDragLeave}
+                onDrop={(e) => onDrop(e, row.id, 'assignment')}
+              >
                 {row.assignmentName ? (
                   <div 
-                    className={`chip assignment-chip ${draggedItem?.id === row.id && draggedItem?.type === 'assignment' ? 'dragging' : ''} ${dropTarget?.id === row.id && dropTarget?.type === 'assignment' ? 'drop-target' : ''} ${row.hasBoth ? 'locked' : ''}`}
+                    className={`chip assignment-chip ${draggedItem?.id === row.id && draggedItem?.type === 'assignment' ? 'dragging' : ''} ${dropTarget?.id === row.id && dropTarget?.type === 'assignment' ? 'drop-target' : ''} ${row.hasBoth ? 'locked' : ''}`} // Added locked class
                     draggable={!row.hasBoth}
                     onDragStart={!row.hasBoth ? (e) => onDragStart(e, row.id, 'assignment') : undefined}
                     onDragEnd={onDragEnd}
-                    onDragOver={(e) => { if (!row.hasBoth) e.preventDefault(); }}
-                    onDragEnter={(e) => onDragEnter(e, row.id, 'assignment')}
-                    onDragLeave={onDragLeave}
-                    onDrop={(e) => onDrop(e, row.id, 'assignment')}
                     onClick={() => onEditAssignment(row.assignmentId)}
                   >
                     {row.assignmentName}
@@ -141,7 +144,7 @@ const OperationsTable = ({
                     <select 
                       value={row.assignmentStatus} 
                       onChange={(e) => onStatusUpdate(row.assignmentId, row.teamId, e.target.value)}
-                      className={`status-indicator ${row.assignmentStatus.toLowerCase()} status-select-inline`}
+                      className={`status-indicator ${(row.assignmentStatus || '').toLowerCase()} status-select-inline`}
                     >
                       <option value="Planned">Planned</option>
                       <option value="Assigned">Assigned</option>
@@ -152,17 +155,19 @@ const OperationsTable = ({
                   ) : <span className={`status-indicator ${row.assignmentStatus?.toLowerCase() || ''}`}>{row.assignmentStatus || '—'}</span>
                 ) : null}
               </td>
-              <td style={{ textAlign: 'center' }}>
+              <td 
+                style={{ textAlign: 'center' }}
+                onDragOver={(e) => onDragOver(e, row.id, 'team')}
+                onDragEnter={(e) => onDragEnter(e, row.id, 'team')}
+                onDragLeave={onDragLeave}
+                onDrop={(e) => onDrop(e, row.id, 'team')}
+              >
                 {row.teamName ? (
                   <div 
-                    className={`chip team-chip ${draggedItem?.id === row.teamId && draggedItem?.type === 'team' ? 'dragging' : ''} ${dropTarget?.id === row.teamId && dropTarget?.type === 'team' ? 'drop-target' : ''} ${row.hasBoth ? 'locked' : ''}`}
+                    className={`chip team-chip ${draggedItem?.id === row.id && draggedItem?.type === 'team' ? 'dragging' : ''} ${dropTarget?.id === row.id && dropTarget?.type === 'team' ? 'drop-target' : ''} ${row.hasBoth ? 'locked' : ''}`}
                     draggable={!row.hasBoth}
-                    onDragStart={!row.hasBoth ? (e) => onDragStart(e, row.teamId, 'team') : undefined}
+                    onDragStart={!row.hasBoth ? (e) => onDragStart(e, row.id, 'team') : undefined}
                     onDragEnd={onDragEnd}
-                    onDragOver={(e) => { if (!row.hasBoth) e.preventDefault(); }}
-                    onDragEnter={(e) => onDragEnter(e, row.teamId, 'team')}
-                    onDragLeave={onDragLeave}
-                    onDrop={(e) => onDrop(e, row.teamId, 'team')}
                     onClick={() => onEditTeam(row.teamId)}
                   >
                     {row.teamName}

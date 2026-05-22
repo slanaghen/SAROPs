@@ -24,7 +24,7 @@ const ICSAssignmentPage = () => {
   // Derived mapping of ICS positions to names based on the Staff team members
   const icsMapping = useMemo(() => {
     const mapping = {
-      ic: '', safety: '', pio: '', liaison: '', ops: '', planning: '', logistics: '', admin: ''
+      ic: null, safety: null, pio: null, liaison: null, ops: null, planning: null, logistics: null, admin: null
     };
 
     const staffTeam = teams?.find(t => t.type === 'Staff');
@@ -35,48 +35,61 @@ const ICSAssignmentPage = () => {
         if (!fullResponder) return;
 
         const role = member.role?.toLowerCase() || '';
-        const name = fullResponder.name;
+        const data = { name: fullResponder.name, agency: fullResponder.agency };
 
-        if (role === 'incident commander') mapping.ic = name;
-        else if (role === 'safety') mapping.safety = name;
-        else if (role === 'pio') mapping.pio = name;
-        else if (role === 'liaison') mapping.liaison = name;
-        else if (role === 'operations') mapping.ops = name;
-        else if (role === 'planning') mapping.planning = name;
-        else if (role === 'logistics') mapping.logistics = name;
-        else if (role.includes('admin') || role.includes('finance')) mapping.admin = name;
+        if (role === 'incident commander') mapping.ic = data;
+        else if (role === 'safety') mapping.safety = data;
+        else if (role === 'pio') mapping.pio = data;
+        else if (role === 'liaison') mapping.liaison = data;
+        else if (role === 'operations') mapping.ops = data;
+        else if (role === 'planning') mapping.planning = data;
+        else if (role === 'logistics') mapping.logistics = data;
+        else if (role.includes('admin') || role.includes('finance')) mapping.admin = data;
       });
     }
     return mapping;
   }, [teams, responders]);
   
 
-  const OrgBox = ({ title, field }) => (
-    <div className="ics-box">
-      <div className="ics-box-title">{title}</div>
+  const OrgBox = ({ title, field }) => {
+    const data = icsMapping[field];
+    return (
+      <div className="ics-box">
+        <div className="ics-box-title">{title}</div>
 
-      <div className="ics-box-input" style={{ 
-        background: '#fff', 
-        border: '1px solid #e2e8f0', 
-        borderRadius: '6px', 
-        padding: '8px 12px', 
-        fontSize: '14px',
-        minHeight: '38px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontWeight: 600,
-        color: icsMapping[field] ? '#1e293b' : '#94a3b8'
-      }}>
-        {icsMapping[field] || ''}
+        <div className="ics-box-input" style={{ 
+          background: '#fff', 
+          border: '1px solid #e2e8f0', 
+          borderRadius: '6px', 
+          padding: '8px 12px', 
+          fontSize: '14px',
+          minHeight: '44px',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontWeight: 600,
+          color: data ? '#1e293b' : '#94a3b8'
+        }}>
+          {data ? (
+            <>
+              <div style={{ lineHeight: 1.2 }}>{data.name}</div>
+              {data.agency && (
+                <div style={{ fontSize: '11px', fontWeight: 400, color: '#64748b', marginTop: '2px' }}>
+                  {data.agency}
+                </div>
+              )}
+            </>
+          ) : ''}
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <div className="ics-assignment-page">
       <div className="page-header">
-        <h1>ICS Organization Chart</h1>
+        <h1>ICS Chart</h1>
         <p className="subtitle">Assign personnel to Command and General Staff positions.</p>
       </div>
       

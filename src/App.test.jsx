@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import * as matchers from '@testing-library/jest-dom/matchers';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
@@ -34,6 +34,11 @@ vi.mock('./lib/supabase', () => ({
 describe('App Component', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Mock Browser APIs for notifications
+    vi.stubGlobal('Notification', vi.fn());
+    global.Notification.permission = 'granted';
+    global.Notification.requestPermission = vi.fn();
+    vi.stubGlobal('Audio', vi.fn().mockReturnValue({ play: vi.fn().mockResolvedValue() }));
   });
 
   it('renders the branding and guest status by default', () => {
@@ -97,5 +102,60 @@ describe('App Component', () => {
     window.dispatchEvent(new Event('focus'));
 
     expect(supabase.from).toHaveBeenCalledWith('responders');
+  });
+
+  it('triggers a browser notification and sound when operational status changes', async () => {
+    // Set initial operational state: Staged
+    vi.mocked(useIncident).mockReturnValue({
+      isActive: true,
+      responderId: 'res-123',
+      responderStatus: 'Staged',
+      setResponderStatus: vi.fn(),
+      setCurrentTeamStatus: vi.fn(),
+      setCurrentAssignmentStatus: vi.fn(),
+      accessLevel: 'responder',
+      incidentData: { name: 'Mountain Rescue', opNumber: '1' },
+    });
+
+    const { rerender } = render(<MemoryRouter><App /></MemoryRouter>);
+
+    // Update context to trigger a status change
+    vi.mocked(useIncident).mockReturnValue({
+      isActive: true,
+      responderId: 'res-123',
+      responderStatus: 'Deployed', // Changed from initial 'Staged'
+      setResponderStatus: vi.fn(),
+      setCurrentTeamStatus: vi.fn(),
+      setCurrentAssignmentStatus: vi.fn(),
+      accessLevel: 'responder',
+      incidentData: { name: 'Mountain Rescue', opNumber: '1' },
+    });
+
+    rerender(<MemoryRouter><App /></MemoryRouter>);
+
+    await waitFor(() => {
+      expect(global.Notification).toHaveBeenCalledWith(
+        "SAROps: Your Status Changed",
+        expect.objectContaining({ body: expect.stringContaining('Deployed') })
+      );
+      expect(global.Audio).toHaveBeenCalled();
+    });
+  });
+
+  it('updates connectivity indicator when browser goes offline/online', () => {
+    vi.mocked(useIncident).mockReturnValue({ isActive: false, logout: vi.fn(), accessLevel: 'responder' });
+    render(<MemoryRouter><App /></MemoryRouter>);
+
+    const dot = document.querySelector('.connection-dot');
+    expect(dot).toHaveClass('online');
+
+    // Simulate offline
+    fireEvent(window, new Event('offline'));
+    expect(dot).toHaveClass('offline');
+    expect(dot).toHaveAttribute('title', 'Offline');
+
+    // Simulate online
+    fireEvent(window, new Event('online'));
+    expect(dot).toHaveClass('online');
   });
 });

@@ -1,9 +1,19 @@
 import { render, screen, fireEvent, cleanup, waitFor, act } from '@testing-library/react';
 import * as matchers from '@testing-library/jest-dom/matchers';
 import { vi, describe, it, expect, afterEach, beforeEach } from 'vitest';
-import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import IncidentEditPage from './IncidentEditPage';
 import { useIncident } from '../context/IncidentContext';
+
+const mockNavigate = vi.fn();
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual('react-router-dom');
+  return {
+    ...actual,
+    useNavigate: () => mockNavigate,
+  };
+});
+
+import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 
 expect.extend(matchers);
 
@@ -29,6 +39,7 @@ const createMockChain = (resolvedValue = { error: null, data: null }) => ({
   eq: vi.fn().mockReturnThis(),
   select: vi.fn().mockReturnThis(),
   order: vi.fn().mockReturnThis(),
+  limit: vi.fn().mockReturnThis(),
   maybeSingle: vi.fn().mockReturnThis(),
   single: vi.fn().mockReturnThis(),
   in: vi.fn().mockReturnThis(),
@@ -41,6 +52,8 @@ afterEach(cleanup);
 describe('IncidentEditPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockFrom.mockReturnValue(createMockChain());
+    mockNavigate.mockReset();
     vi.mocked(useIncident).mockReturnValue({
       isActive: false,
       incidentId: null,
@@ -106,6 +119,10 @@ describe('IncidentEditPage', () => {
           path: "/",
           element: <IncidentEditPage />,
         },
+        {
+          path: "/operations",
+          element: <div>Operations Dashboard</div>,
+        },
       ]);
       render(<RouterProvider router={router} />);
     });
@@ -135,6 +152,10 @@ describe('IncidentEditPage', () => {
       {
         path: "/",
         element: <IncidentEditPage />,
+      },
+      {
+        path: "/operations",
+        element: <div>Operations Dashboard</div>,
       },
     ]);
     render(<RouterProvider router={router} />);
@@ -192,9 +213,37 @@ describe('IncidentEditPage', () => {
       expect(mockFrom).toHaveBeenCalledWith('teams'); // Disband teams step
       expect(mockTableChains.teams.update).toHaveBeenCalledWith(expect.objectContaining({ status: 'Disbanded' }));
       expect(mockTableChains.assignments.update).toHaveBeenCalledTimes(2); // Two updates for assignments (Deployed -> Incomplete, Assigned -> Planned)
-      expect(mockTableChains.responders.update).toHaveBeenCalledWith(expect.objectContaining({ status: 'Staged' }));
+      expect(mockTableChains.responders.update).toHaveBeenCalledWith(expect.objectContaining({ status: 'CheckedOut' }));
       expect(mockTableChains.operational_periods.update).toHaveBeenCalledWith(expect.objectContaining({ end_datetime: expect.any(String) }));
       expect(mockTableChains.incidents.update).toHaveBeenCalledWith(expect.objectContaining({ end_datetime: expect.any(String) }));
+    });
+  });
+
+  it('aborts the end-incident procedure if confirmation is declined', async () => {
+    window.confirm = vi.fn().mockReturnValue(false); // User clicks "Cancel"
+
+    vi.mocked(useIncident).mockReturnValue({ 
+      isActive: true, 
+      incidentId: 'inc-123',
+      incidentData: { opPeriodId: 'op-123' },
+      endIncident: vi.fn(),
+    });
+
+    // Mock finding active assignments to trigger the prompt
+    mockFrom.mockReturnValue({
+      ...createMockChain(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: [{ status: 'Deployed' }], error: null }),
+      then: vi.fn((cb) => Promise.resolve({ data: [{ status: 'Deployed' }], error: null }).then(cb))
+    });
+
+    const router = createMemoryRouter([{ path: "/", element: <IncidentEditPage /> }]);
+    render(<RouterProvider router={router} />);
+
+    fireEvent.click(await screen.findByText(/End Incident/i));
+
+    await waitFor(() => {
+      expect(window.confirm).toHaveBeenCalled();
+      expect(mockFrom).not.toHaveBeenCalledWith('teams'); // Should not have reached cleanup phase
     });
   });
 
@@ -227,6 +276,35 @@ describe('IncidentEditPage', () => {
     fireEvent.click(await screen.findByText('Stay'));
     expect(screen.queryByText(/Unsaved Changes/i)).not.toBeInTheDocument();
     expect(router.state.location.pathname).toBe('/');
+  });
+
+  it('allows navigation when blocker is shown and user chooses to commit changes', async () => {
+    vi.mocked(useIncident).mockReturnValue({
+      isActive: false,
+      incidentId: null,
+      incidentData: { name: '', opNumber: '', opPeriodId: '' },
+      startIncident: vi.fn(),
+    });
+
+    const router = createMemoryRouter([
+      { path: "/", element: <IncidentEditPage /> },
+      { path: "/admin", element: <div>Admin Page</div> }
+    ]);
+    
+    render(<RouterProvider router={router} />);
+    
+    // Make a change to dirty the form
+    fireEvent.change(await screen.findByLabelText(/Incident Name/i), { target: { value: 'Modified Name' } });
+    
+    // Try to navigate away - this should trigger the blocker
+    act(() => { router.navigate('/admin'); });
+
+    // The blocker modal should appear
+    await waitFor(() => {
+      expect(screen.getByText('Unsaved Changes')).toBeInTheDocument();
+      expect(screen.getByText('Commit Changes')).toBeInTheDocument();
+      expect(screen.getByText('Stay')).toBeInTheDocument();
+    });
   });
 
   it('auto check-in the creator when creating a new incident with responder data', async () => {

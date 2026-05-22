@@ -1,12 +1,24 @@
 import React from 'react';
-import { render, screen, fireEvent, act } from '@testing-library/react';
+import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import ResponderCheckin from './ResponderCheckin';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { getResponderByIdentifier } from '../services/responderService';
+
+vi.mock('../lib/supabase', () => ({
+  supabase: {
+    from: vi.fn(),
+  },
+}));
+
+vi.mock('../services/responderService', () => ({
+  getResponderByIdentifier: vi.fn(),
+}));
 
 describe('ResponderCheckin confirmation screen', () => {
   it('renders entered values in confirmation and uses white detail styles', async () => {
+    vi.mocked(getResponderByIdentifier).mockResolvedValue(null);
     const mockIncidents = [{ incident_id: 'inc-123', name: 'Test Incident', number: '2024-001' }];
     render(
       <ResponderCheckin 
@@ -28,9 +40,10 @@ describe('ResponderCheckin confirmation screen', () => {
     fireEvent.change(screen.getByLabelText(/Cell Phone Number/i), {
       target: { value: '1231234567' },
     });
-    fireEvent.change(screen.getByLabelText(/Special Skills/i), {
-      target: { value: 'Medical' },
-    });
+    const skillsSelect = screen.getByLabelText(/Special Skills/i);
+    const medicalOption = screen.getByRole('option', { name: 'Medical' }) as HTMLOptionElement;
+    medicalOption.selected = true;
+    fireEvent.change(skillsSelect);
 
     fireEvent.click(screen.getByRole('button', { name: /Continue to Confirmation/i }));
 
@@ -45,4 +58,29 @@ describe('ResponderCheckin confirmation screen', () => {
     expect(css).toContain('color: white');
   });
 
+  it('returns to edit mode when "Back to Edit" is clicked on confirmation screen', async () => {
+    vi.mocked(getResponderByIdentifier).mockResolvedValue(null);
+    render(
+      <ResponderCheckin 
+        onCheckIn={async () => {}} 
+        incidents={[{ incident_id: 'i1', name: 'Inc 1', number: '1' }]}
+        selectedIncidentId="i1"
+      />
+    );
+
+    // Fill form and continue
+    fireEvent.change(screen.getByLabelText(/Full Name/i), { target: { value: 'Steve' } });
+    fireEvent.change(screen.getByLabelText(/Agency/i), { target: { value: 'SAR' } });
+    fireEvent.change(screen.getByLabelText(/Identifier/i), { target: { value: 'ID1' } });
+    fireEvent.change(screen.getByLabelText(/Cell Phone Number/i), { target: { value: '1234567890' } });
+    fireEvent.click(screen.getByRole('button', { name: /Continue to Confirmation/i }));
+
+    // Verify confirmation screen
+    expect(await screen.findByText(/Confirm Your Information/i)).toBeTruthy();
+
+    // Click Back to Edit and verify form state is restored
+    fireEvent.click(screen.getByRole('button', { name: /Back to Edit/i }));
+    expect(screen.queryByText(/Confirm Your Information/i)).toBeNull();
+    expect(screen.getByLabelText(/Full Name/i)).toHaveValue('Steve');
+  });
 });

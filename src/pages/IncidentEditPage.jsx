@@ -49,6 +49,7 @@ const IncidentEditPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [isSaving, setIsSaving] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false); // Flag specifically to bypass navigation blocker
   const [incident, setIncident] = useState(defaultIncident);
   const [initialIncident, setInitialIncident] = useState(defaultIncident);
 
@@ -167,7 +168,7 @@ const IncidentEditPage = () => {
 
   // Navigation guard for unsaved changes
   const blocker = useBlocker(
-    ({ nextLocation }) => isDirty && !isSaving && nextLocation.pathname !== "/checkin"
+    ({ nextLocation }) => isDirty && !isSubmitting && nextLocation.pathname !== "/checkin"
   );
 
   const handleIncidentChange = (field, value) => {
@@ -178,7 +179,7 @@ const IncidentEditPage = () => {
     setOperationalPeriod(prev => ({ ...prev, [field]: value }));
   };
 
-  const saveData = async () => {
+  const saveData = async (autoResetSaving = true, shouldCleanState = true) => {
     setIsSaving(true);
     const newIncidentId = incident.number.trim();
 
@@ -263,8 +264,10 @@ const IncidentEditPage = () => {
         startIncident(newIncidentId, incident.name, operationalPeriod.op_number, opPeriodId);
       }
 
-      setInitialIncident(incident);
-      setInitialOpPeriod(operationalPeriod);
+      if (shouldCleanState) {
+        setInitialIncident(incident);
+        setInitialOpPeriod(operationalPeriod);
+      }
       setIsLocalSaved(true);
       console.log('[IncidentEdit] Save successful!');
       return true;
@@ -274,16 +277,18 @@ const IncidentEditPage = () => {
       alert(`Error starting incident tracking: ${message}`);
       return false;
     } finally {
-      setIsSaving(false);
+      if (autoResetSaving) setIsSaving(false);
     }
   };
 
   const handleSubmit = async (event) => {
     if (event) event.preventDefault();
     const wasActive = isActive;
-    const success = await saveData();
+    setIsSubmitting(true);
+    const success = await saveData(false, true); // Keep isSaving true until navigation handles it, clean state
     if (success) {
       // Auto check-in the creator if they provided details on the previous check-in page
+      setIsSubmitting(false); // Reset after successful navigation
       const responderData = location.state?.responderData;
       if (!wasActive && responderData) {
         const incidentId = incident.number.trim();
@@ -346,9 +351,14 @@ const IncidentEditPage = () => {
           if (setAccessLevel) setAccessLevel('command staff');
         } catch (err) {
           console.error('[IncidentEdit] Auto check-in failed:', err);
+          alert('Incident created, but auto check-in failed: ' + err.message);
+          return; // Stop navigation if session setup failed
         }
       }
       navigate('/operations');
+    } else {
+      setIsSubmitting(false);
+      setIsSaving(false); // Reset if save failed
     }
   };
 
@@ -387,6 +397,7 @@ const IncidentEditPage = () => {
           `- Close the operational period and end incident tracking`;
         
         if (!window.confirm(confirmMsg)) {
+          setIsSubmitting(false);
           setIsSaving(false);
           return;
         }
@@ -433,6 +444,7 @@ const IncidentEditPage = () => {
       navigate('/checkin');
     } catch (err) {
       console.error('Error ending incident:', err);
+      setIsSubmitting(false);
       alert('Failed to end incident: ' + (err.message || 'Database error'));
     } finally {
       setIsSaving(false);
@@ -474,45 +486,49 @@ const IncidentEditPage = () => {
               />
             </label>
 
-            <label>
-              Incident Number
-              <input
-                type="text"
-                value={incident.number}
-                onChange={(e) => handleIncidentChange('number', e.target.value)}
-                placeholder="Incident Number"
-              />
-            </label>
-
-            <label>
-              SARTopo Map ID
-              <input
-                type="text"
-                value={incident.sartopo_id}
-                onChange={(e) => handleIncidentChange('sartopo_id', e.target.value)}
-                placeholder="e.g. 9ABC"
-              />
-            </label>
-
-            <label>
-              Start Date / Time
-              <input
-                type="datetime-local"
-                value={incident.start_datetime}
-                onChange={(e) => handleIncidentChange('start_datetime', e.target.value)}
-              />
-            </label>
-
-            {isActive && (
+            <div className="timing-row">
               <label>
-                End Date / Time
+                Incident Number
                 <input
-                  type="datetime-local"
-                  value={incident.end_datetime}
-                  onChange={(e) => handleIncidentChange('end_datetime', e.target.value)}
+                  type="text"
+                  value={incident.number}
+                  onChange={(e) => handleIncidentChange('number', e.target.value)}
+                  placeholder="Incident Number"
                 />
               </label>
-            )}
+
+              <label>
+                SARTopo Map ID
+                <input
+                  type="text"
+                  value={incident.sartopo_id}
+                  onChange={(e) => handleIncidentChange('sartopo_id', e.target.value)}
+                  placeholder="e.g. 9ABC"
+                />
+              </label>
+            </div>
+
+            <div className="timing-row">
+              <label>
+                Start Date / Time
+                <input
+                  type="datetime-local"
+                  value={incident.start_datetime}
+                  onChange={(e) => handleIncidentChange('start_datetime', e.target.value)}
+                />
+              </label>
+
+              {isActive && (
+                <label>
+                  End Date / Time
+                  <input
+                    type="datetime-local"
+                    value={incident.end_datetime}
+                    onChange={(e) => handleIncidentChange('end_datetime', e.target.value)}
+                  />
+                </label>
+              )}
+            </div>
 
             <label>
               Incident Narrative
@@ -527,60 +543,64 @@ const IncidentEditPage = () => {
           <div className="section-card">
             <h2>Operational Period</h2>
 
-            <label>
-              OP Number
-              <input
-                type="text"
-                value={operationalPeriod.op_number}
-                onChange={(e) => handleOperationalPeriodChange('op_number', e.target.value)}
-                placeholder="Operational Period Number"
-              />
-            </label>
-
-            <label>
-              OP Start Date / Time
-              <input
-                type="datetime-local"
-                value={operationalPeriod.start_datetime}
-                onChange={(e) => handleOperationalPeriodChange('start_datetime', e.target.value)}
-              />
-            </label>
-
-            {isActive && (
-              <label>
-                OP End Date / Time
+            <div className="timing-row" style={{ alignItems: 'flex-end', marginBottom: '16px' }}>
+              <label style={{ flex: '0 0 140px', marginBottom: 0 }}>
+                OP Number
                 <input
-                  type="datetime-local"
-                  value={operationalPeriod.end_datetime}
-                  onChange={(e) => handleOperationalPeriodChange('end_datetime', e.target.value)}
+                  type="text"
+                  value={operationalPeriod.op_number}
+                  onChange={(e) => handleOperationalPeriodChange('op_number', e.target.value)}
+                  placeholder="OP #"
                 />
               </label>
-            )}
-            
-            <div className="par-config-row" style={{ display: 'flex', alignItems: 'flex-end', gap: '12px', marginBottom: '16px' }}>
-              <label style={{ flex: 1, marginBottom: 0 }}>
-                PAR/Status Check Interval (minutes)
-                <input
-                  type="number"
-                  value={operationalPeriod.par_check_interval}
-                  onChange={(e) => handleOperationalPeriodChange('par_check_interval', e.target.value)}
-                  placeholder="e.g. 60"
-                  disabled={operationalPeriod.par_check_interval === 0}
-                  min="0"
-                />
-              </label>
-              <button 
-                type="button" 
-                className={`btn ${operationalPeriod.par_check_interval === 0 ? 'btn-primary' : 'btn-secondary'}`}
-                style={{ height: '38px', whiteSpace: 'nowrap' }}
-                onClick={() => {
-                  handleOperationalPeriodChange('par_check_interval', operationalPeriod.par_check_interval === 0 ? 60 : 0);
-                }}
-              >
-                {operationalPeriod.par_check_interval === 0 ? 'Enable PAR' : 'Disable PAR'}
-              </button>
+
+              <div className="par-config-row" style={{ display: 'flex', alignItems: 'flex-end', gap: '12px', flex: 1 }}>
+                <label style={{ flex: 1, marginBottom: 0 }}>
+                  PAR/Status Check Interval (minutes)
+                  <input
+                    type="number"
+                    value={operationalPeriod.par_check_interval}
+                    onChange={(e) => handleOperationalPeriodChange('par_check_interval', e.target.value)}
+                    placeholder="e.g. 60"
+                    disabled={operationalPeriod.par_check_interval === 0}
+                    min="0"
+                  />
+                </label>
+                <button 
+                  type="button" 
+                  className={`btn ${operationalPeriod.par_check_interval === 0 ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ height: '38px', whiteSpace: 'nowrap' }}
+                  onClick={() => {
+                    handleOperationalPeriodChange('par_check_interval', operationalPeriod.par_check_interval === 0 ? 60 : 0);
+                  }}
+                >
+                  {operationalPeriod.par_check_interval === 0 ? 'Enable PAR' : 'Disable PAR'}
+                </button>
+              </div>
             </div>
 
+            <div className="timing-row">
+              <label>
+                OP Start Date / Time
+                <input
+                  type="datetime-local"
+                  value={operationalPeriod.start_datetime}
+                  onChange={(e) => handleOperationalPeriodChange('start_datetime', e.target.value)}
+                />
+              </label>
+
+              {isActive && (
+                <label>
+                  OP End Date / Time
+                  <input
+                    type="datetime-local"
+                    value={operationalPeriod.end_datetime}
+                    onChange={(e) => handleOperationalPeriodChange('end_datetime', e.target.value)}
+                  />
+                </label>
+              )}
+            </div>
+            
             <label>
               Operational Period Objective
               <textarea
@@ -621,50 +641,6 @@ const IncidentEditPage = () => {
         </div>
       </form>
 
-      {isLocalSaved && (
-        <div className="review-card">
-          <h3>Saved Incident Preview</h3>
-          <div className="review-grid">
-            <div>
-              <strong>Incident Name:</strong>
-              <p>{incident.name || '—'}</p>
-            </div>
-            <div>
-              <strong>Incident Number:</strong>
-              <p>{incident.number || '—'}</p>
-            </div>
-            <div>
-              <strong>SARTopo Map ID:</strong>
-              <p>{incident.sartopo_id || '—'}</p>
-            </div>
-            <div>
-              <strong>Incident Start:</strong>
-              <p>{incident.start_datetime || '—'}</p>
-            </div>
-            <div>
-              <strong>Incident End:</strong>
-              <p>{incident.end_datetime || '—'}</p>
-            </div>
-            <div>
-              <strong>OP Number:</strong>
-              <p>{operationalPeriod.op_number || '—'}</p>
-            </div>
-            <div>
-              <strong>OP Start:</strong>
-              <p>{operationalPeriod.start_datetime || '—'}</p>
-            </div>
-            <div>
-              <strong>OP End:</strong>
-              <p>{operationalPeriod.end_datetime || '—'}</p>
-            </div>
-            <div>
-              <strong>PAR Interval:</strong>
-              <p>{operationalPeriod.par_check_interval === 0 ? 'Disabled' : `${operationalPeriod.par_check_interval || '60'} minutes`}</p>
-            </div>
-          </div>
-        </div>
-      )}
-
       {blocker.state === 'blocked' && (
         <div style={{
           position: 'fixed', top: 0, left: 0, width: '100%', height: '100%',
@@ -681,8 +657,12 @@ const IncidentEditPage = () => {
             </p>
             <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', marginTop: '24px' }}>
               <button className="btn btn-primary" onClick={async () => {
-                const success = await saveData();
-                if (success) blocker.proceed();
+                const success = await saveData(false); // Keep isSaving true to prevent re-blocking
+                if (success) {
+                  blocker.proceed();
+                } else {
+                  setIsSaving(false); // Reset if save failed
+                }
               }}>Commit Changes</button>
               <button className="btn btn-secondary" onClick={() => blocker.proceed()}>Cancel Changes</button>
               <button className="btn btn-secondary" onClick={() => blocker.reset()}>Stay</button>

@@ -306,4 +306,65 @@ describe('AdminPage Authentication Gate', () => {
       expect(mockEq).toHaveBeenCalledWith('responder_id', 'res-123');
     });
   });
+
+  it('performs bulk cleanup of resources when ending an active incident', async () => {
+    vi.mocked(useIncident).mockReturnValue({ 
+      isAdmin: true, 
+      incidentId: 'inc-123',
+      endIncident: vi.fn()
+    });
+    window.confirm = vi.fn().mockReturnValue(true);
+
+    // Mock finding 1 active assignment and 1 responder
+    supabase.from.mockImplementation((table) => {
+      let data = [];
+      if (table === 'incidents') {
+        data = [{ 
+          incident_id: 'inc-123', 
+          name: 'Active Incident', 
+          number: '1', 
+          start_datetime: new Date().toISOString() 
+        }];
+      }
+      if (table === 'operational_periods') data = { op_period_id: 'op-1' };
+      if (table === 'assignments') data = [{ assignment_id: 'a1', status: 'Deployed' }];
+      if (table === 'responders') data = [{ responder_id: 'r1' }];
+      
+      return {
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        is: vi.fn().mockReturnThis(),
+        in: vi.fn().mockReturnThis(),
+        update: vi.fn().mockReturnThis(),
+        order: vi.fn().mockReturnThis(),
+        maybeSingle: vi.fn().mockResolvedValue({ data, error: null }),
+        then: (onFulfilled) => Promise.resolve({ data, error: null }).then(onFulfilled)
+      };
+    });
+
+    render(<BrowserRouter><AdminPage /></BrowserRouter>);
+    fireEvent.click(screen.getByText(/Incident Management/i));
+
+    const endBtn = await screen.findByRole('button', { name: /End Incident/i });
+    fireEvent.click(endBtn);
+
+    expect(supabase.from).toHaveBeenCalledWith('assignments');
+    expect(supabase.from).toHaveBeenCalledWith('teams');
+    expect(supabase.from).toHaveBeenCalledWith('incidents');
+  });
+
+  it('successfully signs out the administrator and redirects to check-in', async () => {
+    const mockLogout = vi.fn();
+    vi.mocked(useIncident).mockReturnValue({ isAdmin: true, logout: mockLogout });
+    
+    render(<BrowserRouter><AdminPage /></BrowserRouter>);
+
+    const logoutBtn = screen.getByRole('button', { name: /Sign Out Admin/i });
+    fireEvent.click(logoutBtn);
+
+    await waitFor(() => {
+      expect(supabase.auth.signOut).toHaveBeenCalled();
+      expect(mockLogout).toHaveBeenCalled();
+    });
+  });
 });

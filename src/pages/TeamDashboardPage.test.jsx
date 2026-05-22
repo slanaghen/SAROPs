@@ -36,7 +36,7 @@ describe('TeamFormModal', () => {
     initialData: {
       team_id: 't1',
       team_name_number: 'Team 1',
-      type: 'Ground Search',
+      type: 'Ground',
       status: 'Staged',
       leader_responder_id: null,
       equipment: [],

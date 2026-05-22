@@ -27,8 +27,10 @@ describe('OperationsTable', () => {
     rows: mockRows,
     sortConfig: { key: null, direction: 'asc' },
     requestSort: vi.fn(),
-    filters: {},
-    onFilterChange: vi.fn(),
+    assignmentFilter: '',
+    onAssignmentFilterChange: vi.fn(),
+    teamFilter: '',
+    onTeamFilterChange: vi.fn(),
     parInterval: 60,
     onStatusUpdate: vi.fn(),
     onResetPar: vi.fn(),
@@ -59,6 +61,14 @@ describe('OperationsTable', () => {
     const newTeamButton = within(teamHeader).getByRole('button', { name: 'New' });
     expect(newAssignmentButton).toBeInTheDocument();
     expect(newTeamButton).toBeInTheDocument();
+
+    // Verify localized search inputs are present
+    const searchInputs = screen.getAllByPlaceholderText('Search...');
+    expect(searchInputs).toHaveLength(2);
+
+    // Test Team Filter trigger
+    fireEvent.change(searchInputs[1], { target: { value: 'Bravo' } });
+    expect(defaultProps.onTeamFilterChange).toHaveBeenCalledWith('Bravo');
 
     fireEvent.click(newAssignmentButton);
     expect(defaultProps.openNewAssignmentForm).toHaveBeenCalled();
@@ -109,13 +119,6 @@ describe('OperationsTable', () => {
     const nameHeaders = screen.getAllByText('Name', { selector: 'th' }); // Specify selector to avoid matching team name in row
     fireEvent.click(nameHeaders[0]);
     expect(defaultProps.requestSort).toHaveBeenCalledWith('assignmentName');
-  });
-
-  it('triggers column filtering when input values change', () => {
-    render(<OperationsTable {...defaultProps} />);
-    const filterInputs = screen.getAllByPlaceholderText('Filter...');
-    fireEvent.change(filterInputs[0], { target: { value: 'Alpha' } });
-    expect(defaultProps.onFilterChange).toHaveBeenCalledWith('assignmentName', 'Alpha');
   });
 
   it('provides a context-aware action menu', () => {

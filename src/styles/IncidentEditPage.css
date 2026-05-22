@@ -2,6 +2,7 @@
   max-width: 1300px;
   margin: 0 auto;
   padding: 24px;
+  overflow-y: auto;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
 }
 
@@ -32,6 +33,15 @@
   display: grid;
   gap: 10px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.timing-row {
+  display: flex;
+  gap: 12px;
+}
+
+.timing-row label {
+  flex: 1;
 }
 
 .section-card {

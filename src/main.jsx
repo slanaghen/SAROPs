@@ -11,6 +11,7 @@ import AdminPage from './pages/AdminPage';
 import ActionLogPage from './pages/ActionLogPage';
 import ErrorPage from './components/ErrorPage';
 import ICSAssignmentPage from './pages/ICSAssignmentPage';
+import SARTopoDataPage from './pages/SARTopoDataPage';
 import QRCodesPage from './pages/QRCodesPage';
 import { IncidentProvider } from './context/IncidentContext';
 
@@ -49,6 +50,7 @@ const router = createBrowserRouter([
       { path: "admin", element: <AdminPage /> },
       { path: "action-log", element: <ActionLogPage /> },
       { path: "qrcodes", element: <QRCodesPage /> },
+      { path: "sartopo", element: <SARTopoDataPage /> },
       { path: "ics", element: <ICSAssignmentPage /> },
     ],
   },

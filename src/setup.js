@@ -1,52 +1,57 @@
 import { expect, vi } from 'vitest';
 import * as matchers from '@testing-library/jest-dom/matchers';
+import { AbortController as NodeAbortController, AbortSignal as NodeAbortSignal } from 'node:events';
 
 // Centralized setup for jest-dom matchers
 expect.extend(matchers);
 
-// Fix for TypeError: RequestInit: Expected signal to be an instance of AbortSignal.
-// Node/undici and JSDOM may provide different AbortController/AbortSignal
-// implementations (different realms), causing strict instanceof checks to fail.
-// Ensure the runtime uses the same constructors on both `window` and `globalThis`.
 if (typeof window !== 'undefined') {
-  if (typeof globalThis.AbortController !== 'undefined') {
-    window.AbortController = globalThis.AbortController;
-  }
-  if (typeof globalThis.AbortSignal !== 'undefined') {
-    window.AbortSignal = globalThis.AbortSignal;
-  }
+  // Overwrite JSDOM globals with Node.js native constructors to resolve realm mismatches.
+  // This prevents "AbortController is not a constructor" and 
+  // "Expected signal to be an instance of AbortSignal" errors during React Router 7 navigation.
+  Object.defineProperty(window, 'AbortController', {
+    writable: true,
+    configurable: true,
+    value: NodeAbortController,
+  });
+  Object.defineProperty(window, 'AbortSignal', {
+    writable: true,
+    configurable: true,
+    value: NodeAbortSignal,
+  });
+
+  globalThis.AbortController = NodeAbortController;
+  globalThis.AbortSignal = NodeAbortSignal;
 }
 
-// Wrap the global Request constructor to coerce signals coming from a different
-// realm into a `globalThis.AbortSignal` instance accepted by undici.
-if (typeof globalThis.Request !== 'undefined' && typeof globalThis.AbortController !== 'undefined') {
-  const NativeRequest = globalThis.Request;
-  // Test whether the native Request accepts an AbortSignal from this realm.
-  let nativeAcceptsSignal = true;
-  try {
-    new NativeRequest('about:blank', { signal: new globalThis.AbortController().signal });
-  } catch (e) {
-    nativeAcceptsSignal = false;
-  }
-
-  if (!nativeAcceptsSignal) {
-    // Lightweight Request shim used only for tests to avoid undici's strict
-    // instance checks. This stores the fields react-router expects and is
-    // sufficient for client-side navigation usage in tests.
-    globalThis.Request = class {
-      constructor(input, init = {}) {
-        this.url = typeof input === 'string' ? input : input?.url;
-        this.method = init.method || 'GET';
-        this.headers = init.headers || {};
-        this.body = init.body;
-        this.signal = init.signal;
-      }
-      clone() {
-        return new globalThis.Request(this.url, { method: this.method, headers: this.headers, body: this.body, signal: this.signal });
-      }
-    };
-  }
-}
+/**
+ * Global helper for Vitest to create consistent Supabase Query Mocks
+ */
+globalThis.createSupabaseQueryMock = (data, error = null) => {
+  let isSingle = false;
+  const query = {
+    select: vi.fn(() => query),
+    eq: vi.fn(() => query),
+    match: vi.fn(() => query),
+    in: vi.fn(() => query),
+    is: vi.fn(() => query),
+    not: vi.fn(() => query),
+    order: vi.fn(() => query),
+    limit: vi.fn(() => query),
+    update: vi.fn(() => query),
+    delete: vi.fn(() => query),
+    insert: vi.fn(() => query),
+    single: vi.fn(() => { isSingle = true; return query; }),
+    maybeSingle: vi.fn(() => { isSingle = true; return query; }),
+    then: vi.fn((onFulfilled) => {
+      let resultData = data;
+      if (isSingle && Array.isArray(data)) resultData = data[0];
+      else if (!isSingle && !Array.isArray(data) && data !== null && typeof data === 'object') resultData = [data];
+      return Promise.resolve({ data: resultData, error }).then(onFulfilled);
+    }),
+  };
+  return query;
+};
 
 // Global mock for Google Maps loader to prevent resolution errors and JSDOM crashes
 vi.mock('@googlemaps/js-api-loader', () => {
@@ -56,20 +61,7 @@ vi.mock('@googlemaps/js-api-loader', () => {
   };
   const MockMap = vi.fn(() => mockMapInstance);
   const mockLoaderInstance = {
-    importLibrary: vi.fn((lib) => {
-      if (lib === 'maps') {
-        if (typeof window !== 'undefined') {
-          window.google = {
-            maps: {
-              event: { addListenerOnce: vi.fn() },
-              ControlPosition: { TOP_LEFT: 1 }
-            }
-          };
-        }
-        return Promise.resolve({ Map: MockMap });
-      }
-      return Promise.resolve({});
-    }),
+    importLibrary: vi.fn((lib) => (lib === 'maps' ? Promise.resolve({ Map: MockMap }) : Promise.resolve({}))),
     setOptions: vi.fn(),
   };
   const MockLoader = vi.fn(() => mockLoaderInstance);

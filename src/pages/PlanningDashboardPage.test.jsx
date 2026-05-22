@@ -1,4 +1,4 @@
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import * as matchers from '@testing-library/jest-dom/matchers';
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import PlanningDashboardPage from './PlanningDashboardPage';
@@ -94,8 +94,8 @@ describe('PlanningDashboardPage', () => {
     vi.mocked(usePlanningDashboard).mockReturnValue({
       teams: [],
       assignments: [
-        { division: 'A', name: 'AA', title: 'AA' },
-        { division: 'A', name: 'AB', title: 'AB' }
+        { segment: 'A', title: 'AA' },
+        { segment: 'A', title: 'AB' }
       ],
       responders: [],
       loading: false,
@@ -126,7 +126,7 @@ describe('PlanningDashboardPage', () => {
   it('should handle division suffixes at the end of the alphabet (AZ -> AA)', () => {
     vi.mocked(useIncident).mockReturnValue({ incidentData: { opPeriodId: 'op-123' } });
     vi.mocked(usePlanningDashboard).mockReturnValue({
-      assignments: [{ division: 'A', name: 'AZ', title: 'AZ' }],
+      assignments: [{ segment: 'A', title: 'AZ' }],
       teams: [], responders: [], loading: false, fetchDashboardData: vi.fn(),
       stats: mockStats,
     });
@@ -141,8 +141,8 @@ describe('PlanningDashboardPage', () => {
     vi.mocked(useIncident).mockReturnValue({ incidentData: { opPeriodId: 'op-123' } });
     vi.mocked(usePlanningDashboard).mockReturnValue({
       assignments: [
-        { division: 'B', name: 'BA' },
-        { division: 'B', name: 'BB' }
+        { segment: 'B', title: 'BA' },
+        { segment: 'B', title: 'BB' }
       ],
       teams: [], responders: [], loading: false, fetchDashboardData: vi.fn(),
       stats: mockStats,
@@ -152,5 +152,31 @@ describe('PlanningDashboardPage', () => {
     
     const nextName = screen.getByTestId('next-assignment-name').textContent;
     expect(nextName).toBe('AA'); // Division B exists, but Division A should start at AA
+  });
+
+  it('renders error state and handles retry load', () => {
+    vi.mocked(useIncident).mockReturnValue({
+      incidentData: { opPeriodId: 'op-123' },
+    });
+
+    const mockFetch = vi.fn();
+    vi.mocked(usePlanningDashboard).mockReturnValue({
+      teams: [], assignments: [], responders: [],
+      loading: false, stats: mockStats,
+      error: 'Network Error',
+      fetchDashboardData: mockFetch,
+    });
+
+    render(<PlanningDashboardPage />);
+
+    // Verify error message is displayed
+    expect(screen.getByText(/Network Error/i)).toBeInTheDocument();
+    
+    // Click Retry
+    const retryBtn = screen.getByRole('button', { name: /Retry Load/i });
+    fireEvent.click(retryBtn);
+
+    // Verify hook function was called
+    expect(mockFetch).toHaveBeenCalled();
   });
 });

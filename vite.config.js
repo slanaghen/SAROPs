@@ -3,6 +3,15 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [react()],
+  server: {
+    proxy: {
+      '/sartopo-api': {
+        target: 'https://sartopo.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/sartopo-api/, ''),
+      },
+    },
+  },
   test: {
     globals: true,
     environment: 'jsdom',

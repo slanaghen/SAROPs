@@ -13,6 +13,7 @@ ALTER TABLE IF EXISTS assignments
   ADD COLUMN IF NOT EXISTS team_size INTEGER,
   ADD COLUMN IF NOT EXISTS frequency_primary TEXT,
   ADD COLUMN IF NOT EXISTS description TEXT,
+  ADD COLUMN IF NOT EXISTS debrief_narrative TEXT,
   ADD COLUMN IF NOT EXISTS probability_of_detection INTEGER,
   ADD COLUMN IF NOT EXISTS team_name TEXT,
   ADD COLUMN IF NOT EXISTS priority TEXT,
@@ -24,8 +25,7 @@ ALTER TABLE IF EXISTS assignments
   ADD COLUMN IF NOT EXISTS folder_id TEXT,
   ADD COLUMN IF NOT EXISTS color TEXT,
   ADD COLUMN IF NOT EXISTS stroke TEXT,
-  ADD COLUMN IF NOT EXISTS fill TEXT,
-  ADD COLUMN IF NOT EXISTS updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+  ADD COLUMN IF NOT EXISTS fill TEXT;
 
 -- Copy legacy values into new SARTopo fields when those fields are empty
 UPDATE assignments
@@ -36,9 +36,7 @@ SET
   team_size = COALESCE(team_size, assignment_size),
   frequency_primary = COALESCE(frequency_primary, tac_channel),
   description = COALESCE(description, description_narrative),
-  probability_of_detection = COALESCE(probability_of_detection, pod),
-  -- map updated timestamp to the new `updated` field if not already set
-  updated = COALESCE(updated, updated_at);
+  probability_of_detection = COALESCE(probability_of_detection, pod);
 
 COMMIT;
 

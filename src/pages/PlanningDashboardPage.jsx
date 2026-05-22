@@ -45,12 +45,12 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
   const getNextAssignmentName = (division) => {
     if (!assignments || assignments.length === 0) return `${division}A`;
     
-    const segmentAssignments = assignments.filter(a => (a.segment || a.division) === division);
+    const segmentAssignments = assignments.filter(a => a.segment === division);
     const usedSuffixes = new Set(
       segmentAssignments
         .map(a => {
-          if (a.name && a.name.startsWith(division) && a.name.length === division.length + 1) {
-            return a.name.slice(division.length);
+          if (a.title && a.title.startsWith(division) && a.title.length === division.length + 1) {
+            return a.title.slice(division.length);
           }
           return null;
         })
@@ -101,7 +101,7 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
   return (
     <div>
       {hookError && (
-        <div style={{ padding: '16px', color: '#721c24', backgroundColor: '#f8d7da', border: '1px solid #f5c6cb', borderRadius: '4px', margin: '16px', textAlign: 'center' }}>
+        <div className="alert alert-error" style={{ margin: '16px' }}>
           <p><strong>Error:</strong> {hookError}</p>
           <button onClick={() => fetchDashboardData()}>Retry Load</button>
         </div>

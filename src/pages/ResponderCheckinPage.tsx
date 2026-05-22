@@ -133,10 +133,11 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
             number,
             operational_periods (
               op_period_id,
-              op_number
+              op_number,
+              start_datetime
             )
           `)
-          .is('end_datetime', null)
+          .is('end_datetime', null) // Only show incidents that have not ended
           .order('start_datetime', { ascending: false });
 
         if (fetchError) throw fetchError;
@@ -211,9 +212,32 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
 
     try {
       const targetIncidentId = selectedIncidentId;
-      const activeIncident = incidents.find(inc => inc.incident_id === targetIncidentId);
-      const targetIncidentName = activeIncident?.name;
-      const latestOp = (activeIncident as any)?.operational_periods?.[0];
+      let activeIncident = incidents.find(inc => inc.incident_id === targetIncidentId);
+
+      // If not in local state (e.g. just created), fetch from DB to ensure context can start
+      // and the first responder logic can find the operational period and staff team.
+      if (!activeIncident && targetIncidentId) {
+        const { data: freshInc } = await supabase
+          .from('incidents')
+          .select('incident_id, name, number, operational_periods(op_period_id, op_number, start_datetime)')
+          .eq('incident_id', targetIncidentId)
+          .is('end_datetime', null)
+          .maybeSingle();
+        
+        if (freshInc) {
+          activeIncident = freshInc as any;
+        }
+      }
+
+      if (!activeIncident) {
+        throw new Error('Could not retrieve incident details. Please refresh the page.');
+      }
+
+      const targetIncidentName = activeIncident.name;
+      const latestOp = activeIncident.operational_periods?.sort((a: any, b: any) => 
+        new Date(b.start_datetime).getTime() - new Date(a.start_datetime).getTime()
+      )[0];
+
       const targetOpNumber = latestOp?.op_number || '1';
       const targetOpId = latestOp?.op_period_id;
 

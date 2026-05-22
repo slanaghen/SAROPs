@@ -86,7 +86,33 @@ describe('ICSAssignmentPage', () => {
     render(<ICSAssignmentPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('Steve')).toBeInTheDocument();
+      expect(screen.getByText(/Steve/)).toBeInTheDocument();
+    });
+  });
+
+  it('correctly maps General Staff roles (Operations, Planning, Logistics)', async () => {
+    const mockStaffTeam = {
+      type: 'Staff',
+      current_responders: [
+        { responder_id: 'r1', role: 'Operations' },
+        { responder_id: 'r2', role: 'Planning' }
+      ]
+    };
+
+    vi.mocked(usePlanningDashboard).mockReturnValue({
+      teams: [mockStaffTeam],
+      responders: mockResponders,
+      loading: false,
+      error: null,
+      fetchDashboardData: vi.fn(),
+      setError: vi.fn(),
+    });
+
+    render(<ICSAssignmentPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Steve/)).toBeInTheDocument(); 
+      expect(screen.getByText(/Bob/)).toBeInTheDocument();   
     });
   });
 });

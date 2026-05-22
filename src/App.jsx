@@ -253,9 +253,10 @@ function App() {
                   <Link to="/checkin" onClick={() => setMenuOpen(false)}>Check-in</Link>
                   <Link to="/incident" onClick={() => setMenuOpen(false)}>Incident</Link>
                   <Link to="/admin" onClick={() => setMenuOpen(false)}>Administration</Link>
-                  <Link to="/ics" onClick={() => setMenuOpen(false)}>ICS Organization Chart</Link>
+                  <Link to="/ics" onClick={() => setMenuOpen(false)}>ICS Chart</Link>
                   <Link to="/action-log" onClick={() => setMenuOpen(false)}>Action Log</Link>
                   <Link to="/qrcodes" onClick={() => setMenuOpen(false)}>QR Codes</Link>
+                  <Link to="/sartopo" onClick={() => setMenuOpen(false)}>SARTopo Data</Link>
                   <div className="dropdown-divider"></div>
                   <Link to="/checkout" onClick={() => setMenuOpen(false)} className="dropdown-item">Check Out</Link>
                   <button onClick={handleSignOut} className="dropdown-item checkout">Sign Out / Clear All</button>

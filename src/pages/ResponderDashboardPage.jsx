@@ -40,13 +40,11 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
   const mapContainer = useRef(null);
   const map = useRef(null);
   const [mapError, setMapError] = useState(false);
-  const [parRequired, setParRequired] = useState(false);
-  const [timeSinceLastPar, setTimeSinceLastPar] = useState('');
+  const [currentTime, setCurrentTime] = useState(Date.now());
 
   // This hook must be called before any useMemos or useEffects that depend on 'team' or 'assignment'
   const { team, assignment, loading, error, refetch } = useResponderTeamAndAssignment(supabase, responderId); 
 
-  
   // Section Collapsibility State
   const [isExpanded, setIsExpanded] = useState({
     narratives: true,
@@ -54,6 +52,43 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     assignment: true,
     messages: true
   });
+
+  // Keep a live clock for timer displays and overdue calculations
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(Date.now()), 15000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Memoized PAR status and time formatting to ensure visual parity with Operations page
+  const { parRequired, timeSinceLastPar } = useMemo(() => {
+    if (!team || !parInterval || team.status === 'Staged') {
+      return { parRequired: false, timeSinceLastPar: '' };
+    }
+
+    const lastCheckMs = team.last_par_check 
+      ? new Date(team.last_par_check).getTime() 
+      : new Date(team.created_at).getTime();
+    
+    const diffMs = currentTime - lastCheckMs;
+    const minutesSince = diffMs / 60000;
+
+    // Same logic as OperationsDashboard: parInterval + 3 min grace
+    const required = parInterval > 0 && minutesSince > (parInterval + 3);
+
+    let displayTime = 'Never';
+    if (team.last_par_check) {
+      const totalMinutes = Math.floor(diffMs / 60000);
+      if (totalMinutes < 1) displayTime = 'just now';
+      else if (totalMinutes < 60) displayTime = `${totalMinutes}m ago`;
+      else {
+        const hours = Math.floor(totalMinutes / 60);
+        const mins = totalMinutes % 60;
+        displayTime = `${hours}h ${mins}m ago`;
+      }
+    }
+
+    return { parRequired: required, timeSinceLastPar: displayTime };
+  }, [team, parInterval, currentTime]);
   
   const lastMessageCountRef = useRef(0);
   const prevTeamId = useRef(null);
@@ -129,9 +164,9 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       if (!incidentId) return;
       const { data } = await supabase
         .from('responders')
-        .select('responder_id, name')
+        .select('responder_id, name, agency')
         .eq('incident_id', incidentId);
-      if (data) {
+      if (Array.isArray(data)) {
         setResponders(data);
       }
     };
@@ -187,11 +222,8 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
 
   useEffect(() => {
     if (assignment) {
-      setPodValue(assignment.probability_of_detection !== null && assignment.probability_of_detection !== undefined
-        ? String(assignment.probability_of_detection)
-        : (assignment.pod !== null && assignment.pod !== undefined ? String(assignment.pod) : '')
-      );
-      setDebriefValue(assignment.description || assignment.debrief_narrative || '');
+      setPodValue(assignment.probability_of_detection !== null && assignment.probability_of_detection !== undefined ? String(assignment.probability_of_detection) : '');
+      setDebriefValue(assignment.debrief_narrative || '');
     }
   }, [assignment]);
 
@@ -202,7 +234,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       .select('*')
       .eq('team_id', team.team_id)
       .order('created_at', { ascending: true });
-    if (data) setMessages(data);
+    if (Array.isArray(data)) setMessages(data);
   }, [team?.team_id]);
 
   useEffect(() => {
@@ -212,9 +244,10 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       .channel(`team-msgs-${team.team_id}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'team_messages', filter: `team_id=eq.${team.team_id}` }, 
         payload => setMessages(prev => {
+          const current = Array.isArray(prev) ? prev : [];
           // Prevent duplicate if the local insert response arrived first
-          if (prev.some(m => m.id === payload.new.id)) return prev;
-          return [...prev, payload.new];
+          if (current.some(m => m.id === payload.new.id)) return current;
+          return [...current, payload.new];
         }))
       .subscribe();
     return () => { supabase.removeChannel(channel); };
@@ -235,7 +268,10 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       .single();
 
     if (data && !error) {
-      setMessages(prev => prev.some(m => m.id === data.id) ? prev : [...prev, data]);
+      setMessages(prev => {
+        const current = Array.isArray(prev) ? prev : [];
+        return current.some(m => m.id === data.id) ? current : [...current, data];
+      });
       setMessageText('');
     }
   };
@@ -275,55 +311,21 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     }
   };
 
-  useEffect(() => {
-    if (!team || !parInterval || team.status === 'Staged') {
-      setParRequired(false);
-      setTimeSinceLastPar('');
-      return;
-    }
-
-    const checkPar = () => {
-      const lastCheckMs = team.last_par_check ? new Date(team.last_par_check).getTime() : new Date(team.created_at || Date.now()).getTime();
-      const now = Date.now();
-      const diffMs = now - lastCheckMs;
-      const minutesSince = diffMs / 60000;
-
-      setParRequired(parInterval > 0 && minutesSince > (parInterval + 3));
-
-      if (!team.last_par_check) {
-        setTimeSinceLastPar('Never');
-      } else {
-        const totalMinutes = Math.floor(diffMs / 60000);
-        if (totalMinutes < 1) {
-          setTimeSinceLastPar('just now');
-        } else if (totalMinutes < 60) {
-          setTimeSinceLastPar(`${totalMinutes}m ago`);
-        } else {
-          const hours = Math.floor(totalMinutes / 60);
-          const mins = totalMinutes % 60;
-          setTimeSinceLastPar(`${hours}h ${mins}m ago`);
-        }
-      }
-    };
-
-    checkPar();
-    const timer = setInterval(checkPar, 15000); // Check every 15s
-    return () => clearInterval(timer);
-  }, [team, parInterval]);
-
   const handleParResponse = async (status) => {
     if (!team?.team_id) return;
     
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('teams')
         .update({ 
           last_par_check: new Date().toISOString(),
           par_status: status 
         })
-        .eq('team_id', team.team_id);
+        .eq('team_id', team.team_id)
+        .select();
 
       if (error) throw error;
+      if (!data || data.length === 0) throw new Error('PAR update blocked: You must be the Team Leader to perform this action.');
       refetch();
     } catch (err) {
       console.error('Error sending PAR:', err);
@@ -335,15 +337,17 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     
     setIsUpdatingAsnData(true);
     try {
-      const { error: updateErr } = await supabase
+      const { data, error: updateErr } = await supabase
         .from('assignments')
         .update({ 
           probability_of_detection: podValue === '' ? null : parseInt(podValue, 10),
-          description: debriefValue.trim()
+          debrief_narrative: debriefValue.trim()
         })
-        .eq('assignment_id', assignment.assignment_id);
+        .eq('assignment_id', assignment.assignment_id)
+        .select();
 
       if (updateErr) throw updateErr;
+      if (!data || data.length === 0) throw new Error('Update blocked: You are not authorized to modify this assignment.');
       await refetch();
     } catch (err) {
       console.error('Error updating mission data:', err);
@@ -361,35 +365,43 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       const now = new Date().toISOString();
       
       // 1. Update assignment: status -> Completed, team_id -> null, and save final mission results
-      const { error: asnError } = await supabase
+      const { data: asnData, error: asnError } = await supabase
         .from('assignments')
         .update({ 
           status: 'Completed',
-          team_id: null,
           probability_of_detection: podValue === '' ? null : parseInt(podValue, 10),
-          description: debriefValue.trim()
+          debrief_narrative: debriefValue.trim()
         })
-        .eq('assignment_id', assignment.assignment_id);
+        .eq('assignment_id', assignment.assignment_id)
+        .select();
       
       if (asnError) throw asnError;
+      if (!asnData || asnData.length === 0) throw new Error('Completion blocked: Unauthorized assignment update.');
 
       // 2. Update team status to Disbanded (standard terminal state to release resources)
-      const { error: teamError } = await supabase
+      const { data: teamData, error: teamError } = await supabase
         .from('teams')
         .update({
           status: 'Disbanded', 
           last_par_check: null // Clear PAR check when disbanded
         })
-        .eq('team_id', team.team_id);
+        .eq('team_id', team.team_id)
+        .select();
       
       if (teamError) throw teamError;
+      if (!teamData || teamData.length === 0) throw new Error('Completion blocked: Unauthorized team update.');
 
       // 3. Cascade status to team members (return to Staged) and close history
-      const { data: members } = await supabase.from('team_responders').select('responder_id').eq('team_id', team.team_id);
+      const { data: members, error: membersErr } = await supabase.from('team_responders').select('responder_id').eq('team_id', team.team_id);
+      if (membersErr) throw membersErr;
+      
       const ids = members?.map(m => m.responder_id) || [];
       if (ids.length > 0) {
-        await supabase.from('responders').update({ status: 'Staged' }).in('responder_id', ids);
-        await supabase.from('responder_team_history').update({ detached_datetime: now }).eq('team_id', team.team_id).is('detached_datetime', null);
+        const { data: respData, error: respErr } = await supabase.from('responders').update({ status: 'Staged' }).in('responder_id', ids).select();
+        if (respErr) throw respErr;
+        
+        const { error: histErr } = await supabase.from('responder_team_history').update({ detached_datetime: now }).eq('team_id', team.team_id).is('detached_datetime', null).select();
+        if (histErr) throw histErr;
       }
 
       await refetch();
@@ -408,38 +420,46 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       const now = new Date().toISOString();
       
       // 1. Update assignment status
-      const { error: asnError } = await supabase
+      const { data: asnData, error: asnError } = await supabase
         .from('assignments')
         .update({ status: 'Deployed' })
-        .eq('assignment_id', assignment.assignment_id);
+        .eq('assignment_id', assignment.assignment_id)
+        .select();
       
       if (asnError) throw asnError;
+      if (!asnData || asnData.length === 0) throw new Error('Deployment blocked: You do not have permission to update this assignment.');
 
       // 2. Update team status and reset PAR timer
-      const { error: teamError } = await supabase
+      const { data: teamData, error: teamError } = await supabase
         .from('teams')
         .update({ 
           status: 'Deployed', 
           last_par_check: now 
         })
-        .eq('team_id', team.team_id);
+        .eq('team_id', team.team_id)
+        .select();
       
       if (teamError) throw teamError;
+      if (!teamData || teamData.length === 0) throw new Error('Deployment blocked: You do not have permission to update this team.');
 
       // 3. Cascade status to team members
-      const { data: members } = await supabase
+      const { data: members, error: membersErr } = await supabase
         .from('team_responders')
         .select('responder_id')
         .eq('team_id', team.team_id);
       
+      if (membersErr) throw membersErr;
+      
       const ids = members?.map(m => m.responder_id) || [];
       if (ids.length > 0) {
-        await supabase.from('responders').update({ status: 'Deployed' }).in('responder_id', ids);
+        const { error: cascadeError } = await supabase.from('responders').update({ status: 'Deployed' }).in('responder_id', ids).select();
+        if (cascadeError) throw cascadeError;
       }
 
       await refetch();
     } catch (err) {
       console.error('Error deploying assignment:', err);
+      alert('Deployment failed: ' + (err.message || 'Permission denied'));
     }
   };
 
@@ -450,6 +470,12 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     });
     return lookup;
   }, [responders]);
+
+  const responderDisplayName = useMemo(() => {
+    const r = responders.find(res => res.responder_id === responderId);
+    if (!r) return responderName;
+    return `${r.name}${r.agency ? ` (${r.agency})` : ''}`;
+  }, [responders, responderId, responderName]);
 
   // Debug log to verify session IDs match database records
   useEffect(() => {
@@ -478,7 +504,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     return (
       <div className="alert alert-error" style={{ margin: '16px' }}>
         <p><strong>Error:</strong> {error}</p>
-        <button className="btn" onClick={refetch}>Retry Load</button>
+        <button className="btn" onClick={refetch} style={{ fontSize: '18px' }}>Retry Load</button>
       </div>
     );
   }
@@ -488,7 +514,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       onClick={() => setIsExpanded(prev => ({ ...prev, [sectionKey]: !prev[sectionKey] }))}
       style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}
     >
-      <h2 style={{ margin: 0, border: 'none', padding: 0 }}>{title}</h2>
+      <h2 style={{ margin: 0, border: 'none', padding: 0, fontSize: '18px' }}>{title}</h2>
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
         {showBadge}
         <span style={{ fontSize: '10px', color: '#64748b', fontWeight: 700 }}>
@@ -545,7 +571,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
                       You are assigned as the {icsRole} for this incident.
                     </p>
                   )}
-                  <button className="btn btn-primary btn-sm" style={{ width: '100%' }} onClick={() => window.location.href = '/operations'}>
+                  <button className="btn btn-primary" style={{ width: '100%', fontSize: '18px' }} onClick={() => window.location.href = '/operations'}>
                     Go to Operations Dashboard
                   </button>
                 </div>
@@ -609,7 +635,10 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
                           <span style={{ fontSize: '12px', color: '#64748b' }}>{timeSinceLastPar}</span>
                         )}
                       </div>
-                      <div style={{ display: 'flex', gap: '8px' }}><button className="btn btn-primary btn-sm" onClick={() => handleParResponse('OK')} style={{ flex: 1 }}>PAR OK</button><button className="btn btn-secondary btn-sm" onClick={() => handleParResponse('Contact me')} style={{ flex: 1, borderColor: '#f59e0b', color: '#d97706' }}>Contact Command</button></div>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button className="btn btn-primary" onClick={() => handleParResponse('OK')} style={{ flex: 1, fontSize: '18px' }}>PAR OK</button>
+                        <button className="btn btn-secondary" onClick={() => handleParResponse('Contact me')} style={{ flex: 1, borderColor: '#f59e0b', color: '#d97706', fontSize: '18px' }}>Contact Command</button>
+                      </div>
                     </div>
                   )}
                 </>
@@ -617,10 +646,10 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
 
               {team && !isLeavingTeam && (
                 <button 
-                  className="btn btn-secondary btn-sm" 
+                  className="btn btn-secondary" 
                   onClick={handleLeaveTeam}
                   disabled={isLeavingTeam || (team.status === 'Deployed' || assignment?.status === 'Deployed')}
-                  style={{ marginTop: '12px', color: '#dc2626', borderColor: '#fecaca' }}
+                  style={{ marginTop: '12px', color: '#dc2626', borderColor: '#fecaca', fontSize: '18px' }}
                   title={(team.status === 'Deployed' || assignment?.status === 'Deployed') ? "Cannot leave team while deployed" : "Remove yourself from this team"}
                 >
                   {isLeavingTeam ? 'Leaving...' : 'Leave Team'}
@@ -634,7 +663,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       {(assignment || accessLevel === 'command staff' || accessLevel === 'admin') && (
         <div className="dashboard-section assignment-info">
           <SectionHeader
-            title={accessLevel === 'command staff' || accessLevel === 'admin' ? 'ICS Assignment' : `Team Assignment: ${assignment?.title || assignment?.name}`} 
+            title={accessLevel === 'command staff' || accessLevel === 'admin' ? 'ICS Chart' : `Team Assignment: ${assignment?.title}`} 
             sectionKey="assignment" 
           />
           {isExpanded.assignment && (
@@ -645,6 +674,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
                   <div>
                     <div style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', marginBottom: '2px' }}>Current Position</div>
                     <div style={{ fontSize: '16px', fontWeight: 600, color: '#1e293b' }}>{icsRole ? icsRole.toUpperCase() : 'General Staff'}</div>
+                    <div style={{ fontSize: '14px', color: '#64748b', marginTop: '4px' }}>{responderDisplayName}</div>
                   </div>
                 </div>
               ) : assignment && (
@@ -657,36 +687,36 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
                 {assignment.status}
               </span>
             </div>
-            {(assignment.segment || assignment.division) && (
+            {assignment.segment && (
               <div>
                 <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Division</label>
-                <div style={{ fontSize: '15px', fontWeight: 500 }}>{assignment.segment || assignment.division}</div>
+                <div style={{ fontSize: '15px', fontWeight: 500 }}>{assignment.segment}</div>
               </div>
             )}
-            {(assignment.resource_type || assignment.assignment_type) && (
+            {assignment.resource_type && (
               <div>
                 <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Assignment Type</label>
-                <div style={{ fontSize: '15px', fontWeight: 500 }}>{assignment.resource_type || assignment.assignment_type}</div>
+                <div style={{ fontSize: '15px', fontWeight: 500 }}>{assignment.resource_type}</div>
               </div>
             )}
-            {(assignment.team_size || assignment.assignment_size) && (
+            {assignment.team_size && (
               <div>
                 <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Size</label>
-                <div style={{ fontSize: '15px', fontWeight: 500 }}>{assignment.team_size ?? assignment.assignment_size}</div>
+                <div style={{ fontSize: '15px', fontWeight: 500 }}>{assignment.team_size}</div>
               </div>
             )}
-            {(assignment.frequency_primary || assignment.tac_channel) && (
+            {assignment.frequency_primary && (
               <div>
                 <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>TAC Channel</label>
-                <div style={{ fontSize: '15px', fontWeight: 500 }}>{assignment.frequency_primary || assignment.tac_channel}</div>
+                <div style={{ fontSize: '15px', fontWeight: 500 }}>{assignment.frequency_primary}</div>
               </div>
             )}
           </div>
 
-          {(assignment.description || assignment.description_narrative) && (
+          {assignment.description && (
             <div style={{ marginBottom: '12px' }}>
               <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Description</label>
-              <p style={{ margin: 0, fontSize: '14px', lineHeight: '1.5' }}>{assignment.description || assignment.description_narrative}</p>
+              <p style={{ margin: 0, fontSize: '14px', lineHeight: '1.5' }}>{assignment.description}</p>
             </div>
           )}
 
@@ -704,7 +734,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
                     style={{ width: '100px', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
                   />
                 ) : (
-                  <span>{assignment.probability_of_detection !== null && assignment.probability_of_detection !== undefined ? `${assignment.probability_of_detection}%` : (assignment.pod !== null && assignment.pod !== undefined ? `${assignment.pod}%` : '—')}</span>
+                  <span>{assignment.probability_of_detection !== null && assignment.probability_of_detection !== undefined ? `${assignment.probability_of_detection}%` : '—'}</span>
                 )}
               </div>
 
@@ -718,26 +748,26 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
                     style={{ width: '100%', minHeight: '80px', padding: '8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '13px' }}
                   />
                 ) : (
-                  <p style={{ margin: 0, fontSize: '13px' }}>{assignment.description || assignment.debrief_narrative || '—'}</p>
+                  <p style={{ margin: 0, fontSize: '13px' }}>{assignment.debrief_narrative || '—'}</p>
                 )}
               </div>
 
               {isLeader && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '12px' }}>
                   <button 
-                    className="btn btn-secondary btn-sm" 
+                    className="btn btn-secondary" 
                     onClick={handleUpdateAssignmentData}
                     disabled={isUpdatingAsnData}
-                    style={{ width: '100%' }}
+                    style={{ width: '100%', fontSize: '18px' }}
                   >
                     {isUpdatingAsnData ? 'Saving...' : 'Save Mission Data'}
                   </button>
 
                   <button 
-                    className="btn btn-primary btn-sm" 
+                    className="btn btn-primary" 
                     onClick={handleCompleteAssignment}
                     disabled={isUpdatingAsnData || podValue === '' || !debriefValue.trim()}
-                    style={{ width: '100%', backgroundColor: '#059669', borderColor: '#059669' }}
+                    style={{ width: '100%', backgroundColor: '#059669', borderColor: '#059669', fontSize: '18px' }}
                   >
                     {isUpdatingAsnData ? 'Completing...' : 'Complete Assignment'}
                   </button>
@@ -751,7 +781,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
             <button 
               className="btn btn-primary" 
               onClick={handleDeploy}
-              style={{ marginTop: '16px', width: '100%' }}
+              style={{ marginTop: '16px', width: '100%', fontSize: '18px' }}
             >
               Deploy
             </button>
@@ -793,7 +823,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
               placeholder="Send message to Command..."
               style={{ flex: 1, padding: '8px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
             />
-            <button type="submit" className="btn btn-primary btn-sm">Send</button>
+            <button type="submit" className="btn btn-primary" style={{ fontSize: '18px' }}>Send</button>
           </form>
             </div>
           )}

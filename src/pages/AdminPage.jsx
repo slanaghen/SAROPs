@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useIncident } from '../context/IncidentContext';
 import '../styles/IncidentEditPage.css'; // Reusing form styles for consistency
+import { usePlanningDashboard } from '../hooks/usePlanningDashboard'; // Import usePlanningDashboard
 
 const AdminPage = () => {
   const navigate = useNavigate();
@@ -21,6 +22,7 @@ const AdminPage = () => {
   const [loginEmail, setAdminLoginEmail] = useState('');
   const [loginPassword, setAdminLoginPassword] = useState('');
   const [isRespondersExpanded, setIsRespondersExpanded] = useState(false);
+  const { recordAction } = usePlanningDashboard(supabase, incidentId); // Use recordAction from hook
   const [isTeamsExpanded, setIsTeamsExpanded] = useState(false);
   const [isAssignmentsExpanded, setIsAssignmentsExpanded] = useState(false);
   const [isIncidentsExpanded, setIsIncidentsExpanded] = useState(false);
@@ -188,11 +190,12 @@ const AdminPage = () => {
     if (!window.confirm('Mark this responder as checked out?')) return;
 
     try {
+      const now = new Date().toISOString();
       const { error: updateError } = await supabase
         .from('responders')
         .update({ 
           status: 'CheckedOut',
-          checkout_datetime: new Date().toISOString()
+          checkout_datetime: now
         })
         .eq('responder_id', id);
 
@@ -203,6 +206,9 @@ const AdminPage = () => {
         logout();
       }
 
+      const responder = allResponders.find(r => r.responder_id === id);
+      await recordAction(`Admin checked out responder "${responder?.name || 'Unknown'}" (ID: ${id}). Fields modified: status="CheckedOut", checkout_datetime="${now}".`);
+
       setSuccess('Responder checked out.');
       fetchAllResponders();
     } catch (err) {
@@ -210,7 +216,7 @@ const AdminPage = () => {
     }
   };
 
-  const handleDisbandTeam = async (id, name) => {
+  const handleDisbandTeam = async (id, name, type) => { // Added type
     if (!window.confirm(`Disband team "${name}"? Members will be released back to staging.`)) return;
 
     try {
@@ -233,12 +239,13 @@ const AdminPage = () => {
         .from('teams')
         .update({ 
           status: 'Disbanded',
-          last_par_check: new Date().toISOString()
+          last_par_check: null // Clear PAR check when disbanded
         })
         .eq('team_id', id);
 
       if (updateError) throw updateError;
 
+      await recordAction(`Admin disbanded team "${name}" (ID: ${id}, Type: ${type}). Fields modified: status="Disbanded", last_par_check=null. All members status set to "Staged".`);
       setSuccess('Team disbanded.');
       fetchAllTeams();
       fetchAllResponders(); // Refresh responders as their status changed
@@ -249,7 +256,7 @@ const AdminPage = () => {
     }
   };
 
-  const handleDeleteTeam = async (id, name) => {
+  const handleDeleteTeam = async (id, name, type) => { // Added type
     if (!window.confirm(`Permanently delete team "${name}"? This action cannot be undone and will remove all assignment links.`)) return;
 
     try {
@@ -260,6 +267,7 @@ const AdminPage = () => {
 
       if (deleteError) throw deleteError;
 
+      await recordAction(`Admin deleted team "${name}" (ID: ${id}, Type: ${type}).`);
       setSuccess('Team record deleted.');
       fetchAllTeams();
     } catch (err) {
@@ -267,7 +275,7 @@ const AdminPage = () => {
     }
   };
 
-  const handleDeleteAssignment = async (id, name) => {
+  const handleDeleteAssignment = async (id, name, type) => { // Added type
     if (!window.confirm(`Permanently delete assignment "${name}"? This action cannot be undone.`)) return;
 
     try {
@@ -278,6 +286,7 @@ const AdminPage = () => {
 
       if (deleteError) throw deleteError;
 
+      await recordAction(`Admin deleted assignment "${name}" (ID: ${id}, Type: ${type}).`);
       setSuccess('Assignment record deleted.');
       fetchAllAssignments();
     } catch (err) {
@@ -285,7 +294,7 @@ const AdminPage = () => {
     }
   };
 
-  const handleDeleteResponder = async (id, name) => {
+  const handleDeleteResponder = async (id, name, agency) => { // Added agency
     if (!window.confirm(`Permanently delete responder "${name}"? This action cannot be undone.`)) return;
 
     try {
@@ -301,6 +310,7 @@ const AdminPage = () => {
         logout();
       }
 
+      await recordAction(`Admin deleted responder "${name}" (ID: ${id}, Agency: ${agency}).`);
       setSuccess('Responder record deleted.');
       fetchAllResponders();
     } catch (err) {
@@ -382,6 +392,9 @@ const AdminPage = () => {
         .from('incidents')
         .update({ end_datetime: now })
         .eq('incident_id', id);
+      
+      const inc = allIncidents.find(inc => inc.incident_id === id);
+      await recordAction(`Admin ended incident "${inc?.name}" (ID: ${id}). Fields modified: end_datetime="${now}". Automated cleanup: marked ${deployedCount} assignments Incomplete, ${assignedCount} assignments Planned, disbanded all teams, and checked out ${activeResponders.length} responders.`);
 
       if (updateError) throw updateError;
 
@@ -403,7 +416,7 @@ const AdminPage = () => {
     }
   };
 
-  const handleDeleteIncident = async (id) => {
+  const handleDeleteIncident = async (id, name) => { // Added name
     const message = 'Permanently delete this incident? This will remove all associated operational periods, assignments, teams, responders, and logs. This action cannot be undone.';
     if (!window.confirm(message)) return;
 
@@ -430,6 +443,7 @@ const AdminPage = () => {
 
       if (deleteError) throw deleteError;
 
+      await recordAction(`Admin deleted incident "${name}" (ID: ${id}).`);
       // 3. Update context if we deleted the current active session
       if (id === incidentId) {
         logout();
@@ -755,10 +769,10 @@ const AdminPage = () => {
                         </td>
                         <td style={{ textAlign: 'right' }}>
                           <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                            {!isDisbanded && (
-                              <button onClick={() => handleDisbandTeam(team.team_id, team.team_name_number)} className="btn btn-secondary btn-sm" style={{ color: '#f59e0b' }}>Disband</button>
+                            {team.status !== 'Disbanded' && ( // Only show if not already disbanded
+                              <button onClick={() => handleDisbandTeam(team.team_id, team.team_name_number, team.type)} className="btn btn-secondary btn-sm" style={{ color: '#f59e0b' }}>Disband</button>
                             )}
-                            <button onClick={() => handleDeleteTeam(team.team_id, team.team_name_number)} className="btn btn-secondary btn-sm" style={{ color: '#dc2626' }}>Delete</button>
+                            <button onClick={() => handleDeleteTeam(team.team_id, team.team_name_number, team.type)} className="btn btn-secondary btn-sm" style={{ color: '#dc2626' }}>Delete</button>
                           </div>
                         </td>
                       </tr>
@@ -814,14 +828,14 @@ const AdminPage = () => {
                     const incidentNumber = incident?.number;
                     
                     return (
-                      <tr key={asn.assignment_id}>
+                      <tr key={asn.assignment_id || `asn-${index}`}>
                         <td>
-                          <div style={{ fontWeight: 600 }}>{asn.name}</div>
+                          <div style={{ fontWeight: 600 }}>{asn.title}</div>
                           <div style={{ fontSize: '11px', color: '#64748b' }}>
-                            {asn.division ? `Div: ${asn.division}` : 'No Division'}
+                            {asn.segment ? `Seg: ${asn.segment}` : 'No Segment'}
                           </div>
                         </td>
-                        <td>{asn.assignment_type || '—'}</td>
+                        <td>{asn.resource_type || '—'}</td>
                         <td>
                           {incidentName ? (
                             <>
@@ -837,7 +851,7 @@ const AdminPage = () => {
                         </td>
                         <td style={{ textAlign: 'right' }}>
                           <button 
-                            onClick={() => handleDeleteAssignment(asn.assignment_id, asn.title || asn.name)} 
+                            onClick={() => handleDeleteAssignment(asn.assignment_id, asn.title, asn.resource_type)} 
                             className="btn btn-secondary btn-sm" 
                             style={{ color: '#dc2626' }}
                           >
@@ -917,7 +931,7 @@ const AdminPage = () => {
                           </button>
                         ) : (
                           <button 
-                            onClick={() => handleDeleteIncident(inc.incident_id)} 
+                            onClick={() => handleDeleteIncident(inc.incident_id, inc.name)} 
                             className="btn btn-secondary btn-sm"
                             style={{ color: '#dc2626' }}
                           >

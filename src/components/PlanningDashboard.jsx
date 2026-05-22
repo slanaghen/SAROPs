@@ -20,7 +20,7 @@ const PlanningDashboard = ({
   assignments = [], 
   responders = [],
   defaultNewTeamName = '',
-  defaultNewTeamType = 'Ground Search',
+  defaultNewTeamType = 'Ground',
   defaultNewAssignmentDivision = 'A',
   defaultNewAssignmentName = '',
   defaultNewAssignmentType = 'Ground',
@@ -48,6 +48,7 @@ const PlanningDashboard = ({
   const [responderForm, setResponderForm] = useState({});
   const [showMembersModal, setShowMembersModal] = useState(false);
   const [activeTeam, setActiveTeam] = useState(null);
+  const [responderFilter, setResponderFilter] = useState('');
   const [draggedItem, setDraggedItem] = useState(null); // { id, type }
   const [dropTarget, setDropTarget] = useState(null); // { id, type }
 
@@ -89,13 +90,13 @@ const PlanningDashboard = ({
       const assignment = assignments.find(a => a.assignment_id === assignmentId);
 
       if (team && assignment) {
-        handleDragEnd();
+        handleDragEnd(); // Reset drag state
         setLoading(true);
         try {
           if (onTeamAssigned) {
             await onTeamAssigned({ teamId, assignmentId, team, assignment });
           }
-          setSuccessMessage(`Team "${team.team_name_number}" assigned to "${assignment.title || assignment.name}"`);
+          setSuccessMessage(`Team "${team.team_name_number}" assigned to "${assignment.title}"`);
           setTimeout(() => setSuccessMessage(null), 3000);
         } catch (err) {
           setError(err.message || 'Failed to assign team');
@@ -158,8 +159,24 @@ const PlanningDashboard = ({
   // Filter teams to only show those with "Staged" status
   const stagedTeams = teams.filter(t => t.status === 'Staged');
 
+  const isStagedResponder = (responder) => String(responder?.status || '').toLowerCase() === 'staged';
+
   // Available responders for the panel (Staged)
-  const availableRespondersList = responders.filter(r => r.status === 'Staged');
+  const availableRespondersList = useMemo(() => {
+    return responders.filter(r => {
+      if (!isStagedResponder(r)) return false;
+      
+      const term = responderFilter.toLowerCase().trim();
+      if (!term) return true;
+      
+      return (
+        r.name.toLowerCase().includes(term) ||
+        r.identifier.toLowerCase().includes(term) ||
+        (r.agency && r.agency.toLowerCase().includes(term)) ||
+        (r.special_skills && r.special_skills.toLowerCase().includes(term))
+      );
+    });
+  }, [responders, responderFilter]);
 
   // Filter assignments to show unassigned or available assignments
   const availableAssignments = assignments.filter(asn => {
@@ -177,7 +194,7 @@ const PlanningDashboard = ({
 
   // Show responders who are Staged (available) OR already part of the team being edited
   const stagedResponders = responders.filter(r => {
-    const isStaged = r.status === 'Staged';
+    const isStaged = isStagedResponder(r);
     const isCurrentMember = (teamForm.responder_ids || []).includes(r.responder_id);
     const isCurrentLeader = teamForm.leader_responder_id === r.responder_id;
     return isStaged || isCurrentMember || isCurrentLeader;
@@ -206,24 +223,21 @@ const PlanningDashboard = ({
       op_period_id: operationalPeriodId,
       segment: defaultNewAssignmentDivision,
       title: defaultNewAssignmentName,
-      name: defaultNewAssignmentName,
       resource_type: defaultNewAssignmentType,
       team_size: defaultNewAssignmentSize,
       frequency_primary: '',
-      tac_channel: '',
       description: '',
-      description_narrative: '',
-      probabilityOfDetection: '',
       probability_of_detection: null,
-      pod: '',
       debrief_narrative: '',
+      hazards: '',
+      priority: 'Medium',
       status: 'Planned',
     });
     setShowAssignmentForm(true);
   };
 
   const openEditAssignmentForm = (assignment) => {
-    console.log('📝 Opening Assignment Editor for:', assignment.title || assignment.name);
+    console.log('📝 Opening Assignment Editor for:', assignment.title);
     setAssignmentForm({
       ...assignment
     });
@@ -277,14 +291,14 @@ const PlanningDashboard = ({
   };
 
   const handleDeleteAssignment = async (assignment) => {
-    if (!window.confirm(`Are you sure you want to delete assignment "${assignment.title || assignment.name}"? This action cannot be undone.`)) return;
+    if (!window.confirm(`Are you sure you want to delete assignment "${assignment.title}"? This action cannot be undone.`)) return;
 
     try {
       setLoading(true);
       if (deleteAssignment) {
         await deleteAssignment(assignment.assignment_id);
         
-        setSuccessMessage(`Assignment "${assignment.title || assignment.name}" deleted`);
+        setSuccessMessage(`Assignment "${assignment.title}" deleted`);
         setTimeout(() => setSuccessMessage(null), 3000);
       }
     } catch (err) {
@@ -303,6 +317,21 @@ const PlanningDashboard = ({
     try {
       setLoading(true);
       
+      // Auto-generate team name if blank
+      let finalTeamName = formData.team_name_number?.trim();
+      if (!finalTeamName) {
+        const type = formData.type || 'Other';
+        const existingOfSameType = teams.filter(t => t.type === type);
+        let nextNum = existingOfSameType.length + 1;
+        finalTeamName = `${type} ${nextNum}`;
+
+        // Local uniqueness check to avoid immediate collisions
+        while (teams.some(t => t.team_name_number === finalTeamName)) {
+          nextNum++;
+          finalTeamName = `${type} ${nextNum}`;
+        }
+      }
+
       // Ensure leader is included in responder_ids for consistency
       const currentResponders = formData.responder_ids || [];
       const finalResponderIds = (formData.leader_responder_id && !currentResponders.includes(formData.leader_responder_id))
@@ -312,7 +341,7 @@ const PlanningDashboard = ({
       if (formData.team_id && updateTeam) {
         // 1. Update core team details
         await updateTeam(formData.team_id, {
-          team_name_number: formData.team_name_number,
+          team_name_number: finalTeamName,
           type: formData.type,
           status: formData.status,
           leader_responder_id: formData.leader_responder_id,
@@ -336,7 +365,12 @@ const PlanningDashboard = ({
 
         setSuccessMessage('Team updated');
       } else if (createTeam) {
-        await createTeam({ ...formData, responder_ids: finalResponderIds, responder_roles: formData.responder_roles });
+        await createTeam({ 
+          ...formData, 
+          team_name_number: finalTeamName,
+          responder_ids: finalResponderIds, 
+          responder_roles: formData.responder_roles 
+        });
         setSuccessMessage('Team created');
       }
       setShowTeamForm(false);
@@ -360,10 +394,8 @@ const PlanningDashboard = ({
         await updateAssignment(formData.assignment_id, formData);
         setSuccessMessage('Assignment updated');
       } else if (createAssignment) {
-        if (createAssignment) {
-          await createAssignment(formData);
-          setSuccessMessage('Assignment created');
-        }
+        await createAssignment(formData);
+        setSuccessMessage('Assignment created');
       }
       setShowAssignmentForm(false);
       setTimeout(() => setSuccessMessage(null), 3000);
@@ -380,10 +412,25 @@ const PlanningDashboard = ({
   };
 
   const handleSaveResponder = async (formData) => {
+    if (!formData?.responder_id) {
+      setError('Internal Error: Missing responder identifier. Changes cannot be saved.');
+      return;
+    }
+
     try {
       setLoading(true);
       if (updateResponder) {
-        await updateResponder(formData.responder_id, formData);
+        // Cleanse payload to prevent PostgREST errors with invalid columns
+        const { 
+          name, agency, identifier, cell_phone, 
+          access_level, status, special_skills 
+        } = formData;
+
+        await updateResponder(formData.responder_id, {
+          name, agency, identifier, cell_phone, 
+          access_level, status, special_skills
+        });
+
         setSuccessMessage('Responder updated');
       }
       setShowResponderForm(false);
@@ -445,7 +492,7 @@ const PlanningDashboard = ({
   };
 
   return (
-    <div className="planning-dashboard" data-dragging={!!draggedItem}>
+    <div className="planning-dashboard" data-dragging={!!draggedItem} style={{ overflowY: 'auto', maxHeight: '100vh' }}>
       <h1>Planning Dashboard</h1>
 
       {/* Messages */}
@@ -470,11 +517,26 @@ const PlanningDashboard = ({
         </div>
       )}
 
-      <div className="dashboard-container">
+      <div className="dashboard-container" style={{ maxHeight: 'calc(100vh - 160px)', overflowY: 'auto', paddingBottom: '20px' }}>
         {/* Available Responders Section */}
         <div className="section responders-section">
           <div className="section-header">
             <h2>Available Responders ({availableRespondersList.length})</h2>
+          </div>
+
+          <div className="responder-filters" style={{ padding: '0 16px 12px', display: 'flex', gap: '8px' }}>
+            <input 
+              type="text" 
+              placeholder="Search name, ID, agency or skills..." 
+              value={responderFilter}
+              onChange={(e) => setResponderFilter(e.target.value)}
+              style={{ flex: 1, padding: '6px 10px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+            />
+            {responderFilter && (
+              <button className="btn btn-secondary btn-sm" onClick={() => setResponderFilter('')} style={{ fontSize: '10px' }}>
+                Clear
+              </button>
+            )}
           </div>
 
           {availableRespondersList.length === 0 ? (
@@ -522,7 +584,7 @@ const PlanningDashboard = ({
           <div className="section-header">
             <h2>Staged Teams ({stagedTeams.length})</h2> {/* Removed button here */}
             <div>
-              <button className="btn btn-primary btn-sm" onClick={openNewTeamForm}>New Team</button>
+              <button className="btn btn-primary" onClick={openNewTeamForm} style={{ fontSize: '14px' }}>New Team</button>
             </div>
           </div>
 
@@ -588,7 +650,7 @@ const PlanningDashboard = ({
           <div className="section-header">
             <h2>Available Assignments ({availableAssignments.length})</h2>
             <div>
-              <button className="btn btn-primary btn-sm" onClick={openNewAssignmentForm}>New Assignment</button>
+              <button className="btn btn-primary" onClick={openNewAssignmentForm} style={{ fontSize: '14px' }}>New Assignment</button>
             </div>
           </div>
 
@@ -614,18 +676,18 @@ const PlanningDashboard = ({
                   tabIndex={0}
                 >
                   <div className="assignment-header" style={{ gap: '8px', justifyContent: 'flex-start', alignItems: 'center', flexWrap: 'wrap' }}>
-                    <div className="assignment-name clickable-name" style={{ marginRight: '4px' }}>{assignment.title || assignment.name}</div>
-                    {(assignment.resource_type || assignment.assignment_type) && <div className="team-type" style={{ background: '#f1f5f9', color: '#475569' }}>{assignment.resource_type || assignment.assignment_type}</div>}
-                    <span style={{ fontSize: '11px', color: '#64748b' }}>Size: {assignment.team_size ?? assignment.assignment_size}</span>
+                    <div className="assignment-name clickable-name" style={{ marginRight: '4px' }}>{assignment.title}</div>
+                    {assignment.resource_type && <div className="team-type" style={{ background: '#f1f5f9', color: '#475569' }}>{assignment.resource_type}</div>}
+                    <span style={{ fontSize: '11px', color: '#64748b' }}>Size: {assignment.team_size}</span>
                     <div className={`assignment-status ${assignment.status.toLowerCase()}`}>
                       {assignment.status}
                     </div>
                   </div>
 
-                  {(assignment.description || assignment.description_narrative) && (
+                  {assignment.description && (
                     <div className="assignment-details" style={{ marginTop: '4px' }}>
                       <div style={{ fontSize: '12px', color: '#475569', lineHeight: '1.4' }}>
-                        {assignment.description || assignment.description_narrative}
+                        {assignment.description}
                       </div>
                     </div>
                   )}
@@ -689,9 +751,9 @@ const PlanningDashboard = ({
       {/* Members Modal */}
       {showMembersModal && activeTeam && (
         <div className="modal-backdrop">
-          <div className="modal">
+          <div className="modal" style={{ maxHeight: '90vh', overflowY: 'hidden', display: 'flex', flexDirection: 'column' }}>
             <h3>Manage Members — {activeTeam.team_name_number}</h3>
-            <div className="members-list">
+            <div className="members-list" style={{ flex: 1, overflowY: 'auto', paddingRight: '8px', minHeight: '200px' }}>
               {responders.length === 0 ? (
                 <p>No responders available</p>
               ) : (

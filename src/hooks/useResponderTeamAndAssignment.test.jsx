@@ -35,7 +35,7 @@ describe('useResponderTeamAndAssignment Hook', () => {
 
   it('successfully fetches team and assignment for a responder', async () => {
     const mockTeam = { team_id: 't-1', team_name_number: 'Team Alpha' };
-    const mockAssignment = { assignment_id: 'a-1', title: 'Division A', name: 'Division A', team_id: 't-1', segment: 'A', probability_of_detection: null };
+    const mockAssignment = { assignment_id: 'a-1', title: 'Division A', team_id: 't-1', segment: 'A', probability_of_detection: null };
 
     mockSupabase.from.mockImplementation((table) => {
       if (table === 'team_responders') return mockQuery({ 

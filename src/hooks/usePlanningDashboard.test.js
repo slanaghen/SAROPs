@@ -28,36 +28,7 @@ vi.mock('../services/responderService', async (importOriginal) => {
 describe('usePlanningDashboard Hook', () => {
   const opPeriodId = 'op-123';
   
-  // Robust Supabase Mock
-  const createMockQuery = (data, error = null) => {
-    let isSingle = false;
-    const query = {
-      select: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockReturnThis(),
-      match: vi.fn().mockReturnThis(),
-      in: vi.fn().mockReturnThis(),
-      is: vi.fn().mockReturnThis(),
-      insert: vi.fn().mockReturnThis(),
-      update: vi.fn().mockReturnThis(),
-      delete: vi.fn().mockReturnThis(),
-      single: vi.fn().mockImplementation(() => {
-        isSingle = true;
-        return query;
-      }),
-      maybeSingle: vi.fn().mockImplementation(() => {
-        isSingle = true;
-        return query;
-      }),
-      order: vi.fn().mockReturnThis(),
-      then: (onFulfilled, onRejected) => {
-        let resultData = data;
-        if (isSingle && Array.isArray(data)) resultData = data[0];
-        else if (!isSingle && !Array.isArray(data) && data !== null && typeof data === 'object') resultData = [data];
-        return Promise.resolve({ data: resultData, error }).then(onFulfilled, onRejected);
-      },
-    };
-    return query;
-  };
+  const createMockQuery = (data, error = null) => globalThis.createSupabaseQueryMock(data, error);
 
   const mockSupabase = {
     from: vi.fn(),
@@ -69,7 +40,7 @@ describe('usePlanningDashboard Hook', () => {
 
   it('should fetch dashboard data successfully', async () => {
     const mockTeams = [{ team_id: 't1', team_name_number: 'Team 1', op_period_id: opPeriodId, status: 'Staged' }];
-    const mockAsns = [{ assignment_id: 'a1', title: 'Asn A', name: 'Asn A', op_period_id: opPeriodId, team_id: null }];
+    const mockAsns = [{ assignment_id: 'a1', title: 'Asn A', op_period_id: opPeriodId, team_id: null }];
     const mockResponders = [{ responder_id: 'r1', name: 'Steve' }];
 
     mockSupabase.from.mockImplementation((table) => {
@@ -92,10 +63,24 @@ describe('usePlanningDashboard Hook', () => {
   });
 
   it('should handle team creation and logging', async () => {
-    const newTeam = { team_id: 'new-t', team_name_number: 'Team 2', status: 'Staged' };
+    const newTeam = { team_id: 'new-t', team_name_number: 'Team abc', status: 'Staged' };
     
+    // Use createMockQuery as a base to provide thenable behavior and standard chain methods.
+    // This ensures internal list refreshes (fetchDashboardData) resolve with the new team data.
+    const teamsMock = {
+      ...createMockQuery([newTeam]),
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      insert: vi.fn().mockReturnThis(),
+      // maybeSingle resolves to null for the initial uniqueness check, then to the data for the insert result.
+      maybeSingle: vi.fn()
+        .mockResolvedValueOnce({ data: null, error: null })
+        .mockResolvedValue({ data: newTeam, error: null }),
+      single: vi.fn().mockResolvedValue({ data: newTeam, error: null }),
+    };
+
     mockSupabase.from.mockImplementation((table) => {
-      if (table === 'teams') return createMockQuery(newTeam);
+      if (table === 'teams') return teamsMock;
       if (table === 'action_logs') return createMockQuery({});
       return createMockQuery([]);
     });
@@ -106,7 +91,7 @@ describe('usePlanningDashboard Hook', () => {
     await act(async () => {
       created = await result.current.createTeam({ 
         op_period_id: opPeriodId, 
-        team_name_number: 'Team 2' 
+        team_name_number: 'Team xyz' 
       });
     });
 
@@ -118,7 +103,7 @@ describe('usePlanningDashboard Hook', () => {
   it('should handle assignment of a team to an assignment', async () => {
     // Setup initial state with a team and an assignment
     const mockTeams = [{ team_id: 't1', team_name_number: 'Team 1', status: 'Staged' }];
-    const mockAsns = [{ assignment_id: 'a1', title: 'Asn A', name: 'Asn A', team_id: null, status: 'Planned' }];
+    const mockAsns = [{ assignment_id: 'a1', title: 'Asn A', team_id: null, status: 'Planned' }];
     
     mockSupabase.from.mockImplementation((table) => {
       if (table === 'assignments') return createMockQuery({ ...mockAsns[0], team_id: 't1', status: 'Assigned' });
@@ -198,7 +183,7 @@ describe('usePlanningDashboard Hook', () => {
   });
 
   it('should create and update assignments', async () => {
-    const asn = { assignment_id: 'a1', title: 'Area 1', name: 'Area 1' };
+    const asn = { assignment_id: 'a1', title: 'Area 1' };
     mockSupabase.from.mockImplementation((table) => {
       if (table === 'assignments') return createMockQuery(asn);
       if (table === 'action_logs') return createMockQuery({});
@@ -212,8 +197,8 @@ describe('usePlanningDashboard Hook', () => {
     });
     
     expect(result.current.assignments).toContainEqual(expect.objectContaining(asn));
-
-    const updates = { name: 'Area 1 Updated' };
+    
+    const updates = { title: 'Area 1 Updated' };
     mockSupabase.from.mockImplementation((table) => {
       if (table === 'assignments') return createMockQuery({ ...asn, ...updates });
       if (table === 'action_logs') return createMockQuery({});
@@ -290,5 +275,19 @@ describe('usePlanningDashboard Hook', () => {
     expect(result.current.stats.assignments.deployed).toBe(1);
     expect(result.current.stats.teams.staged).toBe(1);
     expect(result.current.stats.assignments.complete).toBe(1);
+  });
+
+  it('should handle normalization of assignments with missing titles or null values', async () => {
+    const brokenAsn = [{ assignment_id: 'a1', title: null, name: null, segment: null }];
+    mockSupabase.from.mockImplementation((table) => {
+      if (table === 'assignments') return createMockQuery(brokenAsn);
+      return createMockQuery([]);
+    });
+
+    const { result } = renderHook(() => usePlanningDashboard(mockSupabase, opPeriodId));
+    await act(async () => { await result.current.fetchDashboardData(); });
+
+    expect(result.current.assignments[0].title).toBe('Untitled Assignment');
+    expect(result.current.assignments[0].segment).toBe('');
   });
 });

@@ -25,10 +25,10 @@ CREATE TYPE team_status AS ENUM (
 DROP TYPE IF EXISTS team_type CASCADE;
 CREATE TYPE team_type AS ENUM (
   'Hasty',
-  'Ground Search',
-  'Vehicle Search',
-  'Aerial Search',
-  'Water Search',
+  'Ground',
+  'Vehicle',
+  'Aerial',
+  'Water',
   'Tracking',
   'Dog',
   'Avalanche',
@@ -160,6 +160,7 @@ CREATE TABLE assignments (
   team_size INTEGER,
   frequency_primary TEXT,
   description TEXT,
+  debrief_narrative TEXT,
   probability_of_detection INTEGER,
   -- Additional metadata from SARTopo
   team_name TEXT,
@@ -173,7 +174,6 @@ CREATE TABLE assignments (
   color TEXT,
   stroke TEXT,
   fill TEXT,
-  updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   is_orphaned BOOLEAN NOT NULL DEFAULT FALSE,
   team_id UUID REFERENCES teams(team_id) ON DELETE SET NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -280,8 +280,6 @@ CREATE INDEX idx_responders_access_level ON responders(access_level);
 
 CREATE INDEX idx_action_logs_incident_id ON action_logs(incident_id);
 
-CREATE INDEX idx_team_messages_team_id ON team_messages(team_id);
-
 -- ============================================================================
 -- VIEWS
 -- ============================================================================
@@ -315,24 +313,18 @@ FROM teams t;
 
 -- View: incident_summary
 -- Summary view for incident dashboard
-CREATE VIEW incident_summary AS
+CREATE OR REPLACE VIEW incident_summary AS
 SELECT
   i.incident_id,
   i.name,
   i.number,
   i.start_datetime,
   i.end_datetime,
-  COUNT(DISTINCT op.op_period_id) as operational_period_count,
-  COUNT(DISTINCT t.team_id) as team_count,
-  COUNT(DISTINCT r.responder_id) as responder_count,
-  COUNT(DISTINCT c.clue_id) as clue_count
-FROM incidents i
-LEFT JOIN operational_periods op ON i.incident_id = op.incident_id
-LEFT JOIN teams t ON op.op_period_id = t.op_period_id
-LEFT JOIN team_responders tr ON t.team_id = tr.team_id
-LEFT JOIN responders r ON tr.responder_id = r.responder_id
-LEFT JOIN clues c ON i.incident_id = c.incident_id
-GROUP BY i.incident_id, i.name, i.number, i.start_datetime, i.end_datetime;
+  (SELECT COUNT(*) FROM operational_periods op WHERE op.incident_id = i.incident_id) as operational_period_count,
+  (SELECT COUNT(DISTINCT t.team_id) FROM teams t JOIN operational_periods op ON t.op_period_id = op.op_period_id WHERE op.incident_id = i.incident_id) as team_count,
+  (SELECT COUNT(*) FROM responders r WHERE r.incident_id = i.incident_id) as responder_count,
+  (SELECT COUNT(*) FROM clues c WHERE c.incident_id = i.incident_id) as clue_count
+FROM incidents i;
 
 -- ============================================================================
 -- TRIGGERS (Optional - for audit trail and updated_at timestamps)
@@ -351,10 +343,21 @@ $func$ LANGUAGE plpgsql;
 -- SECURITY DEFINER allows this to bypass RLS during incident initialization.
 CREATE OR REPLACE FUNCTION create_staff_team_for_op()
 RETURNS TRIGGER AS $func$
+DECLARE
+    _team_id UUID;
 BEGIN
+    -- Create the Staff team and capture the ID
     INSERT INTO teams (op_period_id, team_name_number, sartopo_color_hex, type, status)
     VALUES (NEW.op_period_id, 'Staff', '#0000FF', 'Staff', 'Assigned')
-    ON CONFLICT DO NOTHING;
+    ON CONFLICT DO NOTHING
+    RETURNING team_id INTO _team_id;
+
+    -- Automatically create a "Command Staff" assignment and link it to the staff team
+    IF _team_id IS NOT NULL THEN
+        INSERT INTO assignments (op_period_id, title, resource_type, status, team_id)
+        VALUES (NEW.op_period_id, 'Command Staff', 'Staff', 'Assigned', _team_id);
+    END IF;
+
     RETURN NEW;
 END;
 $func$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -466,11 +469,29 @@ CREATE TRIGGER sync_access_level_on_team_responders
 AFTER INSERT OR UPDATE OR DELETE ON team_responders
 FOR EACH ROW EXECUTE FUNCTION sync_responder_access_level();
 
--- Trigger for ics_assignments changes (replaces old trigger)
-DROP TRIGGER IF EXISTS update_responders_access_level_on_ics_assign ON ics_assignments;
-CREATE TRIGGER sync_access_level_on_ics_assignments
-AFTER INSERT OR UPDATE OR DELETE ON ics_assignments
-FOR EACH ROW EXECUTE FUNCTION sync_responder_access_level();
+-- Function to synchronize assignment team_name when team_id changes
+CREATE OR REPLACE FUNCTION sync_assignment_team_name()
+RETURNS TRIGGER AS $func$
+BEGIN
+    -- On INSERT, check if team_id is provided. On UPDATE, check if it changed.
+    IF (TG_OP = 'INSERT' AND NEW.team_id IS NOT NULL) OR 
+       (TG_OP = 'UPDATE' AND NEW.team_id IS DISTINCT FROM OLD.team_id) 
+    THEN
+        IF NEW.team_id IS NULL THEN
+            NEW.team_name := NULL;
+        ELSE
+            SELECT team_name_number INTO NEW.team_name
+            FROM teams
+            WHERE team_id = NEW.team_id;
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$func$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE TRIGGER trigger_sync_team_name
+BEFORE INSERT OR UPDATE OF team_id ON assignments
+FOR EACH ROW EXECUTE FUNCTION sync_assignment_team_name();
 
 -- ============================================================================
 -- ROW LEVEL SECURITY (RLS) POLICIES
@@ -497,8 +518,49 @@ $func$ LANGUAGE sql STABLE;
 -- Helper function to check if the current user is an admin or command staff
 CREATE OR REPLACE FUNCTION is_admin_or_command_staff()
 RETURNS BOOLEAN AS $func$
-  SELECT (auth.jwt() ->> 'is_anonymous')::boolean IS FALSE;
+  SELECT check_is_operational_staff();
 $func$ LANGUAGE sql STABLE;
+
+-- Helper to safely get the responder_id for the current session
+-- SECURITY DEFINER breaks RLS recursion
+CREATE OR REPLACE FUNCTION get_my_responder_id() 
+RETURNS UUID AS $func$
+  SELECT responder_id FROM responders
+  WHERE auth_uid = auth.uid() 
+  ORDER BY checkin_datetime DESC LIMIT 1;
+$func$ LANGUAGE sql STABLE SECURITY DEFINER;
+
+-- Helper to check if user is the leader of a specific team
+CREATE OR REPLACE FUNCTION is_leader_of_team(_team_id UUID)
+RETURNS BOOLEAN AS $func$
+  SELECT EXISTS (
+    SELECT 1 FROM teams 
+    WHERE team_id = _team_id 
+      AND leader_responder_id = get_my_responder_id()
+  );
+$func$ LANGUAGE sql STABLE SECURITY DEFINER;
+
+-- Helper to check if user is the leader of the team assigned to an assignment
+CREATE OR REPLACE FUNCTION is_leader_of_assignment(_assignment_id UUID)
+RETURNS BOOLEAN AS $func$
+  SELECT EXISTS (
+    SELECT 1 FROM assignments a
+    JOIN teams t ON a.team_id = t.team_id
+    WHERE a.assignment_id = _assignment_id 
+      AND t.leader_responder_id = get_my_responder_id()
+  );
+$func$ LANGUAGE sql STABLE SECURITY DEFINER;
+
+-- Helper to check if user is the leader of a team that a specific responder belongs to
+CREATE OR REPLACE FUNCTION is_leader_of_member(_member_responder_id UUID)
+RETURNS BOOLEAN AS $func$
+  SELECT EXISTS (
+    SELECT 1 FROM team_responders tr
+    JOIN teams t ON tr.team_id = t.team_id
+    WHERE tr.responder_id = _member_responder_id 
+      AND t.leader_responder_id = get_my_responder_id()
+  );
+$func$ LANGUAGE sql STABLE SECURITY DEFINER;
 
 -- NEW HELPER: Check if user is staff based on their actual Responder record
 -- SECURITY DEFINER is required to prevent recursion in RLS
@@ -506,12 +568,49 @@ CREATE OR REPLACE FUNCTION check_is_operational_staff()
 RETURNS BOOLEAN AS $func$
 BEGIN
   RETURN (
-    (auth.jwt() ->> 'is_anonymous')::boolean IS FALSE -- True Admin
+    COALESCE((auth.jwt() ->> 'is_anonymous')::boolean, false) IS FALSE -- True Admin (Email login)
     OR EXISTS (
       SELECT 1 FROM responders 
       WHERE auth_uid = auth.uid() 
       AND access_level IN ('command staff', 'admin')
     )
+  );
+END;
+$func$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
+
+-- Helper to check if an incident is active
+CREATE OR REPLACE FUNCTION is_incident_active(_incident_id TEXT)
+RETURNS BOOLEAN AS $func$
+BEGIN
+  RETURN EXISTS (
+    SELECT 1 FROM incidents i
+    WHERE i.incident_id = _incident_id
+      AND i.end_datetime IS NULL
+  );
+END;
+$func$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
+
+-- Helper to check if an operational period belongs to an active incident
+CREATE OR REPLACE FUNCTION is_active_op_period(_op_period_id UUID)
+RETURNS BOOLEAN AS $func$
+BEGIN
+  RETURN EXISTS (
+    SELECT 1 FROM operational_periods op
+    JOIN incidents i ON op.incident_id = i.incident_id
+    WHERE op.op_period_id = _op_period_id
+      AND i.end_datetime IS NULL
+  );
+END;
+$func$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
+
+-- Helper to check if a team belongs to an active operational period
+CREATE OR REPLACE FUNCTION is_team_active(_team_id UUID)
+RETURNS BOOLEAN AS $func$
+BEGIN
+  RETURN EXISTS (
+    SELECT 1 FROM teams t
+    WHERE t.team_id = _team_id
+      AND is_active_op_period(t.op_period_id)
   );
 END;
 $func$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
@@ -536,16 +635,18 @@ CREATE POLICY "Allow anonymous to start an incident" ON incidents
 
 -- Policies for `responders`
 CREATE POLICY "Allow anonymous to insert their own record" ON responders
-  FOR INSERT TO authenticated WITH CHECK (auth_uid = auth.uid() AND is_anonymous_responder());
-CREATE POLICY "Allow anonymous to view their own record" ON responders
-  FOR SELECT TO authenticated USING (auth_uid = auth.uid() AND is_anonymous_responder());
+  FOR INSERT TO authenticated WITH CHECK (auth_uid = auth.uid());
+CREATE POLICY "Allow authenticated to view active responders" ON responders
+  FOR SELECT TO authenticated USING (incident_id IN (SELECT incident_id FROM incidents WHERE end_datetime IS NULL));
 CREATE POLICY "Allow anonymous to update their own record" ON responders
-  FOR UPDATE TO authenticated USING (auth_uid = auth.uid() AND is_anonymous_responder()) WITH CHECK (auth_uid = auth.uid() AND is_anonymous_responder());
--- REVISED: Admins/Staff can view all responders (no need to filter by incident_id for them, as they are staff)
-CREATE POLICY "Admins/Staff can view all responders" ON responders
-  FOR SELECT TO authenticated USING (is_admin_or_command_staff());
+  FOR UPDATE TO authenticated USING (auth_uid = auth.uid()) WITH CHECK (auth_uid = auth.uid());
+-- Allow Team Leaders to update their members' status (via helper)
+CREATE POLICY "Allow team leaders to update their members" ON responders
+  FOR UPDATE TO authenticated
+  USING (is_leader_of_member(responder_id) OR check_is_operational_staff())
+  WITH CHECK (is_leader_of_member(responder_id) OR check_is_operational_staff());
 CREATE POLICY "Admins/Staff can manage all responders" ON responders
-  FOR ALL TO authenticated USING (is_admin_or_command_staff()) WITH CHECK (is_admin_or_command_staff());
+  FOR ALL TO authenticated USING (check_is_operational_staff()) WITH CHECK (check_is_operational_staff());
 
 -- Policies for `operational_periods`
 -- REVISED: Allow any authenticated user to view operational periods if their parent incident is active.
@@ -561,61 +662,78 @@ CREATE POLICY "Allow anonymous to create operational periods" ON operational_per
 -- REVISED: Allow any authenticated user to view teams if their parent incident is active.
 -- This allows responders to see teams during check-in and breaks recursion.
 CREATE POLICY "Allow authenticated to view active teams" ON teams
-  FOR SELECT TO authenticated USING (op_period_id IN (SELECT op_period_id FROM operational_periods WHERE incident_id IN (SELECT incident_id FROM incidents WHERE end_datetime IS NULL)));
+  FOR SELECT TO authenticated USING (is_active_op_period(op_period_id));
 CREATE POLICY "Admins/Staff can manage all teams" ON teams
   FOR ALL TO authenticated USING (check_is_operational_staff()) WITH CHECK (check_is_operational_staff());
+-- Allow Team Leaders to update their own team's status and last_par_check
+CREATE POLICY "Allow team leaders to update their team" ON teams
+  FOR UPDATE TO authenticated
+  USING (is_leader_of_team(team_id) OR check_is_operational_staff())
+  WITH CHECK (is_leader_of_team(team_id) OR check_is_operational_staff());
+CREATE POLICY "Allow all authenticated to create teams in active incidents" ON teams
+  FOR INSERT TO authenticated 
+  WITH CHECK (is_active_op_period(op_period_id));
 -- Allow anonymous to update Staff team leader if they are setting themselves as leader
 CREATE POLICY "Allow anonymous to update Staff team leader" ON teams
   FOR UPDATE TO authenticated
   USING (
     is_anonymous_responder() AND
     type = 'Staff' AND
-    (leader_responder_id IS NULL OR leader_responder_id IN (SELECT responder_id FROM responders WHERE auth_uid = auth.uid()))
+    (leader_responder_id IS NULL OR EXISTS (SELECT 1 FROM responders r WHERE r.responder_id = leader_responder_id AND r.auth_uid = auth.uid()))
   )
   WITH CHECK (
     is_anonymous_responder() AND
     type = 'Staff' AND
-    leader_responder_id = (SELECT responder_id FROM responders WHERE auth_uid = auth.uid())
+    EXISTS (SELECT 1 FROM responders r WHERE r.responder_id = leader_responder_id AND r.auth_uid = auth.uid())
   );
 
 -- Policies for `assignments`
 -- REVISED: Allow any authenticated user to view assignments if their parent incident is active.
 CREATE POLICY "Allow authenticated to view active assignments" ON assignments
-  FOR SELECT TO authenticated USING (op_period_id IN (SELECT op_period_id FROM operational_periods WHERE incident_id IN (SELECT incident_id FROM incidents WHERE end_datetime IS NULL)));
+  FOR SELECT TO authenticated USING (is_active_op_period(op_period_id));
 CREATE POLICY "Admins/Staff can manage all assignments" ON assignments
   FOR ALL TO authenticated USING (check_is_operational_staff()) WITH CHECK (check_is_operational_staff());
+-- Allow Team Leaders to update their assigned assignment status
+CREATE POLICY "Allow team leaders to update their assignment" ON assignments
+  FOR UPDATE TO authenticated
+  USING (is_leader_of_assignment(assignment_id) OR check_is_operational_staff())
+  WITH CHECK (team_id IS NULL OR is_leader_of_team(team_id) OR check_is_operational_staff());
+CREATE POLICY "Allow all authenticated to create assignments in active incidents" ON assignments
+  FOR INSERT TO authenticated 
+  WITH CHECK (is_active_op_period(op_period_id));
 
 -- Policies for `responder_team_history`
 CREATE POLICY "Allow authenticated to view their own team history" ON responder_team_history
   FOR SELECT TO authenticated USING (responder_id IN (SELECT responder_id FROM responders WHERE auth_uid = auth.uid()));
--- Allow anonymous to insert their own record into team_responders for a Staff team
-CREATE POLICY "Allow anonymous to attach to Staff team" ON team_responders
+
+CREATE POLICY "Allow all authenticated to manage memberships in active incidents" ON team_responders
   FOR INSERT TO authenticated
-  WITH CHECK (
-    is_anonymous_responder() AND
-    responder_id = (SELECT responder_id FROM responders WHERE auth_uid = auth.uid()) AND
-    team_id IN (SELECT team_id FROM teams WHERE type = 'Staff')
-  );
+  WITH CHECK (is_team_active(team_id));
 CREATE POLICY "Admins/Staff can manage all team history" ON responder_team_history
-  FOR ALL TO authenticated USING (is_admin_or_command_staff()) WITH CHECK (is_admin_or_command_staff());
+  FOR ALL TO authenticated USING (check_is_operational_staff()) WITH CHECK (check_is_operational_staff());
 
 -- Policies for `clues`
 CREATE POLICY "Allow authenticated to view clues in their incident" ON clues
   FOR SELECT TO authenticated USING (incident_id IN (SELECT incident_id FROM responders WHERE auth_uid = auth.uid()));
 CREATE POLICY "Admins/Staff can manage all clues" ON clues
-  FOR ALL TO authenticated USING (is_admin_or_command_staff()) WITH CHECK (is_admin_or_command_staff());
+  FOR ALL TO authenticated USING (check_is_operational_staff()) WITH CHECK (check_is_operational_staff());
+CREATE POLICY "Allow anonymous to insert clues" ON clues
+  FOR INSERT TO authenticated WITH CHECK (is_anonymous_responder());
 
 -- Policies for `team_responders` (junction table)
-CREATE POLICY "Allow authenticated to view their team membership" ON team_responders
-  FOR SELECT TO authenticated USING (responder_id IN (SELECT responder_id FROM responders WHERE auth_uid = auth.uid()));
+CREATE POLICY "Allow authenticated to view active team memberships" ON team_responders
+  FOR SELECT TO authenticated USING (is_team_active(team_id));
 CREATE POLICY "Admins/Staff can manage all team memberships" ON team_responders
-  FOR ALL TO authenticated USING (is_admin_or_command_staff()) WITH CHECK (is_admin_or_command_staff());
+  FOR ALL TO authenticated USING (check_is_operational_staff()) WITH CHECK (check_is_operational_staff());
 
 -- Policies for `action_logs`
 CREATE POLICY "Allow authenticated to view action logs in their incident" ON action_logs
   FOR SELECT TO authenticated USING (incident_id IN (SELECT incident_id FROM responders WHERE auth_uid = auth.uid()));
 CREATE POLICY "Admins/Staff can manage all action logs" ON action_logs
-  FOR ALL TO authenticated USING (is_admin_or_command_staff()) WITH CHECK (is_admin_or_command_staff());
+  FOR ALL TO authenticated USING (check_is_operational_staff()) WITH CHECK (check_is_operational_staff());
+CREATE POLICY "Allow all authenticated to record action logs in active incidents" ON action_logs
+  FOR INSERT TO authenticated 
+  WITH CHECK (is_incident_active(incident_id));
 
 -- Policies for `team_messages`
 CREATE POLICY "Allow authenticated to view messages for their team" ON team_messages
@@ -623,4 +741,4 @@ CREATE POLICY "Allow authenticated to view messages for their team" ON team_mess
 CREATE POLICY "Allow authenticated to insert messages for their team" ON team_messages
   FOR INSERT TO authenticated WITH CHECK (team_id IN (SELECT team_id FROM team_responders WHERE responder_id IN (SELECT responder_id FROM responders WHERE auth_uid = auth.uid())));
 CREATE POLICY "Admins/Staff can manage all team messages" ON team_messages
-  FOR ALL TO authenticated USING (is_admin_or_command_staff()) WITH CHECK (is_admin_or_command_staff());
+  FOR ALL TO authenticated USING (check_is_operational_staff()) WITH CHECK (check_is_operational_staff());

@@ -8,8 +8,8 @@ import { useIncident } from '../context/IncidentContext';
  * Moving this out of the JSX makes the component more extensible.
  */
 const TEAM_TYPES = [
-  'Hasty', 'Ground Search', 'Vehicle Search', 'Aerial Search', 
-  'Water Search', 'Tracking', 'Dog', 'Avalanche', 
+  'Hasty', 'Ground', 'Vehicle', 'Aerial', 
+  'Water', 'Tracking', 'Dog', 'Avalanche', 
   'Helicopter', 'Medical', 'Other'
 ];
 
@@ -34,19 +34,40 @@ const TeamFormModal = ({
   const { responderName, user } = useIncident();
   const staffName = responderName || user?.email || 'Operations';
 
-  // Initialize roles from current responders
-  const initialRoles = {};
-  if (initialData.current_responders) {
-    initialData.current_responders.forEach(r => {
-      initialRoles[r.responder_id] = r.role || '';
-    });
-  }
+  /**
+   * Normalizes team type to handle legacy "Search" suffix during transitions.
+   */
+  const normalizeType = (type) => {
+    if (!type) return 'Ground';
+    const mapping = {
+      'Ground Search': 'Ground',
+      'Vehicle Search': 'Vehicle',
+      'Water Search': 'Water',
+      'Aerial Search': 'Aerial'
+    };
+    return mapping[type] || type;
+  };
 
-  const [teamForm, setTeamForm] = useState({
-    ...initialData,
-    equipment: Array.isArray(initialData.equipment) ? initialData.equipment.join(', ') : (initialData.equipment || ''),
-    responder_roles: initialRoles
-  });
+  const getInitialState = (data) => {
+    const roles = { ...(data.responder_roles || {}) };
+    if (data.current_responders) {
+      data.current_responders.forEach(r => {
+        roles[r.responder_id] = r.role || '';
+      });
+    }
+    return {
+      ...data,
+      type: normalizeType(data.type),
+      equipment: Array.isArray(data.equipment) ? data.equipment.join(', ') : (data.equipment || ''),
+      responder_roles: roles
+    };
+  };
+
+  const [teamForm, setTeamForm] = useState(() => getInitialState(initialData));
+
+  useEffect(() => {
+    setTeamForm(getInitialState(initialData));
+  }, [initialData]);
 
   const [messages, setMessages] = useState([]);
   const [messageText, setMessageText] = useState('');
@@ -101,6 +122,8 @@ const TeamFormModal = ({
 
   // Only staged responders (unassigned) or responders already on this team should be available.
   // This prevents assigning a responder to multiple teams simultaneously.
+  const isStagedResponder = (responder) => String(responder?.status || '').toLowerCase() === 'staged';
+
   const availableResponders = useMemo(() => {
     const initialMemberIds = new Set([
       ...(initialData.responder_ids || []),
@@ -109,7 +132,7 @@ const TeamFormModal = ({
     ].filter(Boolean));
 
     return responders.filter(r => 
-      r.status === 'Staged' || initialMemberIds.has(r.responder_id)
+      isStagedResponder(r) || initialMemberIds.has(r.responder_id)
     );
   }, [responders, initialData]);
 
@@ -296,7 +319,7 @@ const TeamFormModal = ({
                     <div style={{ fontWeight: 600 }}>{r.name}</div>
                     <div style={{ opacity: 0.7, fontSize: '10px' }}>
                       {r.agency} {r.special_skills ? `| ${r.special_skills}` : ''}
-                    </div>
+                    </div> 
                   </div>
                 ))}
                 {availableResponders.filter(r => !(teamForm.responder_ids || []).includes(r.responder_id)).length === 0 && (

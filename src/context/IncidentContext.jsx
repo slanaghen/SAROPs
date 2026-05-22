@@ -4,94 +4,42 @@ const IncidentContext = createContext();
 
 const STORAGE_KEY = 'sarops_incident_session';
 
-export const IncidentProvider = ({ children }) => {
-  // Initialize state from localStorage if available
-  const [isActive, setIsActive] = useState(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (!saved) return false;
-    try {
-      const parsed = JSON.parse(saved);
-      return !!(parsed && parsed.isActive);
-    } catch { return false; }
-  });
+/**
+ * Helper to retrieve and validate state from local storage
+ */
+const getSavedState = (key, defaultValue) => {
+  const saved = localStorage.getItem(STORAGE_KEY);
+  if (!saved) return defaultValue;
+  try {
+    const parsed = JSON.parse(saved);
+    return parsed[key] !== undefined ? parsed[key] : defaultValue;
+  } catch {
+    return defaultValue;
+  }
+};
 
+export const IncidentProvider = ({ children }) => {
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-  const [incidentId, setIncidentId] = useState(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (!saved) return null;
-    try {
-      const parsed = JSON.parse(saved);
-      const id = parsed?.incidentId;
-      return id || null; // Incident IDs are now incident numbers (strings), not UUIDs
-    } catch { return null; }
-  });
+  // Unified State Initialization
+  const [isActive, setIsActive] = useState(() => getSavedState('isActive', false));
+  const [incidentId, setIncidentId] = useState(() => getSavedState('incidentId', null));
+  const [responderName, setResponderName] = useState(() => getSavedState('responderName', ''));
+  const [responderStatus, setResponderStatus] = useState(() => getSavedState('responderStatus', ''));
+  const [accessLevel, setAccessLevel] = useState(() => getSavedState('accessLevel', ''));
+  const [currentTeamStatus, setCurrentTeamStatus] = useState(() => getSavedState('currentTeamStatus', null));
+  const [currentAssignmentStatus, setCurrentAssignmentStatus] = useState(() => getSavedState('currentAssignmentStatus', null));
+  const [isAdmin, setIsAdmin] = useState(() => getSavedState('isAdmin', false));
+  
   const [responderId, setResponderId] = useState(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (!saved) return null;
-    try {
-      const parsed = JSON.parse(saved);
-      const rid = parsed?.responderId;
-      return (rid && uuidRegex.test(rid)) ? rid : null;
-    } catch { return null; }
+    const rid = getSavedState('responderId', null);
+    return (rid && uuidRegex.test(rid)) ? rid : null;
   });
 
-  const [responderName, setResponderName] = useState(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (!saved) return '';
-      const parsed = JSON.parse(saved);
-      return parsed && typeof parsed === 'object' ? parsed.responderName || '' : '';
-    } catch { return ''; }
-  });
-  const [responderStatus, setResponderStatus] = useState(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (!saved) return '';
-      const parsed = JSON.parse(saved);
-      return parsed && typeof parsed === 'object' ? parsed.responderStatus || '' : '';
-    } catch { return ''; }
-  });
-  const [accessLevel, setAccessLevel] = useState(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (!saved) return '';
-      const parsed = JSON.parse(saved);
-      return parsed && typeof parsed === 'object' ? parsed.accessLevel || '' : '';
-    } catch { return ''; }
-  });
-  const [currentTeamStatus, setCurrentTeamStatus] = useState(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (!saved) return null;
-      const parsed = JSON.parse(saved);
-      return parsed && typeof parsed === 'object' ? parsed.currentTeamStatus || null : null;
-    } catch { return null; }
-  });
-  const [currentAssignmentStatus, setCurrentAssignmentStatus] = useState(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (!saved) return null;
-      const parsed = JSON.parse(saved);
-      return parsed && typeof parsed === 'object' ? parsed.currentAssignmentStatus || null : null;
-    } catch { return null; }
-  });
-  const [isAdmin, setIsAdmin] = useState(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (!saved) return false;
-    try { return !!JSON.parse(saved).isAdmin; } catch { return false; }
-  });
   const [incidentData, setIncidentData] = useState(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    const defaultData = { name: '', opNumber: '', opPeriodId: '' };
-    if (!saved) return defaultData;
-    try {
-      const parsed = JSON.parse(saved);
-      const data = parsed?.incidentData || defaultData;
-      // Ensure opPeriodId is a UUID or reset it
-      if (data.opPeriodId && !uuidRegex.test(data.opPeriodId)) data.opPeriodId = '';
-      return data;
-    } catch { return defaultData; }
+    const data = getSavedState('incidentData', { name: '', opNumber: '', opPeriodId: '' });
+    if (data.opPeriodId && !uuidRegex.test(data.opPeriodId)) data.opPeriodId = '';
+    return data;
   });
 
   // Persist state to localStorage whenever any value changes

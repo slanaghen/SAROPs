@@ -32,10 +32,13 @@ const Navigation = () => {
           Incident
         </Link>
         <Link to="/ics" className={`nav-tab ${path === '/ics' ? 'active' : ''}`}>
-          ICS Organization Chart
+          ICS Chart
         </Link>
         <Link to="/qrcodes" className={`nav-tab ${path === '/qrcodes' ? 'active' : ''}`}>
           QR Codes
+        </Link>
+        <Link to="/sartopo" className={`nav-tab ${path === '/sartopo' ? 'active' : ''}`}>
+          SARTopo Data
         </Link>
         <Link to="/admin" className={`nav-tab ${path === '/admin' ? 'active' : ''}`}>
           Admin

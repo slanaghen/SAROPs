@@ -26,7 +26,7 @@ const ResponderFormModal = ({
   loading = false,
   error = null
 }) => {
-  const { setAccessLevel: setContextAccessLevel } = useIncident();
+  const { setAccessLevel: setContextAccessLevel, responderId } = useIncident();
   const [formData, setFormData] = useState(initialData);
 
   useEffect(() => {
@@ -38,24 +38,25 @@ const ResponderFormModal = ({
     const name = target.name;
     let processedValue;
 
-    if (target instanceof HTMLSelectElement && target.multiple) {
-      processedValue = Array.from(target.selectedOptions).map(opt => opt.value).filter(v => v !== '').join(', ');
-      setFormData(prev => ({
-        ...prev,
-        [name]: processedValue,
-      }));
+    if (target.type === 'select-multiple') {
+      const select = target;
+      processedValue = Array.from(select.selectedOptions)
+        .map(opt => opt.value)
+        .filter(v => v !== '')
+        .join(', ');
     }
-    else { // This else block was missing, causing the subsequent `if` to be outside the function
+    else {
       const { value, type, checked } = target;
       processedValue = type === 'checkbox' ? checked : value;
-      setFormData(prev => ({
-        ...prev,
-        [name]: processedValue,
-      }));
     }
 
-    // This part should be after setFormData, within the function
-    if (name === 'access_level' && formData.responder_id === initialData.responder_id) {
+    setFormData(prev => ({
+      ...prev,
+      [name]: processedValue,
+    }));
+
+    // Update context if editing current responder session
+    if (name === 'access_level' && initialData.responder_id === responderId) {
       setContextAccessLevel(processedValue); // Update context if editing current responder
     }
   };
@@ -85,61 +86,63 @@ const ResponderFormModal = ({
     >
       {error && <div className="alert alert-error" style={{ marginBottom: '16px' }}>{error}</div>}
 
-      <div className="form-row">
-        <label htmlFor="res_name">Full Name</label>
-        <input id="res_name" name="name" value={formData.name || ''} onChange={handleInputChange} required />
-      </div>
+      <div className="modal-scroll-wrapper" style={{ maxHeight: '65vh', overflowY: 'auto', paddingRight: '8px' }}>
+        <div className="form-row">
+          <label htmlFor="res_name">Full Name</label>
+          <input id="res_name" name="name" value={formData.name || ''} onChange={handleInputChange} required />
+        </div>
 
-      <div className="form-row">
-        <label htmlFor="res_agency">Agency</label>
-        <input id="res_agency" name="agency" value={formData.agency || ''} onChange={handleInputChange} />
-      </div>
+        <div className="form-row">
+          <label htmlFor="res_agency">Agency</label>
+          <input id="res_agency" name="agency" value={formData.agency || ''} onChange={handleInputChange} />
+        </div>
 
-      <div className="form-row">
-        <label htmlFor="res_id">Identifier</label>
-        <input id="res_id" name="identifier" value={formData.identifier || ''} onChange={handleInputChange} />
-      </div>
+        <div className="form-row">
+          <label htmlFor="res_id">Identifier</label>
+          <input id="res_id" name="identifier" value={formData.identifier || ''} onChange={handleInputChange} />
+        </div>
 
-      <div className="form-row">
-        <label htmlFor="res_phone">Cell Phone</label>
-        <input id="res_phone" name="cell_phone" value={formData.cell_phone || ''} onChange={handleInputChange} />
-      </div>
+        <div className="form-row">
+          <label htmlFor="res_phone">Cell Phone</label>
+          <input id="res_phone" name="cell_phone" value={formData.cell_phone || ''} onChange={handleInputChange} />
+        </div>
 
-      <div className="form-row">
-        <label htmlFor="res_level">Access Level</label>
-        <select
-          id="res_level"
-          name="access_level"
-          value={formData.access_level || 'responder'}
-          onChange={handleInputChange}
-          disabled={loading}
-        >
-          {ACCESS_LEVELS.map(level => (
-            <option key={level} value={level}>{level.charAt(0).toUpperCase() + level.slice(1)}</option>
-          ))}
-        </select>
-      </div>
+        <div className="form-row">
+          <label htmlFor="res_level">Access Level</label>
+          <select
+            id="res_level"
+            name="access_level"
+            value={formData.access_level || 'responder'}
+            onChange={handleInputChange}
+            disabled={loading}
+          >
+            {ACCESS_LEVELS.map(level => (
+              <option key={level} value={level}>{level.charAt(0).toUpperCase() + level.slice(1)}</option>
+            ))}
+          </select>
+        </div>
 
-      <div className="form-row">
-        <label htmlFor="res_status">Status</label>
-        <select id="res_status" name="status" value={formData.status || 'Staged'} onChange={handleInputChange}>
-          {STATUS_LIST.map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
-      </div>
+        <div className="form-row">
+          <label htmlFor="res_status">Status</label>
+          <select id="res_status" name="status" value={formData.status || 'Staged'} onChange={handleInputChange}>
+            {STATUS_LIST.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
 
-      <div className="form-row">
-        <label htmlFor="res_skills">Special Skills (Hold Ctrl/Cmd to multi-select)</label>
-        <select
-          id="res_skills"
-          name="special_skills"
-          multiple
-          value={formData.special_skills ? formData.special_skills.split(', ') : []}
-          onChange={handleInputChange}
-          className="multi-select"
-          style={{ minHeight: '120px' }}
-        >
-          {skillsList.map(skill => <option key={skill} value={skill}>{skill}</option>)}
-        </select>
+        <div className="form-row">
+          <label htmlFor="res_skills">Special Skills (Hold Ctrl/Cmd to multi-select)</label>
+          <select
+            id="res_skills"
+            name="special_skills"
+            multiple
+            value={formData.special_skills ? formData.special_skills.split(', ') : []}
+            onChange={handleInputChange}
+            className="multi-select"
+            style={{ minHeight: '120px' }}
+          >
+            {skillsList.map(skill => <option key={skill} value={skill}>{skill}</option>)}
+          </select>
+        </div>
       </div>
     </BaseModal>
   );

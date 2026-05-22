@@ -10,11 +10,11 @@ vi.mock('../context/IncidentContext', () => ({
   useIncident: vi.fn(),
 }));
 
-const mockTeams = [
+const mockTeams = [ // Mock team data
   { team_id: 't1', team_name_number: 'Team 1', status: 'Staged', type: 'Other' }
 ];
 const mockAssignments = [
-  { assignment_id: 'a1', title: 'Assignment A', name: 'Assignment A', op_period_id: 'op1', status: 'Planned' }
+  { assignment_id: 'a1', title: 'Assignment A', op_period_id: 'op1', status: 'Planned' }
 ];
 
 afterEach(() => {
@@ -65,7 +65,7 @@ describe('PlanningDashboard Selection', () => {
     fireEvent.dragStart(teamCard, { dataTransfer: { setData: vi.fn(), effectAllowed: 'move' } });
     fireEvent.drop(assignmentCard);
 
-    await waitFor(() => {
+    await waitFor(() => { // Wait for the asynchronous onAssigned callback to complete
       expect(onAssigned).toHaveBeenCalledWith(expect.objectContaining({
         teamId: 't1',
         assignmentId: 'a1'

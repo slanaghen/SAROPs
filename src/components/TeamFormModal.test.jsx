@@ -16,6 +16,7 @@ afterEach(() => {
 
 describe('TeamFormModal', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     vi.mocked(useIncident).mockReturnValue({
       incidentId: 'inc-123',
       responderName: 'Steve',
@@ -36,7 +37,7 @@ describe('TeamFormModal', () => {
     initialData: {
       team_id: 't1',
       team_name_number: 'Team 1',
-      type: 'Ground Search',
+      type: 'Ground',
       status: 'Staged',
       leader_responder_id: null,
       equipment: [],
@@ -141,5 +142,53 @@ describe('TeamFormModal', () => {
     expect(within(rows[1]).getByText('Responder 2')).toBeInTheDocument();
     // Responder 1 is no longer IC (it would move to custom members or clear)
     expect(within(rows[1]).queryByText('Responder 1')).not.toBeInTheDocument();
+  });
+
+  it('renders role input fields for custom team members', () => {
+    const propsWithMember = {
+      ...defaultProps,
+      initialData: { 
+        ...defaultProps.initialData, 
+        leader_responder_id: 'r1',
+        responder_ids: ['r1', 'r2'],
+        responder_roles: { 'r1': 'Team Leader', 'r2': 'Tracker' }
+      }
+    };
+    render(<TeamFormModal {...propsWithMember} />);
+
+    // R1 is the leader (Role is a fixed label)
+    expect(screen.getByText('Team Leader')).toBeInTheDocument();
+    
+    // R2 is a custom member
+    const trackerInput = screen.getByPlaceholderText(/Assign role.../i);
+    expect(trackerInput).toHaveValue('Tracker');
+
+    fireEvent.change(trackerInput, { target: { value: 'Medic' } });
+    expect(propsWithMember.onSave).not.toHaveBeenCalled(); // Ensure local state change only
+  });
+
+  it('hides the "Staff" type option when a staff team already exists', () => {
+    const propsWithExistingStaff = {
+      ...defaultProps,
+      commandStaffExists: true,
+      initialData: { ...defaultProps.initialData, team_id: null, type: 'Ground' }
+    };
+    render(<TeamFormModal {...propsWithExistingStaff} />);
+    
+    const typeSelect = screen.getByLabelText(/Type/i);
+    const options = within(typeSelect).queryAllByRole('option');
+    const staffOption = options.find(o => o.getAttribute('value') === 'Staff');
+    
+    expect(staffOption).toBeUndefined();
+  });
+
+  it('renders staged responders regardless of case in status values', () => {
+    const mixedStatusResponders = [
+      ...mockResponders,
+      { responder_id: 'r3', name: 'Responder 3', agency: 'Agency C', status: 'staged' }
+    ];
+
+    render(<TeamFormModal {...defaultProps} responders={mixedStatusResponders} />);
+    expect(screen.getByText('Responder 3')).toBeInTheDocument();
   });
 });
