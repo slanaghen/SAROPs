@@ -233,38 +233,27 @@ describe('AdminPage Authentication Gate', () => {
   it('should add a new administrator', async () => {
     vi.mocked(useIncident).mockReturnValue({ isAdmin: true, setIsAdmin: vi.fn(), logout: vi.fn() });
     
-    const mockInsert = vi.fn().mockResolvedValue({ error: null });
-    supabase.from.mockImplementation((table) => {
-      if (table === 'admin_users') return {
-        insert: mockInsert,
-        select: vi.fn().mockReturnThis(),
-        order: vi.fn().mockReturnThis(),
-        then: (onFulfilled) => Promise.resolve({ data: [], error: null }).then(onFulfilled)
-      };
-      return {
-        select: vi.fn().mockReturnThis(),
-        order: vi.fn().mockResolvedValue({ data: [], error: null }),
-        then: (onFulfilled) => Promise.resolve({ data: [], error: null }).then(onFulfilled),
-      };
+    supabase.rpc.mockResolvedValue({ error: null });
+    // Ensure admin list fetch still works for the UI render
+    supabase.from.mockReturnValue({
+      select: vi.fn().mockReturnThis(),
+      order: vi.fn().mockResolvedValue({ data: [], error: null })
     });
 
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
-
     // Expand section to see the add form results in the list later
     fireEvent.click(screen.getByText(/Current Administrators/i));
 
-    fireEvent.change(screen.getByPlaceholderText('CommandCenter1'), { target: { value: 'NewAdmin' } });
     fireEvent.change(screen.getByPlaceholderText('admin@agency.gov'), { target: { value: 'new@admin.com' } });
     fireEvent.change(screen.getByPlaceholderText('••••••••'), { target: { value: 'password123' } });
     const addButton = await screen.findByRole('button', { name: /Add Admin/i });
     fireEvent.click(addButton);
 
     await waitFor(() => {
-      expect(mockInsert).toHaveBeenCalledWith([{
-        email: 'new@admin.com',
-        username: 'NewAdmin',
-        password: 'password123',
-      }]);
+      expect(supabase.rpc).toHaveBeenCalledWith('admin_add_user', expect.objectContaining({
+        p_email: 'new@admin.com',
+        p_password: 'password123'
+      }));
     });
   });
 
@@ -272,21 +261,12 @@ describe('AdminPage Authentication Gate', () => {
     vi.mocked(useIncident).mockReturnValue({ isAdmin: true, setIsAdmin: vi.fn(), logout: vi.fn() });
     window.prompt = vi.fn().mockReturnValue('newpassword');
 
-    const mockUpdate = vi.fn().mockReturnThis();
-    const mockEq = vi.fn().mockResolvedValue({ error: null });
-    supabase.from.mockImplementation((table) => {
-      if (table === 'admin_users') return {
-        select: vi.fn().mockReturnThis(),
-        order: vi.fn().mockReturnThis(),
-        update: mockUpdate,
-        eq: mockEq,
-        then: (onFulfilled) => Promise.resolve({ data: [{ email: 'existing@admin.com', username: 'ExistingAdmin' }], error: null }).then(onFulfilled),
-      };
-      return {
-        select: vi.fn().mockReturnThis(),
-        order: vi.fn().mockResolvedValue({ data: [], error: null }),
-        then: (onFulfilled) => Promise.resolve({ data: [], error: null }).then(onFulfilled),
-      };
+    supabase.rpc.mockResolvedValue({ error: null });
+    supabase.from.mockReturnValue({
+      select: vi.fn().mockReturnThis(),
+      order: vi.fn().mockImplementation(() => ({
+        then: (cb) => cb({ data: [{ email: 'existing@admin.com', username: 'ExistingAdmin' }], error: null })
+      }))
     });
 
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
@@ -298,9 +278,10 @@ describe('AdminPage Authentication Gate', () => {
     fireEvent.click(screen.getByRole('button', { name: /Change Password/i }));
 
     await waitFor(() => {
-      expect(window.prompt).toHaveBeenCalledWith('Enter new password for existing@admin.com:');
-      expect(mockUpdate).toHaveBeenCalledWith({ password: 'newpassword' });
-      expect(mockEq).toHaveBeenCalledWith('email', 'existing@admin.com');
+      expect(supabase.rpc).toHaveBeenCalledWith('admin_update_password', {
+        p_email: 'existing@admin.com',
+        p_password: 'newpassword'
+      });
     });
   });
 
@@ -457,13 +438,13 @@ describe('AdminPage Authentication Gate', () => {
       { email: 'admin2@example.com', username: 'Admin2' }
     ];
 
-    supabase.from.mockImplementation((table) => ({
+    supabase.rpc.mockResolvedValue({ error: null });
+    supabase.from.mockReturnValue({
       select: vi.fn().mockReturnThis(),
-      order: vi.fn().mockReturnThis(),
-      delete: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockResolvedValue({ error: null }),
-      then: (cb) => Promise.resolve({ data: table === 'admin_users' ? mockAdmins : [], error: null }).then(cb)
-    }));
+      order: vi.fn().mockImplementation(() => ({
+        then: (cb) => cb({ data: mockAdmins, error: null })
+      }))
+    });
 
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
     fireEvent.click(screen.getByText(/Current Administrators/i));
@@ -471,6 +452,24 @@ describe('AdminPage Authentication Gate', () => {
     const removeButtons = await screen.findAllByRole('button', { name: /Remove/i });
     fireEvent.click(removeButtons[0]);
 
-    expect(supabase.from).toHaveBeenCalledWith('admin_users');
+    await waitFor(() => {
+      expect(supabase.rpc).toHaveBeenCalledWith('admin_remove_user', { p_email: 'admin1@example.com' });
+    });
+  });
+
+  it('prompts for confirmation and calls seed_data_specific RPC', async () => {
+    vi.mocked(useIncident).mockReturnValue({ isAdmin: true });
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    supabase.rpc.mockResolvedValue({ error: null });
+
+    render(<BrowserRouter><AdminPage /></BrowserRouter>);
+    
+    const seedBtn = await screen.findByRole('button', { name: /Seed Data/i });
+    fireEvent.click(seedBtn);
+
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(supabase.rpc).toHaveBeenCalledWith('seed_data_specific');
+    
+    confirmSpy.mockRestore();
   });
 });

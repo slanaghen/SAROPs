@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useIncident } from '../context/IncidentContext';
 import '../styles.css';
 import { normalizeResourceTypeName } from '../utils/dataNormalization';
+import { SARTOPO_REFRESH_INTERVAL } from '../components/operationalConstants';
 
 const SARTopoDataPage = () => {
   const { incidentId, isActive, incidentData } = useIncident();
@@ -49,79 +50,12 @@ const SARTopoDataPage = () => {
     }
   }, [incidentId, isActive]);
 
-  const handleFetchFeatures = async () => {
-    if (!fetchUrl) {
-      setError('No SARTopo Map ID found for this incident.');
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-    setFeatures(null);
-
-    try {
-      // Using the Vite proxy configured in vite.config.js to bypass CORS
-      const response = await fetch(fetchUrl);
-      
-      if (!response.ok) {
-        const text = await response.text();
-        // If the response is HTML, SARTopo is likely returning an error page (404/403)
-        if (text.includes('<!DOCTYPE html>')) {
-          throw new Error(`SARTopo returned an error page (HTTP ${response.status}). Verify the Map ID is correct and ensure "API Access" or "Offline Access" is enabled in map settings.`);
-        }
-        throw new Error(`SARTopo returned ${response.status}: ${response.statusText}`);
-      }
-
-      // Check content type to prevent JSON parsing errors if we received HTML
-      const contentType = response.headers.get('content-type');
-      if (contentType && !contentType.includes('application/json')) {
-        const text = await response.text();
-        if (text.includes('<!DOCTYPE html>')) {
-          throw new Error('SARTopo returned an HTML page instead of GeoJSON data. This often happens if the Map ID is invalid.');
-        }
-      }
-
-      const data = await response.json();
-      setFeatures(data);
-      setLastFetchTime(Date.now());
-
-      // Fetch existing SAROps assignments to determine 'New'/'Updated' status for display
-      const { data: existingSaropsAsns, error: fetchSaropsError } = await supabase
-        .from('assignments')
-        .select('assignment_id, sartopo_id')
-        .eq('op_period_id', incidentData.opPeriodId);
-
-      if (fetchSaropsError) throw fetchSaropsError;
-
-      const existingSaropsMap = new Map(
-        existingSaropsAsns?.map(a => [a.sartopo_id, a.assignment_id]) || []
-      );
-
-      // Prepare display list for SARTopo Assignments div
-      const fetchedFeatures = data?.result?.state?.features || data?.features || [];
-      const displayList = fetchedFeatures
-        .filter(f => f.properties?.class === 'Assignment')
-        .map(f => ({ ...f, syncStatus: existingSaropsMap.has(f.id) ? 'Updated' : 'New' }));
-      setSartopoAssignmentDisplayList(displayList);
-
-      // Requirement: Automatically sync new assignments when features are fetched
-      if (incidentData?.opPeriodId && fetchedFeatures.length > 0) {
-        await syncSartopoAssignments(fetchedFeatures);
-      }
-    } catch (err) {
-      console.error('Fetch error:', err);
-      setError(err.message || 'Error fetching SARTopo data.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   /**
    * Reconciles SARTopo features with SAROps assignments.
    * If a SARTopo assignment is not present in SAROps (based on sartopo_id),
    * a new SAROps assignment is created.
    */
-  const syncSartopoAssignments = async (providedFeatures = null) => {
+  const syncSartopoAssignments = useCallback(async (providedFeatures = null) => {
     const featuresToSync = providedFeatures || features?.features;
     if (!featuresToSync?.length || !incidentData?.opPeriodId) return;
 
@@ -151,11 +85,11 @@ const SARTopoDataPage = () => {
             sartopo_id: f.id,
             title: f.properties.title || f.properties.name, // Favor 'title' from SARTopo as the source of truth
             resource_type: normalizeResourceTypeName(f.properties.resource_type),
-            frequency_primary: f.properties.frequency || f.properties.primary_frequency || '',
+            frequency_primary: f.properties.primary_frequency || f.properties.frequency || '',
             transportation: f.properties.transportation || null,
-            team_size: f.properties.team_size ? parseInt(f.properties.team_size, 10) : null,
+            team_size: f.properties.team_size ? parseInt(f.properties.team_size, 10) : (f.properties.teamSize ? parseInt(f.properties.teamSize, 10) : null),
             priority: f.properties.priority || 'Medium',
-            probability_of_detection: f.properties.priority ? parseInt(f.properties.priority, 10) : null,
+            probability_of_detection: f.properties.unresponsive_pod ? parseInt(f.properties.unresponsive_pod, 10) : (f.properties.unresponsivePOD ? parseInt(f.properties.unresponsivePOD, 10) : null),
             description: f.properties.description || f.properties.comments || '',
             hazards: f.properties.hazards || '',
             color: f.properties.color || null,
@@ -171,8 +105,6 @@ const SARTopoDataPage = () => {
       }
 
       // 3. Upsert assignments in Supabase (Update existing, Insert new).
-      // We use the composite unique constraint (op_period_id, sartopo_id) to identify records.
-      // This allows us to omit the UUID PK from the payload, avoiding NULL padding issues in bulk batches.
       const { error: syncError } = await supabase
         .from('assignments')
         .upsert(syncPayloads, { onConflict: 'op_period_id, sartopo_id' });
@@ -192,7 +124,105 @@ const SARTopoDataPage = () => {
     } finally {
       setSyncing(false);
     }
-  };
+  }, [features?.features, incidentData?.opPeriodId, setError, setSyncing, setSyncedAssignmentNames]);
+
+  const handleFetchFeatures = useCallback(async () => {
+    if (!fetchUrl) {
+      setError('No SARTopo Map ID found for this incident.');
+      return;
+    }
+
+    // Background fetching: only clear features if this is the first load
+    const isInitialFetch = lastFetchTime === 0;
+
+    setLoading(true);
+    setError(null);
+    if (isInitialFetch) setFeatures(null);
+
+    try {
+      // Using the Vite proxy configured in vite.config.js to bypass CORS
+      const response = await fetch(fetchUrl);
+      
+      if (!response.ok) {
+        const text = await response.text();
+        // If the response is HTML, SARTopo is likely returning an error page (404/403)
+        if (text.includes('<!DOCTYPE html>')) {
+          throw new Error(`SARTopo returned an error page (HTTP ${response.status}). Verify the Map ID is correct and ensure "API Access" or "Offline Access" is enabled in map settings.`);
+        }
+        throw new Error(`SARTopo returned ${response.status}: ${response.statusText}`);
+      }
+
+      // Check content type to prevent JSON parsing errors if we received HTML
+      const contentType = response.headers.get('content-type');
+      if (contentType && !contentType.includes('application/json')) {
+        const text = await response.text();
+        if (text.includes('<!DOCTYPE html>')) {
+          throw new Error('SARTopo returned an HTML page instead of GeoJSON data. This often happens if the Map ID is invalid.');
+        }
+      }
+
+      const data = await response.json();
+      setFeatures(data);
+      setLastFetchTime(Date.now());
+
+      let existingSaropsAsns = [];
+      // Safely fetch existing SAROps assignments to determine 'New'/'Updated' status for display
+      if (incidentData?.opPeriodId) {
+        const { data: fetchedAsns, error: fetchSaropsError } = await supabase
+          .from('assignments')
+          .select('assignment_id, sartopo_id')
+          .eq('op_period_id', incidentData.opPeriodId);
+
+        if (fetchSaropsError) throw fetchSaropsError;
+        existingSaropsAsns = fetchedAsns || [];
+      }
+
+      const existingSaropsMap = new Map(
+        existingSaropsAsns?.map(a => [a.sartopo_id, a.assignment_id]) || []
+      );
+
+      // Prepare display list for SARTopo Assignments div
+      const fetchedFeatures = data?.result?.state?.features || data?.features || [];
+      const displayList = fetchedFeatures
+        .filter(f => f.properties?.class === 'Assignment')
+        .map(f => ({ ...f, syncStatus: existingSaropsMap.has(f.id) ? 'Updated' : 'New' }));
+      setSartopoAssignmentDisplayList(displayList);
+
+      // Requirement: Automatically sync new assignments when features are fetched
+      if (incidentData?.opPeriodId && fetchedFeatures.length > 0) {
+        await syncSartopoAssignments(fetchedFeatures);
+      }
+    } catch (err) {
+      console.error('Fetch error:', err);
+      setError(err.message || 'Error fetching SARTopo data.');
+    } finally {
+      setLoading(false);
+    }
+  }, [fetchUrl, incidentData?.opPeriodId, lastFetchTime, syncSartopoAssignments]);
+
+  // Ref to hold the latest fetcher to avoid dependency loops with the refresh function
+  const fetcherRef = useRef(handleFetchFeatures);
+  useEffect(() => {
+    fetcherRef.current = handleFetchFeatures;
+  }, [handleFetchFeatures]);
+
+  // Automate fetching: trigger when ID is set, then every 60s
+  useEffect(() => {
+    if (!sartopoId || !fetchUrl) return;
+
+    // Execute initial fetch immediately if we haven't fetched yet in this session.
+    // This prevents the loop caused by lastFetchTime updating and recreating handleFetchFeatures.
+    if (lastFetchTime === 0) {
+      handleFetchFeatures();
+    }
+
+    const interval = setInterval(() => {
+      console.log('🔄 Automated SARTopo refresh triggered...');
+      fetcherRef.current();
+    }, SARTOPO_REFRESH_INTERVAL || 60000);
+
+    return () => clearInterval(interval);
+  }, [sartopoId, !!fetchUrl, SARTOPO_REFRESH_INTERVAL, lastFetchTime === 0]);
 
   if (!isActive) {
     return (

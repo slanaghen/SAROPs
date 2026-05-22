@@ -44,6 +44,7 @@ describe('ResponderCheckin confirmation screen', () => {
     const medicalOption = screen.getByRole('option', { name: 'Medical' }) as HTMLOptionElement;
     medicalOption.selected = true;
     fireEvent.change(skillsSelect);
+    fireEvent.click(screen.getByLabelText('SAR'));
 
     fireEvent.click(screen.getByRole('button', { name: /Continue to Confirmation/i }));
 
@@ -73,6 +74,7 @@ describe('ResponderCheckin confirmation screen', () => {
     fireEvent.change(screen.getByLabelText(/Agency/i), { target: { value: 'SAR' } });
     fireEvent.change(screen.getByLabelText(/Identifier/i), { target: { value: 'ID1' } });
     fireEvent.change(screen.getByLabelText(/Cell Phone Number/i), { target: { value: '1234567890' } });
+    fireEvent.click(screen.getByLabelText('SAR'));
     fireEvent.click(screen.getByRole('button', { name: /Continue to Confirmation/i }));
 
     // Verify confirmation screen
@@ -82,5 +84,48 @@ describe('ResponderCheckin confirmation screen', () => {
     fireEvent.click(screen.getByRole('button', { name: /Back to Edit/i }));
     expect(screen.queryByText(/Confirm Your Information/i)).toBeNull();
     expect(screen.getByLabelText(/Full Name/i)).toHaveValue('Steve');
+  });
+
+  it('captures the selected responder type via radio buttons', async () => {
+    const onCheckIn = vi.fn();
+    render(
+      <ResponderCheckin 
+        onCheckIn={onCheckIn} 
+        incidents={[{ incident_id: 'i1', name: 'Inc 1', number: '1' }]}
+        selectedIncidentId="i1"
+      />
+    );
+
+    // Fill out preceding required fields to pass validation
+    fireEvent.change(screen.getByLabelText(/Full Name/i), { target: { value: 'Steve' } });
+    fireEvent.change(screen.getByLabelText(/Agency/i), { target: { value: 'SAR' } });
+    fireEvent.change(screen.getByLabelText(/Identifier/i), { target: { value: 'ID1' } });
+    fireEvent.change(screen.getByLabelText(/Cell Phone Number/i), { target: { value: '1234567890' } });
+
+    const fireRadio = screen.getByLabelText('Fire');
+    fireEvent.click(fireRadio);
+    expect(fireRadio).toBeChecked();
+
+    fireEvent.click(screen.getByRole('button', { name: /Continue to Confirmation/i }));
+    expect(await screen.findByText(/Confirm Your Information/i)).toBeTruthy();
+    expect(screen.getByText('Fire')).toBeTruthy();
+  });
+
+  it('shows an error if no responder type is selected when submitting', async () => {
+    render(
+      <ResponderCheckin 
+        incidents={[{ incident_id: 'i1', name: 'Inc 1', number: '1' }]}
+        selectedIncidentId="i1"
+      />
+    );
+
+    // Fill out preceding required fields to reach responder_type validation
+    fireEvent.change(screen.getByLabelText(/Full Name/i), { target: { value: 'Steve' } });
+    fireEvent.change(screen.getByLabelText(/Agency/i), { target: { value: 'SAR' } });
+    fireEvent.change(screen.getByLabelText(/Identifier/i), { target: { value: 'ID1' } });
+    fireEvent.change(screen.getByLabelText(/Cell Phone Number/i), { target: { value: '1234567890' } });
+
+    fireEvent.click(screen.getByRole('button', { name: /Continue to Confirmation/i }));
+    expect(await screen.findByText(/Please select a responder type/i)).toBeTruthy();
   });
 });

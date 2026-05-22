@@ -4,6 +4,11 @@ import { supabase } from '../lib/supabase';
 import { useIncident } from '../context/IncidentContext';
 import '../styles/IncidentEditPage.css'; // Reusing form styles for consistency
 import { usePlanningDashboard } from '../hooks/usePlanningDashboard'; // Import usePlanningDashboard
+import { 
+  OPERATIONS_REFRESH_INTERVAL, setOperationsRefreshInterval,
+  RESPONDER_REFRESH_INTERVAL, setResponderRefreshInterval,
+  SARTOPO_REFRESH_INTERVAL, setSartopoRefreshInterval
+} from '../components/operationalConstants';
 
 const AdminPage = () => {
   const navigate = useNavigate();
@@ -14,7 +19,6 @@ const AdminPage = () => {
   const [allTeams, setAllTeams] = useState([]);
   const [allAssignments, setAllAssignments] = useState([]);
   const [newEmail, setNewEmail] = useState('');
-  const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -23,6 +27,10 @@ const AdminPage = () => {
   const [loginPassword, setAdminLoginPassword] = useState('');
   const [isRespondersExpanded, setIsRespondersExpanded] = useState(false);
   const { recordAction } = usePlanningDashboard(supabase, incidentId); // Use recordAction from hook
+
+  const [opRefresh, setOpRefresh] = useState(OPERATIONS_REFRESH_INTERVAL / 1000);
+  const [resRefresh, setResRefresh] = useState(RESPONDER_REFRESH_INTERVAL / 1000);
+  const [sartopoRefresh, setSartopoRefresh] = useState(SARTOPO_REFRESH_INTERVAL / 1000);
   const [isTeamsExpanded, setIsTeamsExpanded] = useState(false);
   const [isAssignmentsExpanded, setIsAssignmentsExpanded] = useState(false);
   const [isIncidentsExpanded, setIsIncidentsExpanded] = useState(false);
@@ -115,6 +123,37 @@ const AdminPage = () => {
     navigate('/checkin');
   };
 
+  /**
+   * Triggers the database seeding logic.
+   * This calls the 'seed_data_specific' RPC function which contains the logic
+   * from the seed-data-specific.sql script.
+   */
+  const handleSeedData = async () => {
+    const confirmMsg = "Run the specific database seed script? This will add 15 test assignments and 31 responders to the most recent incident. Existing data will be preserved.";
+    if (!window.confirm(confirmMsg)) return;
+
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      // Execute the seeding logic via RPC. Ensure the seed-data-specific.sql 
+      // content is defined as a function named 'seed_data_specific' in Postgres.
+      const { error: seedError } = await supabase.rpc('seed_data_specific');
+      if (seedError) throw seedError;
+
+      setSuccess('Database successfully seeded with test data.');
+      fetchAllIncidents();
+      fetchAllResponders();
+      fetchAllTeams();
+      fetchAllAssignments();
+    } catch (err) {
+      setError('Failed to seed database: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (isAdmin) {
       fetchAdmins();
@@ -157,25 +196,26 @@ const AdminPage = () => {
     setError(null);
     setSuccess(null);
 
-    if (!newEmail.trim() || !newUsername.trim() || !newPassword.trim()) {
+    if (!newEmail.trim() || !newPassword.trim()) {
       setError('All fields are required to add a new administrator.');
       return;
     }
 
+    const emailVal = newEmail.trim().toLowerCase();
+
     try {
+      // Use secure RPC to bypass RLS and handle server-side hashing
       const { error: insertError } = await supabase
-        .from('admin_users')
-        .insert([{ 
-          email: newEmail.trim().toLowerCase(), 
-          username: newUsername.trim(),
-          password: newPassword.trim()
-        }]);
+        .rpc('admin_add_user', { 
+          p_email: emailVal, 
+          p_username: emailVal,
+          p_password: newPassword.trim()
+        });
 
       if (insertError) throw insertError;
 
       setSuccess(`Added ${newEmail} to administrators.`);
       setNewEmail('');
-      setNewUsername('');
       setNewPassword('');
       fetchAdmins();
     } catch (err) {
@@ -472,10 +512,10 @@ const AdminPage = () => {
     setSuccess(null);
 
     try {
-      const { error: updateError } = await supabase
-        .from('admin_users')
-        .update({ password: newPwd.trim() })
-        .eq('email', email);
+      const { error: updateError } = await supabase.rpc('admin_update_password', {
+        p_email: email,
+        p_password: newPwd.trim()
+      });
 
       if (updateError) throw updateError;
       setSuccess(`Password updated for ${email}`);
@@ -498,11 +538,8 @@ const AdminPage = () => {
     if (!window.confirm(`Remove ${email} from administrators?`)) return;
 
     try {
-      const { error: deleteError } = await supabase
-        .from('admin_users')
-        .delete()
-        .eq('email', email);
-
+      const { error: deleteError } = await supabase.rpc('admin_remove_user', { p_email: email });
+      
       if (deleteError) throw deleteError;
       fetchAdmins();
     } catch (err) {
@@ -565,18 +602,50 @@ const AdminPage = () => {
       </div>
 
       <div className="section-card" style={{ marginBottom: '24px' }}>
-        <h2>Add New Administrator</h2>
-        <form onSubmit={handleAddAdmin} style={{ display: 'grid', gap: '12px', gridTemplateColumns: '1fr 1fr 1fr auto', alignItems: 'flex-end' }}>
-          <label style={{ marginBottom: 0 }}>
-            Username
-            <input
-              type="text"
-              value={newUsername}
-              onChange={(e) => setNewUsername(e.target.value)}
-              placeholder="CommandCenter1"
-              required
+        <h2>System Utilities</h2>
+        <p className="subtitle" style={{ fontSize: '13px', margin: '0 0 16px' }}>Initialize test environments and perform maintenance tasks.</p>
+        <button onClick={handleSeedData} className="btn btn-secondary" disabled={loading}>
+          {loading ? 'Seeding...' : 'Seed Data'}
+        </button>
+      </div>
+
+      <div className="section-card" style={{ marginBottom: '24px' }}>
+        <h2>System Settings</h2>
+        <p className="subtitle" style={{ fontSize: '13px', margin: '0 0 16px' }}>Configure global refresh and polling intervals (in seconds).</p>
+        <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
+          <label style={{ flex: 1, minWidth: '150px', marginBottom: 0 }}>
+            Operations Refresh
+            <input 
+              type="number" 
+              value={opRefresh} 
+              onChange={(e) => { const v = parseInt(e.target.value, 10) || 0; setOpRefresh(v); setOperationsRefreshInterval(v * 1000); }}
+              min="5"
             />
           </label>
+          <label style={{ flex: 1, minWidth: '150px', marginBottom: 0 }}>
+            Responder Refresh
+            <input 
+              type="number" 
+              value={resRefresh} 
+              onChange={(e) => { const v = parseInt(e.target.value, 10) || 0; setResRefresh(v); setResponderRefreshInterval(v * 1000); }}
+              min="5"
+            />
+          </label>
+          <label style={{ flex: 1, minWidth: '150px', marginBottom: 0 }}>
+            SARTopo Refresh
+            <input 
+              type="number" 
+              value={sartopoRefresh} 
+              onChange={(e) => { const v = parseInt(e.target.value, 10) || 0; setSartopoRefresh(v); setSartopoRefreshInterval(v * 1000); }}
+              min="5"
+            />
+          </label>
+        </div>
+      </div>
+
+      <div className="section-card" style={{ marginBottom: '24px' }}>
+        <h2>Add New Administrator</h2>
+        <form onSubmit={handleAddAdmin} style={{ display: 'grid', gap: '12px', gridTemplateColumns: '1fr 1fr auto', alignItems: 'flex-end' }}>
           <label style={{ flex: 1, marginBottom: 0 }}>
             Email Address
             <input

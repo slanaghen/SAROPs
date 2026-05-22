@@ -63,13 +63,12 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     return () => clearInterval(timer);
   }, []);
 
-  // Memorized PAR status and time formatting to ensure visual parity with Operations page
+  // Memoized PAR status and time formatting to ensure visual parity with Operations page
   const { parRequired, timeSinceLastPar } = useMemo(() => {
     // Combine hook data with manually fetched timestamps to ensure values are available even if junction join is partial
     const lastCheck = team?.last_par_check || teamTimestamps.last_par_check || team?.created_at || teamTimestamps.created_at;
-    
-    if (!team || !lastCheck) {
-      return { parRequired: false, timeSinceLastPar: '—' };
+    if (!team || !parInterval || !lastCheck) {
+      return { parRequired: false, timeSinceLastPar: '' };
     }
 
     const lastCheckMs = new Date(lastCheck).getTime();
@@ -78,8 +77,8 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     const diffMs = currentTime - lastCheckMs;
     const minutesSince = diffMs / 60000;
 
-    // Same logic as OperationsDashboard: parInterval + 3 min grace. Staged and Staff teams are exempt.
-    const required = team.status !== 'Staged' && team.type !== 'Staff' && parInterval > 0 && minutesSince > (Number(parInterval) + 3);
+    // Same logic as OperationsDashboard: parInterval + 3 min grace. Staged, Disbanded, and Staff teams are exempt.
+    const required = team.status !== 'Staged' && team.status !== 'Disbanded' && team.type !== 'Staff' && parInterval > 0 && minutesSince > (parInterval + 3);
 
     const totalMinutes = Math.floor(diffMs / 60000);
     let displayTime = 'just now';
@@ -150,6 +149,36 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     prevIcsRole.current = icsRole;
   }, [team?.team_id, assignment?.assignment_id, icsRole]);
 
+  /**
+   * Supplemental function to fetch missing team metadata (timestamps) if the primary hook returns partial data.
+   * This ensures that 'last_par_check' is available even if the hook's junction join omitted it.
+   */
+  const refreshTeamMetadata = useCallback(async () => {
+    if (!team?.team_id) return;
+    const { data } = await supabase
+      .from('teams')
+      .select('last_par_check, created_at')
+      .eq('team_id', team.team_id)
+      .maybeSingle();
+    
+    if (data) {
+      setTeamTimestamps({ last_par_check: data.last_par_check, created_at: data.created_at });
+    }
+  }, [team?.team_id]);
+
+  /**
+   * Refreshes both the primary membership data and the supplemental team metadata.
+   */
+  const refreshAllData = useCallback(() => {
+    refetch();
+    refreshTeamMetadata();
+  }, [refetch, refreshTeamMetadata]);
+
+  // Initial fetch of metadata when team is identified
+  useEffect(() => {
+    refreshTeamMetadata();
+  }, [team?.team_id, refreshTeamMetadata]);
+
   // Real-time subscription to detect team assignments and status changes immediately
   useEffect(() => {
     if (!responderId) return;
@@ -163,7 +192,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
         filter: `responder_id=eq.${responderId}` 
       }, (payload) => {
         console.log('📡 Team membership change detected:', payload.eventType);
-        refetch();
+        refreshAllData();
       })
       .on('postgres_changes', { 
         event: 'UPDATE', 
@@ -172,14 +201,14 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
         filter: `responder_id=eq.${responderId}` 
       }, (payload) => {
         console.log('📡 Responder status change detected:', payload.new.status);
-        refetch();
+        refreshAllData();
       })
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [responderId, refetch]);
+  }, [responderId, refreshAllData]);
 
   // Real-time subscription to detect changes to the team itself (like Command resetting PAR)
   useEffect(() => {
@@ -194,32 +223,14 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
         filter: `team_id=eq.${team.team_id}` 
       }, () => {
         console.log('📡 Team data change detected (e.g. PAR reset)');
-        refetch();
+        refreshAllData();
       })
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [team?.team_id, refetch]);
-
-  // Supplemental effect to fetch missing team metadata (timestamps) if the primary hook returns partial data.
-  // This ensures that 'last_par_check' is available even if the hook's junction join omitted it.
-  useEffect(() => {
-    const refreshTeamMetadata = async () => {
-      if (!team?.team_id) return;
-      const { data } = await supabase
-        .from('teams')
-        .select('last_par_check, created_at')
-        .eq('team_id', team.team_id)
-        .maybeSingle();
-      
-      if (data) {
-        setTeamTimestamps({ last_par_check: data.last_par_check, created_at: data.created_at });
-      }
-    };
-    refreshTeamMetadata();
-  }, [team?.team_id]);
+  }, [team?.team_id, refreshAllData]);
 
   useEffect(() => {
     const fetchResponders = async () => {
@@ -343,11 +354,11 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     if (!responderId) return;
     
     const interval = setInterval(() => {
-      refetch();
-    }, RESPONDER_REFRESH_INTERVAL);
+      refreshAllData();
+    }, RESPONDER_REFRESH_INTERVAL || 60000);
 
     return () => clearInterval(interval);
-  }, [responderId, refetch]);
+  }, [responderId, refreshAllData, RESPONDER_REFRESH_INTERVAL]);
 
   const handleLeaveTeam = async () => {
     if (!team || !responderId) return;
@@ -367,7 +378,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       setResponderStatus('Staged'); // Optimistic update for current responder
       setCurrentTeamStatus(null);
       setCurrentAssignmentStatus(null);
-      await refetch();
+      refreshAllData();
     } catch (err) {
       console.error('Error leaving team:', err);
       alert('Failed to leave team: ' + (err.message || 'Unknown error'));
@@ -398,7 +409,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
         created_at: data[0].created_at || teamTimestamps.created_at
       });
 
-      refetch();
+      refreshAllData();
     } catch (err) {
       console.error('Error sending PAR:', err);
     }
@@ -420,7 +431,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
 
       if (updateErr) throw updateErr;
       if (!data || data.length === 0) throw new Error('Update blocked: You are not authorized to modify this assignment.');
-      await refetch();
+      refreshAllData();
     } catch (err) {
       console.error('Error updating mission data:', err);
       alert('Failed to update mission data: ' + err.message);
@@ -454,7 +465,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       setCurrentTeamStatus(null);
       setCurrentAssignmentStatus(null);
 
-      await refetch();
+      refreshAllData();
     } catch (err) {
       console.error('Error completing assignment:', err);
       alert('Failed to complete assignment: ' + err.message);
@@ -483,7 +494,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       setCurrentTeamStatus('Deployed');
       setCurrentAssignmentStatus('Deployed');
 
-      await refetch();
+      refreshAllData();
     } catch (err) {
       console.error('Error deploying assignment:', err);
       alert('Deployment failed: ' + (err.message || 'Permission denied'));
@@ -531,7 +542,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     return (
       <div className="alert alert-error" style={{ margin: '16px' }}>
         <p><strong>Error:</strong> {error}</p>
-        <button className="btn" onClick={refetch} style={{ fontSize: '18px' }}>Retry Load</button>
+        <button className="btn" onClick={refreshAllData} style={{ fontSize: '18px' }}>Retry Load</button>
       </div>
     );
   }
@@ -572,14 +583,14 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
         </div>
       )}
 
-      {!team && !assignment && accessLevel === 'responder' && (
+      {(!team || team.status === 'Disbanded') && !assignment && accessLevel === 'responder' && (
         <div className="dashboard-section empty-state">
           <p>You are currently not attached to a team or your team is not assigned to an assignment.</p>
           <p>Please check in with incident command for your assignment.</p>
         </div>
       )}
 
-      {(team || accessLevel === 'command staff' || accessLevel === 'admin') && (
+      {((team && team.status !== 'Disbanded') || accessLevel === 'command staff' || accessLevel === 'admin') && (
         <div className="dashboard-section team-info">
           <SectionHeader
             title={accessLevel === 'command staff' || accessLevel === 'admin' ? 'Staff Status' : `Your Team: ${team?.team_name_number}`} 
@@ -685,7 +696,8 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
                         )}
                       </div>
                       <div style={{ display: 'flex', gap: '8px' }}>
-                        <button className="btn btn-primary" onClick={() => handleParResponse('OK')} style={{ width: '100%', fontSize: '18px' }}>PAR OK</button>
+                        <button className="btn btn-primary" onClick={() => handleParResponse('OK')} style={{ flex: 1, fontSize: '18px' }}>PAR OK</button>
+                        <button className="btn btn-secondary" onClick={() => handleParResponse('Contact me')} style={{ flex: 1, borderColor: '#f59e0b', color: '#d97706', fontSize: '18px' }}>Contact Command</button>
                       </div>
                     </div>
                   )}
@@ -708,7 +720,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
         </div>
       )}
 
-      {(assignment || accessLevel === 'command staff' || accessLevel === 'admin') && (
+      {((assignment && team?.status !== 'Disbanded' && assignment.status !== 'Completed' && assignment.status !== 'Incomplete') || accessLevel === 'command staff' || accessLevel === 'admin') && (
         <div className="dashboard-section assignment-info">
           <SectionHeader
             title={accessLevel === 'command staff' || accessLevel === 'admin' ? 'ICS Chart' : `Team Assignment: ${assignment?.title}`} 
@@ -841,7 +853,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
         </div>
       )}
 
-      {team && (
+      {team && team.status !== 'Disbanded' && (
         <div className="dashboard-section messaging-info">
           <SectionHeader 
             title="Team Leader Communications" 

@@ -40,6 +40,9 @@ const Navigation = () => {
         <Link to="/sartopo" className={`nav-tab ${path === '/sartopo' ? 'active' : ''}`}>
           SARTopo Data
         </Link>
+        <Link to="/pdfs" className={`nav-tab ${path === '/pdfs' ? 'active' : ''}`}>
+          PDFs
+        </Link>
         <Link to="/admin" className={`nav-tab ${path === '/admin' ? 'active' : ''}`}>
           Admin
         </Link>

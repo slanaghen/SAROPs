@@ -4,6 +4,7 @@ export type AssignmentStatus = 'Planned' | 'Assigned' | 'Deployed' | 'Completed'
 export type AccessLevel = 'responder' | 'command staff' | 'admin';
 export type TeamStatus = 'Staged' | 'Assigned' | 'Deployed' | 'Disbanded';
 export type TeamType = 'Hasty' | 'Ground' | 'Vehicle' | 'UAS' | 'Water' | 'Tracking' | 'Dog' | 'Avalanche' | 'Transport' | 'Helicopter' | 'Medical' | 'Staff' | 'Other';
+export type ResponderType = 'SAR' | 'Fire' | 'Law' | 'Medical';
 export type ResponderStatus = 'Staged' | 'Attached' | 'Assigned' | 'Deployed' | 'CheckedOut' | 'Cleared';
 
 export interface Incident {
@@ -90,6 +91,7 @@ export interface Responder {
   device_id: string; // Distinct browser/session token for offline tracking
   checkin_datetime: string;
   checkout_datetime: string | null;
+  responder_type?: ResponderType;
   last_seen_at?: string; // Optional: for real-time presence tracking
   access_level: AccessLevel;
   status: ResponderStatus;

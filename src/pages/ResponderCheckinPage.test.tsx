@@ -136,6 +136,7 @@ describe('ResponderCheckinPage Routing', () => {
     fireEvent.change(screen.getByLabelText(/Agency/i), { target: { value: 'SAR' } });
     fireEvent.change(screen.getByLabelText(/Identifier/i), { target: { value: 'K9-1' } });
     fireEvent.change(screen.getByLabelText(/Cell Phone Number/i), { target: { value: '1231234567' } });
+    fireEvent.click(screen.getByLabelText('SAR')); // Select responder type
 
     // Select an incident to satisfy form validation
     fireEvent.change(screen.getByLabelText(/Select Active Incident/i), { target: { value: 'inc-1' } });
@@ -184,6 +185,7 @@ describe('ResponderCheckinPage Routing', () => {
     await screen.findByLabelText(/Full Name/i);
 
     // Submit empty form
+    fireEvent.click(screen.getByLabelText('SAR')); // Select responder type to pass that validation
     const continueBtn = screen.getByRole('button', { name: /Continue to Confirmation/i });
     fireEvent.click(continueBtn);
 

@@ -275,10 +275,10 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
 
     const interval = setInterval(() => {
       fetchDashboardData();
-    }, OPERATIONS_REFRESH_INTERVAL);
+    }, OPERATIONS_REFRESH_INTERVAL || 60000);
 
     return () => clearInterval(interval);
-  }, [operationalPeriodId, fetchDashboardData]);
+  }, [operationalPeriodId, fetchDashboardData, OPERATIONS_REFRESH_INTERVAL]);
 
   const recordAction = async (action) => {
     if (!incidentId) return;
@@ -662,7 +662,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       <header className="operations-header">
         <div>
           <h1>Operations Dashboard</h1>
-          <p>Summary of assignments and teams in the current operational period. Drag and drop teams onto assignments (or vice versa) to link resources.</p>
+          <p>Drag and drop teams onto assignments (or vice versa) to link resources.</p>
         </div>
         <div className="view-filter-container" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <label htmlFor="view-mode-select" style={{ fontSize: '13px', fontWeight: 600, color: '#475569' }}>View:</label>

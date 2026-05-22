@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { supabase } from '../lib/supabase';
-import { Responder, ResponderStatus, AccessLevel } from '../types/sarops-types';
+import { Responder, ResponderStatus, AccessLevel, ResponderType } from '../types/sarops-types';
 import { getResponderByIdentifier } from '../services/responderService';
 import { SKILLS_LIST } from '../constants/operationalConstants';
 import '../styles/ResponderCheckin.css';
@@ -37,6 +37,7 @@ interface ResponderCheckinProps {
     identifier: string;
     cell_phone: string;
     special_skills: string;
+    responder_type: ResponderType | '';
   };
 }
 
@@ -61,6 +62,7 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
     identifier: '',
     cell_phone: '',
     special_skills: '',
+    responder_type: '', // New field
   });
 
   // UI state
@@ -74,6 +76,7 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
     agency: string;
     identifier: string;
     cell_phone: string;
+    responder_type: ResponderType | '';
     special_skills: string;
     incident_id?: string;
   } | null>(null);
@@ -120,7 +123,7 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
       processedValue = Array.from(select.selectedOptions).map(opt => opt.value).filter(v => v !== '').join(', ');
     } else {
       const { value, checked } = e.target as HTMLInputElement;
-      processedValue = type === 'checkbox' ? checked : (name === 'cell_phone' ? formatPhoneNumber(value) : value);
+      processedValue = type === 'checkbox' ? checked : (name === 'cell_phone' ? formatPhoneNumber(value) : (type === 'radio' ? value : value));
     }
 
     setFormData(prev => ({
@@ -162,6 +165,10 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
       setInternalError('Please enter a valid phone number');
       return false;
     }
+    if (!data.responder_type) {
+      setInternalError('Please select a responder type');
+      return false;
+    }
 
     return true;
   };
@@ -194,6 +201,7 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
       identifier: (data.identifier || '').trim(),
       cell_phone: (data.cell_phone || '').trim(),
       special_skills: (data.special_skills || '').trim() || undefined,
+      responder_type: data.responder_type || undefined,
       access_level: initialAccessLevel,
       device_id: generateDeviceId(),
       checkin_datetime: now,
@@ -218,6 +226,7 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
       identifier: (fd.get('identifier') as string) || '',
       cell_phone: formatPhoneNumber((fd.get('cell_phone') as string) || ''),
       special_skills: fd.getAll('special_skills').filter(v => v !== '').join(', '),
+      responder_type: (fd.get('responder_type') as ResponderType) || '',
       incident_id: selectedIncidentId,
     };
 
@@ -425,6 +434,53 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
               </small>
             </div>
 
+            <div className="form-group radio-form-group">
+              <label>Responder Type *</label>
+              <div className="radio-group">
+                <label className="radio-label">
+                  <input
+                    type="radio"
+                    name="responder_type"
+                    value="SAR"
+                    checked={formData.responder_type === 'SAR'}
+                    onChange={handleInputChange}
+                    disabled={displayLoading}
+                    required
+                  />
+                  SAR
+                </label>
+                <label className="radio-label">
+                  <input
+                    type="radio"
+                    name="responder_type"
+                    value="Fire"
+                    checked={formData.responder_type === 'Fire'}
+                    onChange={handleInputChange}
+                    disabled={displayLoading}
+                  />
+                  Fire
+                </label>
+                <label className="radio-label">
+                  <input
+                    type="radio"
+                    name="responder_type"
+                    value="Law"
+                    checked={formData.responder_type === 'Law'}
+                    onChange={handleInputChange}
+                    disabled={displayLoading}
+                  />
+                  Law
+                </label>
+                <label className="radio-label">
+                  <input type="radio" name="responder_type" value="Medical" checked={formData.responder_type === 'Medical'} onChange={handleInputChange} disabled={displayLoading} />
+                  Medical
+                </label>
+              </div>
+              <small className="form-hint">
+                Your primary operational role/agency type.
+              </small>
+            </div>
+
             {/* Incident Selection Dropdown */}
             <div className="form-group">
               <label htmlFor="incident">Select Active Incident *</label>
@@ -495,6 +551,11 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
               <div className="detail-item">
                 <span className="detail-label">Cell Phone:</span>
                 <span className="detail-value">{displayResponder.cell_phone}</span>
+              </div>
+
+              <div className="detail-item">
+                <span className="detail-label">Responder Type:</span>
+                <span className="detail-value">{displayResponder.responder_type}</span>
               </div>
 
               <div className="detail-item">

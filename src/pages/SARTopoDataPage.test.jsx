@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, cleanup, within } from '@testing-library/react';
 import * as matchers from '@testing-library/jest-dom/matchers';
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import SARTopoDataPage from './SARTopoDataPage';
@@ -39,10 +39,18 @@ describe('SARTopoDataPage', () => {
 
   it('renders map information when an incident is active', async () => {
     vi.mocked(useIncident).mockReturnValue({ isActive: true, incidentId: 'inc-123' });
+    // Provide a fetch mock to satisfy the automated initial fetch on mount
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      headers: { get: () => 'application/json' },
+      json: vi.fn().mockResolvedValue({ features: [] })
+    });
+
     render(<SARTopoDataPage />);
     
     expect(await screen.findByText('MAP123')).toBeInTheDocument();
-    expect(screen.getByText('Fetch Live Features')).toBeInTheDocument();
+    // Use findByText to wait for the automated initial fetch to complete and the button to revert to idle
+    expect(await screen.findByText('Fetch Live Features')).toBeInTheDocument();
   });
 
   it('handles API errors when fetching features', async () => {
@@ -64,7 +72,7 @@ describe('SARTopoDataPage', () => {
   });
 
   it('renders features as JSON when fetch is successful', async () => {
-    const mockData = { features: [{ type: 'Feature', properties: { name: 'Clue 1' } }] };
+    const mockData = { features: [{ type: 'Feature', properties: { name: 'Clue 1', class: 'Assignment' } }] };
     vi.mocked(useIncident).mockReturnValue({ isActive: true, incidentId: 'inc-123' });
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
@@ -79,12 +87,25 @@ describe('SARTopoDataPage', () => {
     const fetchBtn = await screen.findByText('Fetch Live Features');
     fireEvent.click(fetchBtn);
 
-    expect(await screen.findByText(/Map Features \(1\)/i)).toBeInTheDocument();
-    expect(screen.getByText(/"Clue 1"/)).toBeInTheDocument();
+    const mapFeaturesHeading = await screen.findByRole('heading', { name: /Map Features \(1\)/i });
+    const mapFeaturesSection = mapFeaturesHeading.closest('.section-card');
+    expect(mapFeaturesSection).toBeInTheDocument();
+    expect(within(mapFeaturesSection).getByText(/"Clue 1"/)).toBeInTheDocument();
   });
 
   it('syncs assignment feature payloads to Supabase', async () => {
-    const mockData = { features: [{ type: 'Feature', id: 'feature-1', properties: { name: 'Clue 1', resource_type: 'Search Team', priority: 'High' } }] };
+    const mockData = { 
+      features: [{ 
+        type: 'Feature', 
+        id: 'feature-1', 
+        properties: { 
+          name: 'Clue 1', 
+          resource_type: 'Search Team', 
+          priority: 'High',
+          class: 'Assignment'
+        } 
+      }] 
+    };
     vi.mocked(useIncident).mockReturnValue({ isActive: true, incidentId: 'inc-123', incidentData: { opPeriodId: mockOpPeriodId } });
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
@@ -111,6 +132,57 @@ describe('SARTopoDataPage', () => {
       title: 'Clue 1',
       resource_type: 'Search Team',
       priority: 'High'
+    });
+  });
+
+  it('correctly maps SARTopo Responsive POD and Primary Frequency to SAROps fields', async () => {
+    const mockData = { 
+      features: [{ 
+        type: 'Feature', 
+        id: 'feat-pod', 
+        properties: { 
+          class: 'Assignment',
+          title: 'POD Test', 
+          unresponsive_pod: '85',
+          primary_frequency: 'TAC 4',
+          teamSize: '4'
+        } 
+      }] 
+    };
+    
+    vi.mocked(useIncident).mockReturnValue({ isActive: true, incidentId: 'inc-123', incidentData: { opPeriodId: 'op-123' } });
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      headers: { get: () => 'application/json' },
+      json: vi.fn().mockResolvedValue(mockData)
+    });
+
+    render(<SARTopoDataPage />);
+    
+    await waitFor(() => expect(fromMock.upsert).toHaveBeenCalled());
+    
+    expect(fromMock.upsert.mock.calls[0][0][0]).toMatchObject({
+      probability_of_detection: 85,
+      frequency_primary: 'TAC 4',
+      team_size: 4,
+      title: 'POD Test'
+    });
+  });
+
+  it('updates the fetch URL with a timestamp after a successful fetch', async () => {
+    vi.mocked(useIncident).mockReturnValue({ isActive: true, incidentId: 'inc-123' });
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      headers: { get: () => 'application/json' },
+      json: vi.fn().mockResolvedValue({ features: [] })
+    });
+
+    render(<SARTopoDataPage />);
+    
+    // Wait for the initial fetch to complete and update lastFetchTime
+    await waitFor(() => {
+      const url = screen.getByText(/\/since\/\d+/);
+      expect(url.textContent).not.toContain('/since/0');
     });
   });
 });

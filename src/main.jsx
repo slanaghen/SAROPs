@@ -13,6 +13,7 @@ import ErrorPage from './components/ErrorPage';
 import ICSAssignmentPage from './pages/ICSAssignmentPage';
 import SARTopoDataPage from './pages/SARTopoDataPage';
 import QRCodesPage from './pages/QRCodesPage';
+import PDFsPage from './pages/PDFsPage';
 import { IncidentProvider } from './context/IncidentContext';
 
 const OperationsDashboardPage = lazy(() => import('./pages/OperationsDashboardPage'));
@@ -51,6 +52,7 @@ const router = createBrowserRouter([
       { path: "action-log", element: <ActionLogPage /> },
       { path: "qrcodes", element: <QRCodesPage /> },
       { path: "sartopo", element: <SARTopoDataPage /> },
+      { path: "pdfs", element: <PDFsPage /> },
       { path: "ics", element: <ICSAssignmentPage /> },
     ],
   },

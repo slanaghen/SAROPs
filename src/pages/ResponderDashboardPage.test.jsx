@@ -83,6 +83,28 @@ describe('ResponderDashboardPage', () => {
     expect(screen.getByText(/You are currently not attached to a team/i)).toBeInTheDocument();
   });
 
+  it('hides the assignment div when the assignment is marked as Completed', () => {
+    const mockTeam = { team_name_number: 'Team 1', status: 'Assigned' };
+    const mockAsn = { title: 'Finished Task', status: 'Completed' };
+    
+    vi.mocked(useIncident).mockReturnValue({ 
+      responderId: 'r1', 
+      accessLevel: 'responder',
+      setResponderStatus: vi.fn(),
+      setCurrentTeamStatus: vi.fn(),
+      setCurrentAssignmentStatus: vi.fn(),
+    });
+    vi.mocked(useResponderTeamAndAssignment).mockReturnValue({
+      team: mockTeam,
+      assignment: mockAsn,
+      loading: false,
+    });
+
+    render(<ResponderDashboardPage />);
+    // Assignment title should be hidden for responders if completed
+    expect(screen.queryByText(/Team Assignment: Finished Task/i)).not.toBeInTheDocument();
+  });
+
   it('renders team and assignment information when available', () => {
     const mockTeam = { team_name_number: 'Team 1', type: 'Ground', status: 'Assigned' };
     const mockAsn = { title: 'Area A', status: 'Planned', segment: 'A', resource_type: 'Ground', team_size: 2, frequency_primary: 'TAC 1', description: 'Test', probability_of_detection: null };

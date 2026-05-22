@@ -52,6 +52,14 @@ CREATE TYPE responder_status AS ENUM (
   'Cleared'
 );
 
+DROP TYPE IF EXISTS responder_type CASCADE;
+CREATE TYPE responder_type AS ENUM (
+  'SAR',
+  'Fire',
+  'Law',
+  'Medical'
+);
+
 DROP TYPE IF EXISTS access_level CASCADE;
 CREATE TYPE access_level AS ENUM (
   'responder',
@@ -106,6 +114,7 @@ CREATE TABLE responders (
   checkin_datetime TIMESTAMP WITH TIME ZONE NOT NULL,
   checkout_datetime TIMESTAMP WITH TIME ZONE,
   access_level access_level NOT NULL DEFAULT 'responder',
+  responder_type responder_type,
   status responder_status NOT NULL DEFAULT 'Staged',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -826,3 +835,35 @@ CREATE POLICY "Allow authenticated to insert messages for their team" ON team_me
   FOR INSERT TO authenticated WITH CHECK (team_id IN (SELECT team_id FROM team_responders WHERE responder_id IN (SELECT responder_id FROM responders WHERE auth_uid = auth.uid())));
 CREATE POLICY "Admins/Staff can manage all team messages" ON team_messages
   FOR ALL TO authenticated USING (check_is_operational_staff()) WITH CHECK (check_is_operational_staff());
+
+-- Policies for admin_users
+-- Allow staff/admins to view the list of system administrators
+CREATE POLICY "Allow staff to view admin list" ON admin_users
+  FOR SELECT TO authenticated USING (check_is_operational_staff());
+
+-- Secure RPCs for managing administrators
+-- These functions use SECURITY DEFINER to bypass RLS and ensure 
+-- passwords are encrypted correctly using pgcrypto.
+CREATE OR REPLACE FUNCTION admin_add_user(p_email TEXT, p_username TEXT, p_password TEXT)
+RETURNS VOID AS $func$
+BEGIN
+  INSERT INTO admin_users (email, username, password)
+  VALUES (LOWER(p_email), p_username, crypt(p_password, gen_salt('bf')));
+END;
+$func$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION admin_remove_user(p_email TEXT)
+RETURNS VOID AS $func$
+BEGIN
+  DELETE FROM admin_users WHERE email = LOWER(p_email);
+END;
+$func$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION admin_update_password(p_email TEXT, p_password TEXT)
+RETURNS VOID AS $func$
+BEGIN
+  UPDATE admin_users 
+  SET password = crypt(p_password, gen_salt('bf'))
+  WHERE email = LOWER(p_email);
+END;
+$func$ LANGUAGE plpgsql SECURITY DEFINER;
