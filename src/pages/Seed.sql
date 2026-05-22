@@ -30,7 +30,7 @@ BEGIN
     (target_op_id, 'Meadow Grid', 'Linear search through western clearings.', 'Ground', 'TAC 1', 'Planned'),
     (target_op_id, 'South Bowl K9', 'Area search with canine assistance.', 'Dog', 'TAC 3', 'Planned'),
     (target_op_id, 'Road Corridor A', 'Vehicle patrol of FS 301.', 'Vehicle', 'FS-CH', 'Planned'),
-    (target_op_id, 'Summit Flight', 'Aerial observation of peaks.', 'Aerial', 'AIR-GUARD', 'Planned'),
+    (target_op_id, 'Summit Flight', 'Aerial observation of peaks.', 'UAS', 'AIR-GUARD', 'Planned'),
     (target_op_id, 'Creek Bed Tracking', 'Tracker search for signs of passage.', 'Tracking', 'TAC 2', 'Planned'),
     (target_op_id, 'Trailhead Standby', 'Medical and logistics support.', 'Medical', 'EMS-LINK', 'Planned'),
     (target_op_id, 'Peak Signal Station', 'Set up radio relay.', 'Other', 'TAC 5', 'Planned'),

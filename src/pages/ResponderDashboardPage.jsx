@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Loader } from '@googlemaps/js-api-loader';
 import { supabase } from '../lib/supabase'; // Assuming this is the centralized Supabase client
 import { useIncident } from '../context/IncidentContext';
 import useResponderTeamAndAssignment from '../hooks/useResponderTeamAndAssignment'; // The new hook
 import { removeResponderFromTeam } from '../services/responderService';
+import { RESPONDER_REFRESH_INTERVAL } from '../components/operationalConstants';
 import '../styles/ResponderDashboard.css'; // New CSS file for styling
 
 /**
@@ -18,7 +18,10 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     incidentId, 
     incidentData, 
     responderName,
-    accessLevel 
+    accessLevel,
+    setResponderStatus,
+    setCurrentTeamStatus,
+    setCurrentAssignmentStatus
   } = useIncident();
   const responderId = propId || contextId;
   const [responders, setResponders] = useState([]);
@@ -30,12 +33,13 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     opObjective: '',
     saNarrative: ''
   });
-  const [parInterval, setParInterval] = useState(60);
+  const [parInterval, setParInterval] = useState(0);
   const [sartopoId, setSartopoId] = useState(null);
   const [podValue, setPodValue] = useState('');
   const [debriefValue, setDebriefValue] = useState('');
   const [isUpdatingAsnData, setIsUpdatingAsnData] = useState(false);
   const [icsRole, setIcsRole] = useState(null);
+  const [teamTimestamps, setTeamTimestamps] = useState({ last_par_check: null, created_at: null });
 
   const mapContainer = useRef(null);
   const map = useRef(null);
@@ -59,36 +63,54 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     return () => clearInterval(timer);
   }, []);
 
-  // Memoized PAR status and time formatting to ensure visual parity with Operations page
+  // Memorized PAR status and time formatting to ensure visual parity with Operations page
   const { parRequired, timeSinceLastPar } = useMemo(() => {
-    if (!team || !parInterval) {
-      return { parRequired: false, timeSinceLastPar: '' };
+    // Combine hook data with manually fetched timestamps to ensure values are available even if junction join is partial
+    const lastCheck = team?.last_par_check || teamTimestamps.last_par_check || team?.created_at || teamTimestamps.created_at;
+    
+    if (!team || !lastCheck) {
+      return { parRequired: false, timeSinceLastPar: '—' };
     }
 
-    const lastCheckMs = team.last_par_check 
-      ? new Date(team.last_par_check).getTime() 
-      : new Date(team.created_at || Date.now()).getTime();
+    const lastCheckMs = new Date(lastCheck).getTime();
+    if (isNaN(lastCheckMs)) return { parRequired: false, timeSinceLastPar: '—' };
     
     const diffMs = currentTime - lastCheckMs;
     const minutesSince = diffMs / 60000;
 
     // Same logic as OperationsDashboard: parInterval + 3 min grace. Staged and Staff teams are exempt.
-    const required = team.status !== 'Staged' && team.type !== 'Staff' && parInterval > 0 && minutesSince > (parInterval + 3);
+    const required = team.status !== 'Staged' && team.type !== 'Staff' && parInterval > 0 && minutesSince > (Number(parInterval) + 3);
 
-    let displayTime = 'Never';
-    if (team.last_par_check) {
-      const totalMinutes = Math.floor(diffMs / 60000);
-      if (totalMinutes < 1) displayTime = 'just now';
-      else if (totalMinutes < 60) displayTime = `${totalMinutes}m ago`;
-      else {
-        const hours = Math.floor(totalMinutes / 60);
-        const mins = totalMinutes % 60;
-        displayTime = `${hours}h ${mins}m ago`;
-      }
+    const totalMinutes = Math.floor(diffMs / 60000);
+    let displayTime = 'just now';
+    if (totalMinutes >= 1 && totalMinutes < 60) displayTime = `${totalMinutes}m ago`;
+    else if (totalMinutes >= 60) {
+      const hours = Math.floor(totalMinutes / 60);
+      const mins = totalMinutes % 60;
+      displayTime = `${hours}h ${mins}m ago`;
     }
 
     return { parRequired: required, timeSinceLastPar: displayTime };
-  }, [team, parInterval, currentTime]);
+  }, [team, teamTimestamps, parInterval, currentTime]);
+
+  // Synchronize the global context (banner) with the data fetched by this dashboard.
+  // This ensures the top banner stays in sync with real-time status changes detected by the dashboard
+  // (e.g. from polling or real-time subscriptions within the useResponderTeamAndAssignment hook).
+  useEffect(() => {
+    if (team?.status && team.status !== 'Disbanded') {
+      setCurrentTeamStatus(team.status);
+    } else {
+      setCurrentTeamStatus(null);
+    }
+  }, [team?.status, setCurrentTeamStatus]);
+
+  useEffect(() => {
+    if (assignment?.status) {
+      setCurrentAssignmentStatus(assignment.status);
+    } else {
+      setCurrentAssignmentStatus(null);
+    }
+  }, [assignment?.status, setCurrentAssignmentStatus]);
   
   const lastMessageCountRef = useRef(0);
   const prevTeamId = useRef(null);
@@ -180,6 +202,24 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       supabase.removeChannel(channel);
     };
   }, [team?.team_id, refetch]);
+
+  // Supplemental effect to fetch missing team metadata (timestamps) if the primary hook returns partial data.
+  // This ensures that 'last_par_check' is available even if the hook's junction join omitted it.
+  useEffect(() => {
+    const refreshTeamMetadata = async () => {
+      if (!team?.team_id) return;
+      const { data } = await supabase
+        .from('teams')
+        .select('last_par_check, created_at')
+        .eq('team_id', team.team_id)
+        .maybeSingle();
+      
+      if (data) {
+        setTeamTimestamps({ last_par_check: data.last_par_check, created_at: data.created_at });
+      }
+    };
+    refreshTeamMetadata();
+  }, [team?.team_id]);
 
   useEffect(() => {
     const fetchResponders = async () => {
@@ -298,13 +338,13 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     }
   };
 
-  // Periodically refresh data to detect status changes from Command (every 30s)
+  // Periodically refresh data to detect status changes from Command
   useEffect(() => {
     if (!responderId) return;
     
     const interval = setInterval(() => {
       refetch();
-    }, 30000);
+    }, RESPONDER_REFRESH_INTERVAL);
 
     return () => clearInterval(interval);
   }, [responderId, refetch]);
@@ -324,6 +364,9 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     setIsLeavingTeam(true);
     try {
       await removeResponderFromTeam(supabase, responderId, team.team_id);
+      setResponderStatus('Staged'); // Optimistic update for current responder
+      setCurrentTeamStatus(null);
+      setCurrentAssignmentStatus(null);
       await refetch();
     } catch (err) {
       console.error('Error leaving team:', err);
@@ -348,6 +391,13 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
 
       if (error) throw error;
       if (!data || data.length === 0) throw new Error('PAR update blocked: You must be the Team Leader to perform this action.');
+      
+      // Optimistically update local timestamps to ensure the dashboard reflects the "just now" state immediately
+      setTeamTimestamps({
+        last_par_check: data[0].last_par_check,
+        created_at: data[0].created_at || teamTimestamps.created_at
+      });
+
       refetch();
     } catch (err) {
       console.error('Error sending PAR:', err);
@@ -384,9 +434,8 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     
     setIsUpdatingAsnData(true);
     try {
-      const now = new Date().toISOString();
-      
-      // 1. Update assignment: status -> Completed, team_id -> null, and save final mission results
+      // 1. Update assignment: status -> Completed and save final mission results.
+      // Triggers now handle cascading this to the Team (Disbanded) and Responders (Staged) automatically.
       const { data: asnData, error: asnError } = await supabase
         .from('assignments')
         .update({ 
@@ -399,32 +448,11 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       
       if (asnError) throw asnError;
       if (!asnData || asnData.length === 0) throw new Error('Completion blocked: Unauthorized assignment update.');
-
-      // 2. Update team status to Disbanded (standard terminal state to release resources)
-      const { data: teamData, error: teamError } = await supabase
-        .from('teams')
-        .update({
-          status: 'Disbanded', 
-          last_par_check: null // Clear PAR check when disbanded
-        })
-        .eq('team_id', team.team_id)
-        .select();
       
-      if (teamError) throw teamError;
-      if (!teamData || teamData.length === 0) throw new Error('Completion blocked: Unauthorized team update.');
-
-      // 3. Cascade status to team members (return to Staged) and close history
-      const { data: members, error: membersErr } = await supabase.from('team_responders').select('responder_id').eq('team_id', team.team_id);
-      if (membersErr) throw membersErr;
-      
-      const ids = members?.map(m => m.responder_id) || [];
-      if (ids.length > 0) {
-        const { data: respData, error: respErr } = await supabase.from('responders').update({ status: 'Staged' }).in('responder_id', ids).select();
-        if (respErr) throw respErr;
-        
-        const { error: histErr } = await supabase.from('responder_team_history').update({ detached_datetime: now }).eq('team_id', team.team_id).is('detached_datetime', null).select();
-        if (histErr) throw histErr;
-      }
+      // Optimistic update for the global banner
+      setResponderStatus('Staged');
+      setCurrentTeamStatus(null);
+      setCurrentAssignmentStatus(null);
 
       await refetch();
     } catch (err) {
@@ -439,9 +467,8 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     if (!team?.team_id || !assignment?.assignment_id) return;
     
     try {
-      const now = new Date().toISOString();
-      
-      // 1. Update assignment status
+      // 1. Update assignment status.
+      // Triggers now handle cascading this to the Team and all individual Responders automatically.
       const { data: asnData, error: asnError } = await supabase
         .from('assignments')
         .update({ status: 'Deployed' })
@@ -451,32 +478,10 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       if (asnError) throw asnError;
       if (!asnData || asnData.length === 0) throw new Error('Deployment blocked: You do not have permission to update this assignment.');
 
-      // 2. Update team status and reset PAR timer
-      const { data: teamData, error: teamError } = await supabase
-        .from('teams')
-        .update({ 
-          status: 'Deployed', 
-          last_par_check: now 
-        })
-        .eq('team_id', team.team_id)
-        .select();
-      
-      if (teamError) throw teamError;
-      if (!teamData || teamData.length === 0) throw new Error('Deployment blocked: You do not have permission to update this team.');
-
-      // 3. Cascade status to team members
-      const { data: members, error: membersErr } = await supabase
-        .from('team_responders')
-        .select('responder_id')
-        .eq('team_id', team.team_id);
-      
-      if (membersErr) throw membersErr;
-      
-      const ids = members?.map(m => m.responder_id) || [];
-      if (ids.length > 0) {
-        const { error: cascadeError } = await supabase.from('responders').update({ status: 'Deployed' }).in('responder_id', ids).select();
-        if (cascadeError) throw cascadeError;
-      }
+      // Optimistic update for the global banner and local state
+      setResponderStatus('Deployed');
+      setCurrentTeamStatus('Deployed');
+      setCurrentAssignmentStatus('Deployed');
 
       await refetch();
     } catch (err) {
@@ -579,7 +584,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
           <SectionHeader
             title={accessLevel === 'command staff' || accessLevel === 'admin' ? 'Staff Status' : `Your Team: ${team?.team_name_number}`} 
             sectionKey="team" 
-            showBadge={parRequired && (
+            showBadge={team && parRequired ? (
               <span 
                 className="status-indicator incomplete" 
                 style={{ 
@@ -590,18 +595,18 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
                   color: 'white', 
                   padding: '2px 8px', 
                   borderRadius: '4px', 
-                  fontSize: '9px',
+                  fontSize: '11px',
                   fontWeight: 700,
                   whiteSpace: 'nowrap'
                 }}
               >
                 {timeSinceLastPar}
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="12" cy="12" r="10"></circle>
                   <polyline points="12 6 12 12 16 14"></polyline>
                 </svg>
               </span>
-            )}
+            ) : null}
           />
 
           {isExpanded.team && (
@@ -680,8 +685,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
                         )}
                       </div>
                       <div style={{ display: 'flex', gap: '8px' }}>
-                        <button className="btn btn-primary" onClick={() => handleParResponse('OK')} style={{ flex: 1, fontSize: '18px' }}>PAR OK</button>
-                        <button className="btn btn-secondary" onClick={() => handleParResponse('Contact me')} style={{ flex: 1, borderColor: '#f59e0b', color: '#d97706', fontSize: '18px' }}>Contact Command</button>
+                        <button className="btn btn-primary" onClick={() => handleParResponse('OK')} style={{ width: '100%', fontSize: '18px' }}>PAR OK</button>
                       </div>
                     </div>
                   )}

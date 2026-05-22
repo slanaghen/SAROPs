@@ -3,7 +3,7 @@
 export type AssignmentStatus = 'Planned' | 'Assigned' | 'Deployed' | 'Completed' | 'Incomplete';
 export type AccessLevel = 'responder' | 'command staff' | 'admin';
 export type TeamStatus = 'Staged' | 'Assigned' | 'Deployed' | 'Disbanded';
-export type TeamType = 'Hasty' | 'Ground' | 'Vehicle' | 'Aerial' | 'Water' | 'Tracking' | 'Dog' | 'Avalanche' | 'Transport' | 'Helicopter' | 'Medical' | 'Staff' | 'Other';
+export type TeamType = 'Hasty' | 'Ground' | 'Vehicle' | 'UAS' | 'Water' | 'Tracking' | 'Dog' | 'Avalanche' | 'Transport' | 'Helicopter' | 'Medical' | 'Staff' | 'Other';
 export type ResponderStatus = 'Staged' | 'Attached' | 'Assigned' | 'Deployed' | 'CheckedOut' | 'Cleared';
 
 export interface Incident {
@@ -73,6 +73,7 @@ export interface Team {
   equipment: string[]; // Free-text array for general gear
   last_par_check: string | null;
   par_status: string | null;
+  created_at?: string;
 }
 
 /**

@@ -30,7 +30,7 @@ CREATE TYPE team_type AS ENUM (
   'Hasty',
   'Ground',
   'Vehicle',
-  'Aerial',
+  'UAS',
   'Water',
   'Tracking',
   'Dog',
@@ -429,18 +429,54 @@ END;
 $func$ LANGUAGE plpgsql;
 
 -- Function to update responder statuses when a Staff team status changes to Assigned
-CREATE OR REPLACE FUNCTION sync_staff_members_on_status_change()
+-- Function to update responder statuses and assignment status when a team status changes
+CREATE OR REPLACE FUNCTION sync_team_members_on_status_change()
 RETURNS TRIGGER AS $func$
+DECLARE
+    _target_responder_status responder_status;
+    _target_assignment_status assignment_status;
 BEGIN
-    -- If a Staff team status changes to 'Assigned'
-    IF NEW.type = 'Staff' AND NEW.status = 'Assigned' AND (TG_OP = 'INSERT' OR OLD.status IS DISTINCT FROM NEW.status) THEN
+    -- 1. Determine target responder status based on new team status
+    _target_responder_status := CASE 
+        WHEN NEW.status = 'Staged' THEN 'Attached'::responder_status
+        WHEN NEW.status = 'Assigned' THEN 'Assigned'::responder_status
+        WHEN NEW.status = 'Deployed' THEN 'Deployed'::responder_status
+        WHEN NEW.status = 'Disbanded' THEN 'Staged'::responder_status
+        ELSE NULL
+    END;
+
+    -- Update responders if status changed or it's a new team
+    IF _target_responder_status IS NOT NULL AND (TG_OP = 'INSERT' OR OLD.status IS DISTINCT FROM NEW.status) THEN
         UPDATE responders
-        SET status = 'Assigned'
+        SET status = _target_responder_status
         WHERE responder_id IN (
             SELECT responder_id FROM team_responders WHERE team_id = NEW.team_id
         )
-        AND status IS DISTINCT FROM 'Assigned';
+        AND status IS DISTINCT FROM _target_responder_status;
     END IF;
+
+    -- 2. Automatically close team history logs on disbandment
+    IF NEW.status = 'Disbanded' AND OLD.status IS DISTINCT FROM NEW.status THEN
+        UPDATE responder_team_history
+        SET detached_datetime = CURRENT_TIMESTAMP
+        WHERE team_id = NEW.team_id
+          AND detached_datetime IS NULL;
+    END IF;
+
+    -- 3. Sync Assignment status if team moves to active state (Bi-directional)
+    _target_assignment_status := CASE
+        WHEN NEW.status = 'Assigned' THEN 'Assigned'::assignment_status
+        WHEN NEW.status = 'Deployed' THEN 'Deployed'::assignment_status
+        ELSE NULL
+    END;
+
+    IF _target_assignment_status IS NOT NULL AND (TG_OP = 'INSERT' OR OLD.status IS DISTINCT FROM NEW.status) THEN
+        UPDATE assignments
+        SET status = _target_assignment_status
+        WHERE team_id = NEW.team_id
+          AND status IS DISTINCT FROM _target_assignment_status;
+    END IF;
+
     RETURN NEW;
 END;
 $func$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -461,9 +497,10 @@ CREATE TRIGGER update_teams_updated_at BEFORE UPDATE ON teams
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- Trigger for status changes on the teams table
-CREATE TRIGGER sync_staff_status_on_team_update
+-- Trigger for status changes on the teams table (Cascades to members and assignments)
+CREATE TRIGGER sync_team_status_on_team_update
 AFTER INSERT OR UPDATE OF status ON teams
-FOR EACH ROW EXECUTE FUNCTION sync_staff_members_on_status_change();
+FOR EACH ROW EXECUTE FUNCTION sync_team_members_on_status_change();
 
 CREATE TRIGGER update_assignments_updated_at BEFORE UPDATE ON assignments
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
@@ -499,9 +536,41 @@ BEGIN
 END;
 $func$ LANGUAGE plpgsql SECURITY DEFINER;
 
-CREATE TRIGGER trigger_sync_team_name
+CREATE TRIGGER trigger_sync_assignment_team_name
 BEFORE INSERT OR UPDATE OF team_id ON assignments
 FOR EACH ROW EXECUTE FUNCTION sync_assignment_team_name();
+
+-- Function to sync team status and PAR timer when assignment status changes
+CREATE OR REPLACE FUNCTION sync_team_status_on_assignment_update()
+RETURNS TRIGGER AS $func$
+DECLARE
+    _target_team_status team_status;
+BEGIN
+    -- Only sync if team_id is present and status changed
+    IF NEW.team_id IS NOT NULL AND (TG_OP = 'INSERT' OR OLD.status IS DISTINCT FROM NEW.status) THEN
+        _target_team_status := CASE
+            WHEN NEW.status = 'Planned' THEN 'Staged'::team_status
+            WHEN NEW.status = 'Assigned' THEN 'Assigned'::team_status
+            WHEN NEW.status = 'Deployed' THEN 'Deployed'::team_status
+            WHEN NEW.status = 'Completed' OR NEW.status = 'Incomplete' THEN 'Disbanded'::team_status
+            ELSE NULL
+        END;
+
+        IF _target_team_status IS NOT NULL THEN
+            UPDATE teams
+            SET status = _target_team_status,
+                last_par_check = CASE WHEN _target_team_status = 'Deployed' THEN CURRENT_TIMESTAMP ELSE last_par_check END
+            WHERE team_id = NEW.team_id
+              AND status IS DISTINCT FROM _target_team_status;
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$func$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE TRIGGER trigger_sync_team_status_from_assignment
+AFTER INSERT OR UPDATE OF status ON assignments
+FOR EACH ROW EXECUTE FUNCTION sync_team_status_on_assignment_update();
 
 -- ============================================================================
 -- ROW LEVEL SECURITY (RLS) POLICIES
@@ -676,6 +745,10 @@ CREATE POLICY "Allow authenticated to view active teams" ON teams
   FOR SELECT TO authenticated USING (is_active_op_period(op_period_id));
 CREATE POLICY "Admins/Staff can manage all teams" ON teams
   FOR ALL TO authenticated USING (check_is_operational_staff()) WITH CHECK (check_is_operational_staff());
+-- Allow team members to view their own team, regardless of operational period activity status
+CREATE POLICY "Allow team members to view their own team" ON teams
+  FOR SELECT TO authenticated
+  USING (EXISTS (SELECT 1 FROM team_responders tr WHERE tr.team_id = teams.team_id AND tr.responder_id = get_my_responder_id()));
 -- Allow Team Leaders to update their own team's status and last_par_check
 CREATE POLICY "Allow team leaders to update their team" ON teams
   FOR UPDATE TO authenticated

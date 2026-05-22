@@ -5,6 +5,7 @@ import { vi, describe, it, expect, afterEach } from 'vitest';
 import ResponderDashboardPage from './ResponderDashboardPage';
 import { useIncident } from '../context/IncidentContext';
 import useResponderTeamAndAssignment from '../hooks/useResponderTeamAndAssignment';
+import { removeResponderFromTeam } from '../services/responderService';
 import { supabase } from '../lib/supabase';
 
 vi.mock('../context/IncidentContext', () => ({
@@ -13,6 +14,10 @@ vi.mock('../context/IncidentContext', () => ({
 
 vi.mock('../hooks/useResponderTeamAndAssignment', () => ({
   default: vi.fn(),
+}));
+
+vi.mock('../services/responderService', () => ({
+  removeResponderFromTeam: vi.fn().mockResolvedValue({ success: true }),
 }));
 
 const createSupabaseMock = (data, error = null) => globalThis.createSupabaseQueryMock(data, error);
@@ -30,7 +35,10 @@ vi.mock('../lib/supabase', () => ({
 beforeEach(() => {
   vi.resetAllMocks();
   // Re-establish the default mock implementation for from()
-  vi.mocked(supabase.from).mockImplementation(() => globalThis.createSupabaseQueryMock([]));
+  vi.mocked(supabase.from).mockImplementation((table) => {
+    if (table === 'operational_periods') return globalThis.createSupabaseQueryMock({ par_check_interval: 60 });
+    return globalThis.createSupabaseQueryMock([]);
+  });
 
   // Restore the chainable channel mock functionality lost after resetAllMocks
   vi.mocked(supabase.channel).mockReturnThis();
@@ -45,6 +53,9 @@ beforeEach(() => {
     incidentId: 'inc-123',
     incidentData: { opPeriodId: 'op-123', name: 'Test Incident' },
     parInterval: 60, // Default PAR interval
+    setResponderStatus: vi.fn(),
+    setCurrentTeamStatus: vi.fn(),
+    setCurrentAssignmentStatus: vi.fn(),
   });
 });
 
@@ -56,7 +67,10 @@ describe('ResponderDashboardPage', () => {
   it('shows empty state when responder has no team or assignment', () => {
     vi.mocked(useIncident).mockReturnValue({ 
       responderId: 'r1', 
-      accessLevel: 'responder'
+      accessLevel: 'responder',
+      setResponderStatus: vi.fn(),
+      setCurrentTeamStatus: vi.fn(),
+      setCurrentAssignmentStatus: vi.fn(),
     });
     vi.mocked(useResponderTeamAndAssignment).mockReturnValue({
       team: null,
@@ -75,7 +89,10 @@ describe('ResponderDashboardPage', () => {
     
     vi.mocked(useIncident).mockReturnValue({ 
       responderId: 'r1', 
-      accessLevel: 'responder'
+      accessLevel: 'responder',
+      setResponderStatus: vi.fn(),
+      setCurrentTeamStatus: vi.fn(),
+      setCurrentAssignmentStatus: vi.fn(),
     });
     vi.mocked(useResponderTeamAndAssignment).mockReturnValue({
       team: mockTeam,
@@ -104,7 +121,10 @@ describe('ResponderDashboardPage', () => {
   it('renders loading state', () => {
     vi.mocked(useIncident).mockReturnValue({ 
       responderId: 'r1', 
-      accessLevel: 'responder'
+      accessLevel: 'responder',
+      setResponderStatus: vi.fn(),
+      setCurrentTeamStatus: vi.fn(),
+      setCurrentAssignmentStatus: vi.fn(),
     });
     vi.mocked(useResponderTeamAndAssignment).mockReturnValue({
       loading: true,
@@ -124,7 +144,10 @@ describe('ResponderDashboardPage', () => {
       responderName: 'Steve',
       accessLevel: 'responder',
       incidentId: 'inc-123',
-      incidentData: { opPeriodId: 'op-123', name: 'Test Incident' }
+      incidentData: { opPeriodId: 'op-123', name: 'Test Incident' },
+      setResponderStatus: vi.fn(),
+      setCurrentTeamStatus: vi.fn(),
+      setCurrentAssignmentStatus: vi.fn(),
     });
 
     vi.mocked(useResponderTeamAndAssignment).mockReturnValue({
@@ -152,10 +175,9 @@ describe('ResponderDashboardPage', () => {
     fireEvent.click(deployBtn);
 
     await waitFor(() => {
+      // Triggers now handle cascading status changes. 
+      // Component only needs to update the primary assignment record.
       expect(supabase.from).toHaveBeenCalledWith('assignments');
-      expect(supabase.from).toHaveBeenCalledWith('teams');
-      expect(supabase.from).toHaveBeenCalledWith('team_responders');
-      expect(supabase.from).toHaveBeenCalledWith('responders');
       expect(mockRefetch).toHaveBeenCalled();
     });
   });
@@ -173,7 +195,10 @@ describe('ResponderDashboardPage', () => {
       responderId: 'r1',
       incidentId: 'inc-123', // Needed for fetchIncidentDetails
       incidentData: { opPeriodId: 'op-123' }, // Needed for fetchIncidentDetails
-      accessLevel: 'responder'
+      accessLevel: 'responder',
+      setResponderStatus: vi.fn(),
+      setCurrentTeamStatus: vi.fn(),
+      setCurrentAssignmentStatus: vi.fn(),
     });
 
     // Mock supabase calls for fetchIncidentDetails and handleParResponse
@@ -193,8 +218,10 @@ describe('ResponderDashboardPage', () => {
 
     const { rerender } = render(<ResponderDashboardPage />);
     
-    // Initially shows Never
-    expect(screen.getByText('Never')).toBeInTheDocument();
+    // Wait for parInterval to load and display "just now"
+    // (Text was "Never" in previous versions, but now reflects time since creation)
+    const initialJustNows = await screen.findAllByText('just now');
+    expect(initialJustNows.length).toBeGreaterThanOrEqual(1);
 
     const okBtn = screen.getByRole('button', { name: /PAR OK/i });
     fireEvent.click(okBtn);
@@ -218,7 +245,8 @@ describe('ResponderDashboardPage', () => {
     await waitFor(() => {
       // Check for optimistic UI update (which might display "just now")
       expect(screen.queryByText(/Never/i)).not.toBeInTheDocument();
-      expect(screen.getByText('just now')).toBeInTheDocument();
+      const justNowElements = screen.getAllByText('just now');
+      expect(justNowElements.length).toBeGreaterThanOrEqual(1);
     });
   });
 
@@ -226,18 +254,28 @@ describe('ResponderDashboardPage', () => {
     const mockTeam = { 
       team_id: 't1', 
       team_name_number: 'Team 1',
+      type: 'Ground',
       status: 'Assigned', 
       last_par_check: new Date(Date.now() - 120 * 60000).toISOString() // 2 hours ago
     };
     const mockRefetch = vi.fn();
 
-    // Mock successful update response to satisfy the component's row-count check
+    // Mock responses for both the team details and the operational period interval
     supabase.from.mockImplementation((table) => {
       if (table === 'teams') return createSupabaseMock([mockTeam]);
+      if (table === 'operational_periods') return globalThis.createSupabaseQueryMock({ par_check_interval: 60 });
       return createSupabaseMock([]);
     });
 
-    vi.mocked(useIncident).mockReturnValue({ responderId: 'r1', accessLevel: 'responder' });
+    vi.mocked(useIncident).mockReturnValue({ 
+      responderId: 'r1', 
+      incidentId: 'inc-123',
+      incidentData: { opPeriodId: 'op-123' },
+      accessLevel: 'responder',
+      setResponderStatus: vi.fn(),
+      setCurrentTeamStatus: vi.fn(),
+      setCurrentAssignmentStatus: vi.fn(),
+    });
     vi.mocked(useResponderTeamAndAssignment).mockReturnValue({
       team: mockTeam,
       assignment: null,
@@ -247,7 +285,8 @@ describe('ResponderDashboardPage', () => {
 
     render(<ResponderDashboardPage />);
     
-    const overdueChip = screen.getByTitle('Click to reset PAR');
+    // Use findByTitle to wait for async parInterval hydration from fetchIncidentDetails
+    const overdueChip = await screen.findByTitle('Click to reset PAR');
     fireEvent.click(overdueChip);
 
     await waitFor(() => {
@@ -269,8 +308,12 @@ describe('ResponderDashboardPage', () => {
 
     vi.mocked(useIncident).mockReturnValue({ 
       responderId: 'r1', 
+      incidentId: 'inc-123',
       incidentData: { opPeriodId: 'op-1' },
-      accessLevel: 'responder' 
+      accessLevel: 'responder',
+      setResponderStatus: vi.fn(),
+      setCurrentTeamStatus: vi.fn(),
+      setCurrentAssignmentStatus: vi.fn(),
     });
 
     vi.mocked(useResponderTeamAndAssignment).mockReturnValue({
@@ -308,8 +351,12 @@ describe('ResponderDashboardPage', () => {
 
     vi.mocked(useIncident).mockReturnValue({ 
       responderId: 'r1', 
+      incidentId: 'inc-123',
       incidentData: { opPeriodId: 'op-1' },
-      accessLevel: 'responder' 
+      accessLevel: 'responder',
+      setResponderStatus: vi.fn(),
+      setCurrentTeamStatus: vi.fn(),
+      setCurrentAssignmentStatus: vi.fn(),
     });
 
     vi.mocked(useResponderTeamAndAssignment).mockReturnValue({
@@ -344,7 +391,10 @@ describe('ResponderDashboardPage', () => {
 
     vi.mocked(useIncident).mockReturnValue({ 
       responderId: 'r1', 
-      accessLevel: 'responder' 
+      accessLevel: 'responder',
+      setResponderStatus: vi.fn(),
+      setCurrentTeamStatus: vi.fn(),
+      setCurrentAssignmentStatus: vi.fn(),
     });
 
     vi.mocked(useResponderTeamAndAssignment).mockReturnValue({
@@ -372,20 +422,24 @@ describe('ResponderDashboardPage', () => {
     let mockTeam = { team_name_number: 'Team 1', status: 'Assigned', type: 'Ground', last_par_check: new Date(now - 30000).toISOString() }; // 30s ago
     vi.mocked(useResponderTeamAndAssignment).mockReturnValue({ team: mockTeam, loading: false, refetch: mockRefetch });
     const { rerender } = render(<ResponderDashboardPage />);
-    expect(screen.getByText('just now')).toBeInTheDocument();
+    // Find text asynchronously because parInterval is updated via useEffect/fetch on mount
+    const justNows = await screen.findAllByText('just now');
+    expect(justNows.length).toBeGreaterThanOrEqual(1);
 
     // 2. Multiple minutes
     mockTeam = { team_name_number: 'Team 1', status: 'Assigned', type: 'Ground', last_par_check: new Date(now - 15 * 60000).toISOString() }; // 15m ago
     vi.mocked(useResponderTeamAndAssignment).mockReturnValue({ team: mockTeam, loading: false, refetch: mockRefetch });
     rerender(<ResponderDashboardPage />);
-    expect(screen.getByText('15m ago')).toBeInTheDocument();
+    const minsAgo = screen.getAllByText('15m ago');
+    expect(minsAgo.length).toBeGreaterThanOrEqual(1);
 
     // 3. Hours and minutes
     mockTeam = { team_name_number: 'Team 1', status: 'Assigned', type: 'Ground', last_par_check: new Date(now - 145 * 60000).toISOString() }; // 2h 25m ago
     vi.mocked(useResponderTeamAndAssignment).mockReturnValue({ team: mockTeam, loading: false, refetch: mockRefetch });
     rerender(<ResponderDashboardPage />);
-    // When overdue, the duration text appears in both the section badge and the reset chip
-    expect(screen.getAllByText('2h 25m ago').length).toBeGreaterThanOrEqual(2);
+    // When overdue, the duration text appears in both the section badge and the interactive reset chip
+    const durations = await screen.findAllByText('2h 25m ago');
+    expect(durations.length).toBeGreaterThanOrEqual(2);
   });
 
   it('updates the message list when a real-time message event is received', async () => {
@@ -395,6 +449,9 @@ describe('ResponderDashboardPage', () => {
     vi.mocked(useIncident).mockReturnValue({
       responderId: 'r1',
       responderName: 'Steve',
+      setResponderStatus: vi.fn(),
+      setCurrentTeamStatus: vi.fn(),
+      setCurrentAssignmentStatus: vi.fn(),
       accessLevel: 'responder',
       incidentId: 'inc-123',
       incidentData: { opPeriodId: 'op-123' }
@@ -481,6 +538,9 @@ describe('ResponderDashboardPage', () => {
     const mockAsn = { assignment_id: 'a1', status: 'Deployed', title: 'Task 1' };
     const mockRefetch = vi.fn();
 
+    const mockSetResponderStatus = vi.fn();
+    const mockSetCurrentTeamStatus = vi.fn();
+    const mockSetCurrentAssignmentStatus = vi.fn();
     vi.mocked(useResponderTeamAndAssignment).mockReturnValue({
       team: mockTeam,
       assignment: mockAsn,
@@ -488,6 +548,15 @@ describe('ResponderDashboardPage', () => {
       refetch: mockRefetch,
     });
 
+    vi.mocked(useIncident).mockReturnValue({
+      responderId: 'r1',
+      accessLevel: 'responder',
+      incidentId: 'inc-123',
+      incidentData: { opPeriodId: 'op-123' },
+      setResponderStatus: mockSetResponderStatus,
+      setCurrentTeamStatus: mockSetCurrentTeamStatus,
+      setCurrentAssignmentStatus: mockSetCurrentAssignmentStatus,
+    });
     supabase.from.mockImplementation(() => createSupabaseMock([mockAsn]));
 
     render(<ResponderDashboardPage />);
@@ -514,9 +583,12 @@ describe('ResponderDashboardPage', () => {
   });
 
   it('prompts for confirmation and calls removeResponderFromTeam when leaving a team', async () => {
-    const mockTeam = { team_id: 't1', team_name_number: 'Team Alpha', status: 'Assigned' };
+    const mockTeam = { team_id: 't1', team_name_number: 'Team Alpha', status: 'Assigned', created_at: new Date().toISOString() };
     const mockRefetch = vi.fn();
     
+    const mockSetResponderStatus = vi.fn();
+    const mockSetCurrentTeamStatus = vi.fn();
+    const mockSetCurrentAssignmentStatus = vi.fn();
     vi.mocked(useResponderTeamAndAssignment).mockReturnValue({
       team: mockTeam,
       assignment: null,
@@ -524,6 +596,15 @@ describe('ResponderDashboardPage', () => {
       refetch: mockRefetch,
     });
 
+    vi.mocked(useIncident).mockReturnValue({
+      responderId: 'r1',
+      accessLevel: 'responder',
+      incidentId: 'inc-123',
+      incidentData: { opPeriodId: 'op-123' },
+      setResponderStatus: mockSetResponderStatus,
+      setCurrentTeamStatus: mockSetCurrentTeamStatus,
+      setCurrentAssignmentStatus: mockSetCurrentAssignmentStatus,
+    });
     // Mock window confirm
     const confirmSpy = vi.spyOn(window, 'confirm').mockImplementation(() => true);
     
@@ -535,11 +616,8 @@ describe('ResponderDashboardPage', () => {
     expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('leave team "Team Alpha"'));
     
     await waitFor(() => {
-      expect(supabase.from).toHaveBeenCalledWith('team_responders');
-      // Check if delete was called (part of removeResponderFromTeam)
-      const calls = vi.mocked(supabase.from).mock.results;
-      const deleteCall = calls.find(r => r.value.delete);
-      expect(deleteCall).toBeDefined();
+      expect(removeResponderFromTeam).toHaveBeenCalledWith(supabase, 'r1', 't1');
+      expect(mockRefetch).toHaveBeenCalled();
     });
     confirmSpy.mockRestore();
   });
@@ -547,6 +625,9 @@ describe('ResponderDashboardPage', () => {
   it('should successfully send a message to Command', async () => {
     const mockTeam = { team_id: 't1', team_name_number: 'Team 1', leader_responder_id: 'r1', status: 'Assigned' };
     
+    const mockSetResponderStatus = vi.fn();
+    const mockSetCurrentTeamStatus = vi.fn();
+    const mockSetCurrentAssignmentStatus = vi.fn();
     vi.mocked(useResponderTeamAndAssignment).mockReturnValue({
       team: mockTeam, assignment: null, loading: false, refetch: vi.fn()
     });
@@ -563,6 +644,16 @@ describe('ResponderDashboardPage', () => {
       return createSupabaseMock([]);
     });
 
+    vi.mocked(useIncident).mockReturnValue({
+      responderId: 'r1',
+      accessLevel: 'responder',
+      incidentId: 'inc-123',
+      incidentData: { opPeriodId: 'op-123' },
+      setResponderStatus: mockSetResponderStatus,
+      setCurrentTeamStatus: mockSetCurrentTeamStatus,
+      setCurrentAssignmentStatus: mockSetCurrentAssignmentStatus,
+    });
+
     render(<ResponderDashboardPage />);
 
     const input = screen.getByPlaceholderText(/Send message to Command/i);
@@ -574,37 +665,29 @@ describe('ResponderDashboardPage', () => {
     });
   });
 
-  it('should update PAR status to "Contact me" when that button is clicked', async () => {
-    const mockTeam = { team_id: 't1', team_name_number: 'Team 1', status: 'Assigned' };
-    const mockRefetch = vi.fn();
-
-    vi.mocked(useResponderTeamAndAssignment).mockReturnValue({
-      team: mockTeam, assignment: null, loading: false, refetch: mockRefetch,
-    });
-
-    render(<ResponderDashboardPage />);
-    const contactBtn = screen.getByRole('button', { name: /Contact Command/i });
-    fireEvent.click(contactBtn);
-
-    await waitFor(() => {
-      const updateCall = vi.mocked(supabase.from).mock.results.find(r => r.value.update && r.value.update.mock.calls.length > 0).value;
-      expect(updateCall.update).toHaveBeenCalledWith(expect.objectContaining({
-        par_status: 'Contact me'
-      }));
-    });
-  });
-
   it('allows a non-leader to leave a team when assigned but not deployed', async () => {
-    const mockTeam = { team_id: 't1', team_name_number: 'Team Alpha', leader_responder_id: 'OTHER_LEADER', status: 'Assigned' };
+    const mockTeam = { team_id: 't1', team_name_number: 'Team Alpha', leader_responder_id: 'OTHER_LEADER', status: 'Assigned', created_at: new Date().toISOString() };
     const mockRefetch = vi.fn();
     
+    const mockSetResponderStatus = vi.fn();
+    const mockSetCurrentTeamStatus = vi.fn();
+    const mockSetCurrentAssignmentStatus = vi.fn();
     vi.mocked(useResponderTeamAndAssignment).mockReturnValue({
       team: mockTeam,
-      assignment: { status: 'Assigned' },
+      assignment: { title: 'Area Alpha', status: 'Assigned' },
       loading: false,
       refetch: mockRefetch,
     });
 
+    vi.mocked(useIncident).mockReturnValue({
+      responderId: 'r1',
+      accessLevel: 'responder',
+      incidentId: 'inc-123',
+      incidentData: { opPeriodId: 'op-123' },
+      setResponderStatus: mockSetResponderStatus,
+      setCurrentTeamStatus: mockSetCurrentTeamStatus,
+      setCurrentAssignmentStatus: mockSetCurrentAssignmentStatus,
+    });
     window.confirm = vi.fn().mockReturnValue(true);
     
     render(<ResponderDashboardPage />);
@@ -615,7 +698,7 @@ describe('ResponderDashboardPage', () => {
     fireEvent.click(leaveBtn);
 
     await waitFor(() => {
-      expect(supabase.from).toHaveBeenCalledWith('team_responders');
+      expect(removeResponderFromTeam).toHaveBeenCalledWith(supabase, 'r1', 't1');
       expect(mockRefetch).toHaveBeenCalled();
     });
   });

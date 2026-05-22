@@ -8,7 +8,7 @@ export const normalizeResourceTypeName = (type: string | undefined | null): stri
     'Ground Search': 'Ground',
     'Vehicle Search': 'Vehicle',
     'Water Search': 'Water',
-    'Aerial Search': 'Aerial'
+    'Aerial Search': 'UAS'
   };
 
   return legacyMapping[type] || type;

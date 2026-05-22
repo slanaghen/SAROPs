@@ -93,7 +93,7 @@ function App() {
           .eq('responder_id', responderId)
           .maybeSingle();
 
-        if (membership && membership.teams) {
+        if (membership && membership.teams && membership.teams.status !== 'Disbanded') {
           setCurrentTeamStatus(membership.teams.status);
           const assignments = membership.teams.assignments;
           const activeAsn = Array.isArray(assignments) ? assignments[0] : assignments;
@@ -131,6 +131,22 @@ function App() {
         filter: `responder_id=eq.${responderId}` 
       }, () => {
         console.debug('📡 Team membership change detected, syncing...');
+        syncSession();
+      })
+      .on('postgres_changes', { 
+        event: 'UPDATE', 
+        schema: 'public', 
+        table: 'teams' 
+      }, () => {
+        console.debug('📡 Team record change detected, syncing...');
+        syncSession();
+      })
+      .on('postgres_changes', { 
+        event: 'UPDATE', 
+        schema: 'public', 
+        table: 'assignments' 
+      }, () => {
+        console.debug('📡 Assignment record change detected, syncing...');
         syncSession();
       })
       .subscribe();
@@ -232,9 +248,11 @@ function App() {
               </>
             ) : (user?.email || 'Guest')}
           </div>
-          {(responderStatus || user) && (
-            <span className={`status-indicator ${(responderStatus || 'online').toLowerCase()}`}>
-              {responderStatus || 'Authenticated'}
+          {(responderStatus || currentTeamStatus || user) && (
+            <span className={`status-indicator ${(
+              (currentTeamStatus && currentTeamStatus !== 'Disbanded') ? currentTeamStatus : (responderStatus || 'online')
+            ).toLowerCase()}`}>
+              {(currentTeamStatus && currentTeamStatus !== 'Disbanded') ? currentTeamStatus : (responderStatus || 'Authenticated')}
             </span>
           )}
           <div className={`connection-dot ${offline ? 'offline' : 'online'}`} title={offline ? 'Offline' : 'Online'}></div>

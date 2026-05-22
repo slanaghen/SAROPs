@@ -1,14 +1,25 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { useIncident } from '../context/IncidentContext';
 import '../styles.css';
 
 const SARTopoDataPage = () => {
-  const { incidentId, isActive } = useIncident();
+  const { incidentId, isActive, incidentData } = useIncident();
   const [sartopoId, setSartopoId] = useState(null);
   const [features, setFeatures] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState(null);
+
+  const fetchUrl = useMemo(() => {
+    let mapId = sartopoId?.trim();
+    if (!mapId) return null;
+
+    if (mapId.includes('/')) {
+      mapId = mapId.split('/').pop() || mapId.split('/').slice(-2, -1)[0];
+    }
+    return `/sartopo-api/api/v1/map/${mapId}/since/0`;
+  }, [sartopoId]);
 
   useEffect(() => {
     const fetchSartopoId = async () => {
@@ -30,7 +41,7 @@ const SARTopoDataPage = () => {
   }, [incidentId, isActive]);
 
   const handleFetchFeatures = async () => {
-    if (!sartopoId) {
+    if (!fetchUrl) {
       setError('No SARTopo Map ID found for this incident.');
       return;
     }
@@ -41,20 +52,39 @@ const SARTopoDataPage = () => {
 
     try {
       // Using the Vite proxy configured in vite.config.js to bypass CORS
-      const response = await fetch(`/sartopo-api/api/v1/map/${sartopoId}/features`);
+      const response = await fetch(fetchUrl);
       
       if (!response.ok) {
-        throw new Error(`SARTopo API returned ${response.status}: ${response.statusText}`);
+        const text = await response.text();
+        // If the response is HTML, SARTopo is likely returning an error page (404/403)
+        if (text.includes('<!DOCTYPE html>')) {
+          throw new Error(`SARTopo returned an error page (HTTP ${response.status}). Verify the Map ID is correct and ensure "API Access" or "Offline Access" is enabled in map settings.`);
+        }
+        throw new Error(`SARTopo returned ${response.status}: ${response.statusText}`);
+      }
+
+      // Check content type to prevent JSON parsing errors if we received HTML
+      const contentType = response.headers.get('content-type');
+      if (contentType && !contentType.includes('application/json')) {
+        const text = await response.text();
+        if (text.includes('<!DOCTYPE html>')) {
+          throw new Error('SARTopo returned an HTML page instead of GeoJSON data. This often happens if the Map ID is invalid.');
+        }
       }
 
       const data = await response.json();
       setFeatures(data);
     } catch (err) {
       console.error('Fetch error:', err);
-      setError('Error fetching SARTopo data. This map may be private or protected by CORS.');
+      setError(err.message || 'Error fetching SARTopo data.');
     } finally {
       setLoading(false);
     }
+  };
+
+  // Preservation of sync function (currently disabled per operational requirements)
+  const syncSartopoAssignments = async () => {
+    return;
   };
 
   if (!isActive) {
@@ -79,14 +109,30 @@ const SARTopoDataPage = () => {
             <p style={{ margin: '4px 0 0', color: '#64748b', fontSize: '14px' }}>
               SARTopo Map ID: <code style={{ color: '#0369a1', fontWeight: 700 }}>{sartopoId || 'Not Configured'}</code>
             </p>
+            {fetchUrl && (
+              <p style={{ margin: '4px 0 0', color: '#64748b', fontSize: '12px' }}>
+                Fetch URL: <code style={{ color: '#0369a1' }}>{fetchUrl}</code>
+              </p>
+            )}
           </div>
-          <button 
-            className="btn btn-primary" 
-            onClick={handleFetchFeatures}
-            disabled={loading || !sartopoId}
-          >
-            {loading ? 'Fetching...' : 'Fetch Live Features'}
-          </button>
+          <div style={{ display: 'flex', gap: '12px' }}>
+            <button 
+              className="btn btn-primary" 
+              onClick={handleFetchFeatures}
+              disabled={loading || !sartopoId}
+            >
+              {loading ? 'Fetching...' : 'Fetch Live Features'}
+            </button>
+            <button 
+              className="btn btn-secondary" 
+              onClick={syncSartopoAssignments}
+              // synchronization functionality is currently disabled per operational requirements
+              disabled={true}
+              title="Assignment synchronization is currently disabled."
+            >
+              {syncing ? 'Syncing...' : 'Sync Assignment Features'}
+            </button>
+          </div>
         </div>
 
         {error && (

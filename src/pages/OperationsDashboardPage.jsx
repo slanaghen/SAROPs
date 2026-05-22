@@ -7,6 +7,7 @@ import { usePlanningDashboard } from '../hooks/usePlanningDashboard';
 import TeamFormModal from '../components/TeamFormModal';
 import AssignmentFormModal from '../components/AssignmentFormModal';
 import BaseModal from '../components/BaseModal';
+import { OPERATIONS_REFRESH_INTERVAL } from '../components/operationalConstants';
 import OperationsToolbar from '../components/OperationsToolbar';
 import OperationsTable from '../components/OperationsTable';
 import OperationsMap from '../components/OperationsMap';
@@ -96,6 +97,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     if (!team || team.status === 'Staged' || team.type === 'Staff' || interval <= 0) return false;
     const lastCheck = team.last_par_check ? new Date(team.last_par_check).getTime() : new Date(team.created_at || Date.now()).getTime();
     const minutesSince = (currentTime - lastCheck) / 60000;
+    team.last_par_check = lastCheck;
     // Threshold: interval + 3 minute grace period
     return minutesSince > (interval + 3);
   }, [currentTime]);
@@ -104,12 +106,13 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
    * Shared Helper: Formats relative time strings for UI display.
    */
   const formatTimeSince = useCallback((timestamp, createdAt) => {
-    if (!timestamp && !createdAt) return '—';
-    const lastCheckMs = timestamp ? new Date(timestamp).getTime() : new Date(createdAt).getTime();
+    const lastCheck = timestamp || createdAt;
+    if (!lastCheck) return '—';
+    const lastCheckMs = new Date(lastCheck).getTime();
+    if (isNaN(lastCheckMs)) return '—';
     const diffMs = currentTime - lastCheckMs;
     const totalMinutes = Math.floor(diffMs / 60000);
 
-    if (!timestamp) return 'Never';
     if (totalMinutes < 1) return 'just now';
     if (totalMinutes < 60) return `${totalMinutes}m ago`;
     
@@ -264,6 +267,17 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
 
   useEffect(() => {
     fetchDashboardData();
+  }, [operationalPeriodId, fetchDashboardData]);
+
+  // Periodically refresh dashboard data to ensure real-time accuracy (every 60s)
+  useEffect(() => {
+    if (!operationalPeriodId) return;
+
+    const interval = setInterval(() => {
+      fetchDashboardData();
+    }, OPERATIONS_REFRESH_INTERVAL);
+
+    return () => clearInterval(interval);
   }, [operationalPeriodId, fetchDashboardData]);
 
   const recordAction = async (action) => {
@@ -648,7 +662,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       <header className="operations-header">
         <div>
           <h1>Operations Dashboard</h1>
-          <p>Summary of assignments and teams in the current operational period.</p>
+          <p>Summary of assignments and teams in the current operational period. Drag and drop teams onto assignments (or vice versa) to link resources.</p>
         </div>
         <div className="view-filter-container" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <label htmlFor="view-mode-select" style={{ fontSize: '13px', fontWeight: 600, color: '#475569' }}>View:</label>
@@ -663,26 +677,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
             <option value="Operations">Operations (Active)</option>
             <option value="Planning">Planning (Staged)</option>
           </select>
-          <div style={{ display: 'flex', gap: '4px', marginLeft: '12px', borderLeft: '1px solid #e2e8f0', paddingLeft: '12px' }}>
-            <button 
-              className={`btn btn-sm ${layoutMode === 'table' ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => setLayoutMode('table')}
-            >
-              Table
-            </button>
-            <button 
-              className={`btn btn-sm ${layoutMode === 'split' ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => setLayoutMode('split')}
-            >
-              Split
-            </button>
-            <button 
-              className={`btn btn-sm ${layoutMode === 'map' ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => setLayoutMode('map')}
-            >
-              Map
-            </button>
-          </div>
+
           <button 
             className="btn btn-secondary" 
             style={{ 

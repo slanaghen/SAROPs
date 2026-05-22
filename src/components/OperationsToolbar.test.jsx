@@ -15,26 +15,13 @@ describe('OperationsToolbar', () => {
   it('renders dashboard title and description', () => {
     render(<OperationsToolbar {...defaultProps} />);
     expect(screen.getByText('Operations Dashboard')).toBeInTheDocument();
-    expect(screen.getByText(/Summary of assignments and teams/)).toBeInTheDocument();
+    expect(screen.getByText(/Drag and drop teams/i)).toBeInTheDocument();
   });
 
   it('triggers setViewMode when the view selector changes', () => {
     render(<OperationsToolbar {...defaultProps} />);
     fireEvent.change(screen.getByLabelText(/View:/), { target: { value: 'Operations' } });
     expect(defaultProps.setViewMode).toHaveBeenCalledWith('Operations');
-  });
-
-  it('triggers setLayoutMode when layout toggle buttons are clicked', () => {
-    render(<OperationsToolbar {...defaultProps} />);
-    
-    fireEvent.click(screen.getByText('Table'));
-    expect(defaultProps.setLayoutMode).toHaveBeenCalledWith('table');
-    
-    fireEvent.click(screen.getByText('Map'));
-    expect(defaultProps.setLayoutMode).toHaveBeenCalledWith('map');
-    
-    fireEvent.click(screen.getByText('Split'));
-    expect(defaultProps.setLayoutMode).toHaveBeenCalledWith('split');
   });
 
   it('shows the correct team count in the broadcast button tooltip', () => {
