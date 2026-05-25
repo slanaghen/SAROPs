@@ -1,4 +1,8 @@
-DO $$
+CREATE OR REPLACE FUNCTION public.seed_data_specific()
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER -- Runs with elevated permissions to bypass RLS for development seeding
+AS $$
 DECLARE
     latest_incident_id TEXT;
     latest_op_id UUID;
@@ -103,3 +107,7 @@ BEGIN
 
     RAISE NOTICE 'Success: Seeded 15 assignments and 31 responders for Incident % (OP %).', latest_incident_id, latest_op_id;
 END $$;
+
+-- Grant access to authenticated and anonymous users
+GRANT EXECUTE ON FUNCTION public.seed_data_specific() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.seed_data_specific() TO anon;

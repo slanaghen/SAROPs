@@ -829,10 +829,33 @@ CREATE POLICY "Allow all authenticated to record action logs in active incidents
   WITH CHECK (is_incident_active(incident_id));
 
 -- Policies for `team_messages`
-CREATE POLICY "Allow authenticated to view messages for their team" ON team_messages
-  FOR SELECT TO authenticated USING (team_id IN (SELECT team_id FROM team_responders WHERE responder_id IN (SELECT responder_id FROM responders WHERE auth_uid = auth.uid())));
-CREATE POLICY "Allow authenticated to insert messages for their team" ON team_messages
-  FOR INSERT TO authenticated WITH CHECK (team_id IN (SELECT team_id FROM team_responders WHERE responder_id IN (SELECT responder_id FROM responders WHERE auth_uid = auth.uid())));
+CREATE POLICY "Allow authenticated to view messages for their team or Staff team" ON team_messages
+  FOR SELECT TO authenticated 
+  USING (
+    team_id IN (SELECT team_id FROM team_responders WHERE responder_id = get_my_responder_id())
+    OR EXISTS (
+      SELECT 1 FROM teams t
+      JOIN operational_periods op ON t.op_period_id = op.op_period_id
+      JOIN responders r ON op.incident_id = r.incident_id
+      WHERE t.team_id = team_messages.team_id 
+        AND t.type = 'Staff'
+        AND r.responder_id = get_my_responder_id()
+    )
+  );
+
+CREATE POLICY "Allow authenticated to insert messages for their team or Staff team" ON team_messages
+  FOR INSERT TO authenticated 
+  WITH CHECK (
+    team_id IN (SELECT team_id FROM team_responders WHERE responder_id = get_my_responder_id())
+    OR EXISTS (
+      SELECT 1 FROM teams t
+      JOIN operational_periods op ON t.op_period_id = op.op_period_id
+      JOIN responders r ON op.incident_id = r.incident_id
+      WHERE t.team_id = team_messages.team_id 
+        AND t.type = 'Staff'
+        AND r.responder_id = get_my_responder_id()
+    )
+  );
 CREATE POLICY "Admins/Staff can manage all team messages" ON team_messages
   FOR ALL TO authenticated USING (check_is_operational_staff()) WITH CHECK (check_is_operational_staff());
 

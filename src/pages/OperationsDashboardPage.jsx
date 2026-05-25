@@ -367,15 +367,14 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     setError(null);
 
     try {
-      const messagesToInsert = teams.map(t => ({
-        team_id: t.team_id,
-        sender_name: responderName || user?.email || 'Operations',
-        message_text: `[BROADCAST]: ${broadcastMessage.trim()}`
-      }));
+      const staffTeam = teams.find(t => t.type === 'Staff');
+      if (!staffTeam) throw new Error('No Staff team found to receive broadcast.');
 
-      const { error: broadcastErr } = await supabase
-        .from('team_messages')
-        .insert(messagesToInsert);
+      const { error: broadcastErr } = await supabase.from('team_messages').insert({
+        team_id: staffTeam.team_id,
+        sender_name: `${responderName || user?.email || 'Operations'} (Broadcast)`,
+        message_text: broadcastMessage.trim()
+      });
 
       if (broadcastErr) throw broadcastErr;
 

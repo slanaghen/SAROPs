@@ -19,11 +19,18 @@ vi.mock('../hooks/usePlanningDashboard', () => ({
 
 vi.mock('../lib/supabase', () => ({
   supabase: { // Define the mock structure here
-    from: vi.fn(() => globalThis.createSupabaseQueryMock([])),
+    from: vi.fn(() => {
+      const mock = globalThis.createSupabaseQueryMock([]);
+      mock.neq = vi.fn().mockReturnThis();
+      return mock;
+    }),
     rpc: vi.fn(() => globalThis.createSupabaseQueryMock(null)),
     auth: {
       signOut: vi.fn().mockResolvedValue({ error: null }),
     },
+    channel: vi.fn().mockReturnThis(),
+    on: vi.fn().mockReturnThis(),
+    subscribe: vi.fn().mockReturnThis(),
   },
 }));
 

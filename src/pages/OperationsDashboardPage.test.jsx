@@ -196,8 +196,9 @@ describe('OperationsDashboardPage Logic', () => {
 
   it('sends a broadcast message to all teams in the operational period', async () => {
     const mockTeams = [
-      { team_id: 't1', team_name_number: 'Team 1', op_period_id: 'op-123' },
-      { team_id: 't2', team_name_number: 'Team 2', op_period_id: 'op-123' }
+      { team_id: 't1', team_name_number: 'Team 1', op_period_id: 'op-123', type: 'Ground' },
+      { team_id: 't2', team_name_number: 'Team 2', op_period_id: 'op-123', type: 'Ground' },
+      { team_id: 'staff-1', team_name_number: 'Staff', op_period_id: 'op-123', type: 'Staff' }
     ];
 
     supabase.from.mockImplementation((table) => {
@@ -221,9 +222,8 @@ describe('OperationsDashboardPage Logic', () => {
       // Find the specific call index for team_messages to get the correct return value
       const callIdx = vi.mocked(supabase.from).mock.calls.findIndex(c => c[0] === 'team_messages');
       const insertArgs = vi.mocked(supabase.from).mock.results[callIdx].value.insert.mock.calls[0][0];
-
-      expect(insertArgs).toHaveLength(2);
-      expect(insertArgs[0]).toEqual(expect.objectContaining({ message_text: '[BROADCAST]: Return to Base' }));
+      
+      expect(insertArgs).toEqual(expect.objectContaining({ message_text: 'Return to Base' }));
     });
   });
 

@@ -244,6 +244,12 @@ article {
   color: #111827; /* Black */
 }
 
+.staff-chip {
+  background-color: #1e3a8a !important;
+  color: #ffffff !important;
+  border-color: #1e3a8a !important;
+}
+
 .status-indicator.assigned {
   background: #d97706; /* Dark Amber */
   color: white;

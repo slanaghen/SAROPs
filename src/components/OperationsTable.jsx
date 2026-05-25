@@ -126,7 +126,7 @@ const OperationsTable = ({
               >
                 {row.assignmentName ? (
                   <div 
-                    className={`chip assignment-chip ${draggedItem?.id === row.id && draggedItem?.type === 'assignment' ? 'dragging' : ''} ${dropTarget?.id === row.id && dropTarget?.type === 'assignment' ? 'drop-target' : ''} ${row.hasBoth ? 'locked' : ''}`} // Added locked class
+                    className={`chip assignment-chip ${draggedItem?.id === row.id && draggedItem?.type === 'assignment' ? 'dragging' : ''} ${dropTarget?.id === row.id && dropTarget?.type === 'assignment' ? 'drop-target' : ''} ${row.hasBoth ? 'locked' : ''} ${row.assignmentName === 'Command Staff' ? 'staff-chip' : ''}`}
                     draggable={!row.hasBoth}
                     onDragStart={!row.hasBoth ? (e) => onDragStart(e, row.id, 'assignment') : undefined}
                     onDragEnd={onDragEnd}
@@ -164,7 +164,7 @@ const OperationsTable = ({
               >
                 {row.teamName ? (
                   <div 
-                    className={`chip team-chip ${draggedItem?.id === row.id && draggedItem?.type === 'team' ? 'dragging' : ''} ${dropTarget?.id === row.id && dropTarget?.type === 'team' ? 'drop-target' : ''} ${row.hasBoth ? 'locked' : ''}`}
+                    className={`chip team-chip ${draggedItem?.id === row.id && draggedItem?.type === 'team' ? 'dragging' : ''} ${dropTarget?.id === row.id && dropTarget?.type === 'team' ? 'drop-target' : ''} ${row.hasBoth ? 'locked' : ''} ${row.teamType === 'Staff' ? 'staff-chip' : ''}`}
                     draggable={!row.hasBoth}
                     onDragStart={!row.hasBoth ? (e) => onDragStart(e, row.id, 'team') : undefined}
                     onDragEnd={onDragEnd}

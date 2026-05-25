@@ -142,13 +142,19 @@ const AdminPage = () => {
       const { error: seedError } = await supabase.rpc('seed_data_specific');
       if (seedError) throw seedError;
 
+      await recordAction?.('Admin triggered specific development data seeding (15 assignments, 31 responders).');
       setSuccess('Database successfully seeded with test data.');
       fetchAllIncidents();
       fetchAllResponders();
       fetchAllTeams();
       fetchAllAssignments();
     } catch (err) {
-      setError('Failed to seed database: ' + err.message);
+      let userFriendlyMessage = err.message;
+      // Specifically catch the "missing function" error to provide a setup hint
+      if (err.message?.includes('seed_data_specific') && err.message?.includes('schema cache')) {
+        userFriendlyMessage = 'The database function "seed_data_specific" is not defined. Please run the seeding SQL script in your Supabase SQL Editor.';
+      }
+      setError('Failed to seed database: ' + userFriendlyMessage);
     } finally {
       setLoading(false);
     }
@@ -247,7 +253,7 @@ const AdminPage = () => {
       }
 
       const responder = allResponders.find(r => r.responder_id === id);
-      await recordAction(`Admin checked out responder "${responder?.name || 'Unknown'}" (ID: ${id}). Fields modified: status="Cleared", checkout_datetime="${now}".`);
+      await recordAction?.(`Admin checked out responder "${responder?.name || 'Unknown'}" (ID: ${id}). Fields modified: status="Cleared", checkout_datetime="${now}".`);
 
       setSuccess('Responder checked out.');
       fetchAllResponders();
@@ -285,7 +291,7 @@ const AdminPage = () => {
 
       if (updateError) throw updateError;
 
-      await recordAction(`Admin disbanded team "${name}" (ID: ${id}, Type: ${type}). Fields modified: status="Disbanded", last_par_check=null. All members status are "Staged".`);
+      await recordAction?.(`Admin disbanded team "${name}" (ID: ${id}, Type: ${type}). Fields modified: status="Disbanded", last_par_check=null. All members status are "Staged".`);
       setSuccess('Team disbanded.');
       fetchAllTeams();
       fetchAllResponders(); // Refresh responders as their status changed
@@ -300,6 +306,18 @@ const AdminPage = () => {
     if (!window.confirm(`Permanently delete team "${name}"? This action cannot be undone and will remove all assignment links.`)) return;
 
     try {
+      // Release members to Staged status before deletion to ensure they aren't orphaned in an active status
+      const { data: members } = await supabase.from('team_responders').select('responder_id').eq('team_id', id);
+      const rIds = members?.map(m => m.responder_id) || [];
+      
+      if (rIds.length > 0) {
+        await supabase.from('responders').update({ status: 'Staged' }).in('responder_id', rIds);
+        await supabase.from('responder_team_history')
+          .update({ detached_datetime: new Date().toISOString() })
+          .eq('team_id', id)
+          .is('detached_datetime', null);
+      }
+
       const { error: deleteError } = await supabase
         .from('teams')
         .delete()
@@ -307,7 +325,7 @@ const AdminPage = () => {
 
       if (deleteError) throw deleteError;
 
-      await recordAction(`Admin deleted team "${name}" (ID: ${id}, Type: ${type}).`);
+      await recordAction?.(`Admin deleted team "${name}" (ID: ${id}, Type: ${type}).`);
       setSuccess('Team record deleted.');
       fetchAllTeams();
     } catch (err) {
@@ -326,7 +344,7 @@ const AdminPage = () => {
 
       if (deleteError) throw deleteError;
 
-      await recordAction(`Admin deleted assignment "${name}" (ID: ${id}, Type: ${type}).`);
+      await recordAction?.(`Admin deleted assignment "${name}" (ID: ${id}, Type: ${type}).`);
       setSuccess('Assignment record deleted.');
       fetchAllAssignments();
     } catch (err) {
@@ -350,7 +368,7 @@ const AdminPage = () => {
         logout();
       }
 
-      await recordAction(`Admin deleted responder "${name}" (ID: ${id}, Agency: ${agency}).`);
+      await recordAction?.(`Admin deleted responder "${name}" (ID: ${id}, Agency: ${agency}).`);
       setSuccess('Responder record deleted.');
       fetchAllResponders();
     } catch (err) {
@@ -434,7 +452,7 @@ const AdminPage = () => {
         .eq('incident_id', id);
       
       const inc = allIncidents.find(inc => inc.incident_id === id);
-      await recordAction(`Admin ended incident "${inc?.name}" (ID: ${id}). Fields modified: end_datetime="${now}". Automated cleanup: marked ${deployedCount} assignments Incomplete, ${assignedCount} assignments Planned, disbanded all teams, and checked out ${activeResponders.length} responders.`);
+      await recordAction?.(`Admin ended incident "${inc?.name}" (ID: ${id}). Fields modified: end_datetime="${now}". Automated cleanup: marked ${deployedCount} assignments Incomplete, ${assignedCount} assignments Planned, disbanded all teams, and checked out ${activeResponders.length} responders.`);
 
       if (updateError) throw updateError;
 
@@ -483,7 +501,7 @@ const AdminPage = () => {
 
       if (deleteError) throw deleteError;
 
-      await recordAction(`Admin deleted incident "${name}" (ID: ${id}).`);
+      await recordAction?.(`Admin deleted incident "${name}" (ID: ${id}).`);
       // 3. Update context if we deleted the current active session
       if (id === incidentId) {
         logout();

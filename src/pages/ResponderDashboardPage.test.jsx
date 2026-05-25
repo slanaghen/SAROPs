@@ -20,7 +20,16 @@ vi.mock('../services/responderService', () => ({
   removeResponderFromTeam: vi.fn().mockResolvedValue({ success: true }),
 }));
 
-const createSupabaseMock = (data, error = null) => globalThis.createSupabaseQueryMock(data, error);
+// Mock OperationsMap to prevent Google Maps API loader from crashing the test environment
+vi.mock('../components/OperationsMap', () => ({
+  default: () => <div data-testid="operations-map-mock" />
+}));
+
+const createSupabaseMock = (data, error = null) => {
+  const mock = globalThis.createSupabaseQueryMock(data, error);
+  mock.neq = vi.fn().mockReturnThis();
+  return mock;
+};
 
 vi.mock('../lib/supabase', () => ({
   supabase: {
@@ -143,6 +152,7 @@ describe('ResponderDashboardPage', () => {
   it('renders loading state', () => {
     vi.mocked(useIncident).mockReturnValue({ 
       responderId: 'r1', 
+      responderName: 'Steve',
       accessLevel: 'responder',
       setResponderStatus: vi.fn(),
       setCurrentTeamStatus: vi.fn(),
@@ -330,6 +340,7 @@ describe('ResponderDashboardPage', () => {
 
     vi.mocked(useIncident).mockReturnValue({ 
       responderId: 'r1', 
+      responderName: 'Steve',
       incidentId: 'inc-123',
       incidentData: { opPeriodId: 'op-1' },
       accessLevel: 'responder',
@@ -346,10 +357,12 @@ describe('ResponderDashboardPage', () => {
       refetch: vi.fn()
     });
     
-    // Mock OP period interval
-    supabase.from.mockImplementation((table) => 
-      createSupabaseQueryMock({ par_check_interval: parInterval })
-    );
+    // Mock supabase calls with table-specific data to prevent data-shape crashes
+    vi.mocked(supabase.from).mockImplementation((table) => {
+      if (table === 'operational_periods') return createSupabaseQueryMock({ par_check_interval: parInterval });
+      if (table === 'teams') return createSupabaseQueryMock([mockTeam]);
+      return createSupabaseQueryMock([]);
+    });
 
     render(<ResponderDashboardPage />);
     
@@ -373,6 +386,7 @@ describe('ResponderDashboardPage', () => {
 
     vi.mocked(useIncident).mockReturnValue({ 
       responderId: 'r1', 
+      responderName: 'Steve',
       incidentId: 'inc-123',
       incidentData: { opPeriodId: 'op-1' },
       accessLevel: 'responder',
@@ -660,7 +674,7 @@ describe('ResponderDashboardPage', () => {
       if (table === 'team_messages') {
         const mock = createSupabaseMock([]);
         mock.insert = mockInsert;
-        mock.single = vi.fn().mockResolvedValue({ data: { id: 'm1', message_text: 'Test' }, error: null });
+        mock.single = vi.fn().mockResolvedValue({ data: { id: 'm1', sender_name: 'Steve', message_text: 'Test', created_at: new Date().toISOString() }, error: null });
         return mock;
       }
       return createSupabaseMock([]);

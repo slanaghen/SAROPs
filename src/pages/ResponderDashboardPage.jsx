@@ -4,6 +4,7 @@ import { useIncident } from '../context/IncidentContext';
 import useResponderTeamAndAssignment from '../hooks/useResponderTeamAndAssignment'; // The new hook
 import { removeResponderFromTeam } from '../services/responderService';
 import { RESPONDER_REFRESH_INTERVAL } from '../components/operationalConstants';
+import OperationsMap from '../components/OperationsMap';
 import '../styles/ResponderDashboard.css'; // New CSS file for styling
 
 /**
@@ -40,10 +41,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
   const [isUpdatingAsnData, setIsUpdatingAsnData] = useState(false);
   const [icsRole, setIcsRole] = useState(null);
   const [teamTimestamps, setTeamTimestamps] = useState({ last_par_check: null, created_at: null });
-
-  const mapContainer = useRef(null);
-  const map = useRef(null);
-  const [mapError, setMapError] = useState(false);
+  const [staffTeamId, setStaffTeamId] = useState(null);
   const [currentTime, setCurrentTime] = useState(Date.now());
 
   // This hook must be called before any useMemos or useEffects that depend on 'team' or 'assignment'
@@ -56,6 +54,23 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     assignment: true,
     messages: true
   });
+
+  // Resolve the Staff team ID to enable directed messaging to Incident Command
+  useEffect(() => {
+    const fetchStaffTeamId = async () => {
+      if (!incidentData?.opPeriodId) return;
+      const { data } = await supabase
+        .from('teams')
+        .select('team_id')
+        .eq('op_period_id', incidentData.opPeriodId)
+        .eq('type', 'Staff')
+        .maybeSingle();
+      if (data) setStaffTeamId(data.team_id);
+    };
+    fetchStaffTeamId();
+  }, [incidentData?.opPeriodId]);
+
+  const messagingChannelId = useMemo(() => staffTeamId || team?.team_id, [staffTeamId, team?.team_id]);
 
   // Keep a live clock for timer displays and overdue calculations
   useEffect(() => {
@@ -301,48 +316,59 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
   }, [assignment]);
 
   const fetchMessages = useCallback(async () => {
-    if (!team?.team_id) return;
+    if (!messagingChannelId) return;
     const { data } = await supabase
       .from('team_messages')
       .select('*')
-      .eq('team_id', team.team_id)
+      .eq('team_id', messagingChannelId)
       .order('created_at', { ascending: true });
     if (Array.isArray(data)) setMessages(data);
-  }, [team?.team_id]);
+  }, [messagingChannelId]);
 
   useEffect(() => {
-    if (!team?.team_id || !isLeader) return;
+    if (!messagingChannelId) return;
+    setMessages([]); // Clear previous channel messages during transition
     fetchMessages();
     const channel = supabase
-      .channel(`team-msgs-${team.team_id}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'team_messages', filter: `team_id=eq.${team.team_id}` }, 
+      .channel(`team-msgs-${messagingChannelId}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'team_messages', filter: `team_id=eq.${messagingChannelId}` }, 
         payload => setMessages(prev => {
-          const current = Array.isArray(prev) ? prev : [];
+          const current = prev || [];
           // Prevent duplicate if the local insert response arrived first
           if (current.some(m => m.id === payload.new.id)) return current;
           return [...current, payload.new];
         }))
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [team?.team_id, isLeader, fetchMessages]);
+  }, [messagingChannelId, fetchMessages]);
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
-    if (!messageText.trim() || !team?.team_id) return;
+    if (!messageText.trim() || !messagingChannelId) return;
+
+    const senderDisplay = (team?.type !== 'Staff' && team?.team_name_number) 
+      ? `${responderName} (${team.team_name_number})` 
+      : responderName;
 
     const { data, error } = await supabase
       .from('team_messages')
       .insert({ 
-        team_id: team.team_id, 
-        sender_name: responderName, 
+        team_id: messagingChannelId, 
+        sender_name: senderDisplay, 
         message_text: messageText.trim() 
       })
       .select()
       .single();
 
-    if (data && !error) {
+    if (error) {
+      console.error('Failed to send message:', error);
+      alert('Failed to send message: ' + (error.message || 'Permission denied'));
+      return;
+    }
+
+    if (data) {
       setMessages(prev => {
-        const current = Array.isArray(prev) ? prev : [];
+        const current = prev || [];
         return current.some(m => m.id === data.id) ? current : [...current, data];
       });
       setMessageText('');
@@ -697,7 +723,6 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
                       </div>
                       <div style={{ display: 'flex', gap: '8px' }}>
                         <button className="btn btn-primary" onClick={() => handleParResponse('OK')} style={{ flex: 1, fontSize: '18px' }}>PAR OK</button>
-                        <button className="btn btn-secondary" onClick={() => handleParResponse('Contact me')} style={{ flex: 1, borderColor: '#f59e0b', color: '#d97706', fontSize: '18px' }}>Contact Command</button>
                       </div>
                     </div>
                   )}
@@ -867,8 +892,8 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
               messages.map((m, i) => (
                 <div key={m.id || i} style={{ marginBottom: '10px', paddingBottom: '6px', borderBottom: '1px solid #e2e8f0', fontSize: '13px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
-                    <span style={{ fontWeight: 700, color: m.sender_name === responderName ? '#2563eb' : '#475569' }}>{m.sender_name}</span>
-                    <span style={{ fontSize: '10px', color: '#94a3b8' }}>{new Date(m.created_at).toLocaleTimeString()}</span>
+                    <span style={{ fontWeight: 700, color: (m.sender_name?.startsWith && responderName && typeof m.sender_name === 'string' && m.sender_name.startsWith(responderName)) ? '#2563eb' : '#475569' }}>{m.sender_name || 'Unknown'}</span>
+                    <span style={{ fontSize: '10px', color: '#94a3b8' }}>{m.created_at ? new Date(m.created_at).toLocaleTimeString() : '...'}</span>
                   </div>
                   <span>{m.message_text}</span>
                 </div>
@@ -902,38 +927,12 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
             height: '650px', 
             position: 'relative' 
           }}>
-            {mapError ? (
-              <div className="map-fallback" style={{ 
-                height: '100%', 
-                width: '100%', 
-                display: 'flex', 
-                flexDirection: 'column',
-                alignItems: 'center', 
-                justifyContent: 'center', 
-                background: '#f1f5f9',
-                backgroundImage: 'url("https://placehold.co/600x400/e2e8f0/64748b?text=Boulder,+CO+Static+Preview")',
-                backgroundSize: 'cover',
-                backgroundPosition: 'center'
-              }}>
-                <div style={{ 
-                  background: 'rgba(255,255,255,0.9)', 
-                  padding: '20px', 
-                  borderRadius: '8px', 
-                  textAlign: 'center',
-                  boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)',
-                  border: '1px solid #e2e8f0',
-                  maxWidth: '80%'
-                }}>
-                  <div style={{ fontSize: '24px', marginBottom: '8px' }}>⚠️</div>
-                  <h4 style={{ margin: '0 0 8px', color: '#1e293b' }}>Interactive Map Unavailable</h4>
-                  <p style={{ fontSize: '13px', color: '#64748b', margin: 0 }}>
-                    This is a static preview. To enable the live operations map, please configure a valid <strong>Google Maps API Key</strong>.
-                  </p>
-                </div>
-              </div>
-            ) : (
-              <div ref={mapContainer} style={{ height: '100%', width: '100%', background: '#f1f5f9' }} />
-            )}
+            <OperationsMap 
+              loading={loading} 
+              assignments={assignment ? [assignment] : []} 
+              teams={team ? [team] : []} 
+              sartopoId={sartopoId} 
+            />
           </div>
         </div>
       </div>

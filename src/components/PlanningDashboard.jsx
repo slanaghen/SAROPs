@@ -49,6 +49,9 @@ const PlanningDashboard = ({
   const [showMembersModal, setShowMembersModal] = useState(false);
   const [activeTeam, setActiveTeam] = useState(null);
   const [responderFilter, setResponderFilter] = useState('');
+  const [teamFilter, setTeamFilter] = useState('');
+  const [assignmentFilter, setAssignmentFilter] = useState('');
+  const [viewMode, setViewMode] = useState('All');
   const [draggedItem, setDraggedItem] = useState(null); // { id, type }
   const [dropTarget, setDropTarget] = useState(null); // { id, type }
 
@@ -156,15 +159,15 @@ const PlanningDashboard = ({
     return false;
   };
 
-  // Filter teams to only show those with "Staged" status
-  const stagedTeams = teams.filter(t => t.status === 'Staged');
-
   const isStagedResponder = (responder) => String(responder?.status || '').toLowerCase() === 'staged';
 
-  // Available responders for the panel (Staged)
+  // Filter responders logic
   const availableRespondersList = useMemo(() => {
     return responders.filter(r => {
-      if (!isStagedResponder(r)) return false;
+      // View Mode Filter
+      if (viewMode === 'Operations') {
+        if (!['Attached', 'Assigned', 'Deployed'].includes(r.status)) return false;
+      } else if (viewMode === 'Planning' && r.status !== 'Staged') return false;
       
       const term = responderFilter.toLowerCase().trim();
       if (!term) return true;
@@ -176,15 +179,51 @@ const PlanningDashboard = ({
         (r.special_skills && r.special_skills.toLowerCase().includes(term))
       );
     });
-  }, [responders, responderFilter]);
+  }, [responders, responderFilter, viewMode]);
 
-  // Filter assignments to show unassigned or available assignments
-  const availableAssignments = assignments.filter(asn => {
-    const isUnassigned = asn.team_id === null || asn.team_id === undefined;
-    return asn.op_period_id === operationalPeriodId && 
-           isUnassigned && 
-           !asn.is_orphaned;
-  });
+  // Filter teams logic
+  const filteredTeams = useMemo(() => {
+    return teams.filter(t => {
+      // View Mode Filter
+      if (viewMode === 'Operations') {
+        if (!['Assigned', 'Deployed'].includes(t.status)) return false;
+      } else if (viewMode === 'Planning' && t.status !== 'Staged') return false;
+
+      const term = teamFilter.toLowerCase().trim();
+      if (!term) return true;
+
+      const leaderName = getResponderName(t.leader_responder_id).toLowerCase();
+      return (
+        t.team_name_number.toLowerCase().includes(term) ||
+        t.type.toLowerCase().includes(term) ||
+        leaderName.includes(term)
+      );
+    });
+  }, [teams, teamFilter, viewMode, responders]);
+
+  // Filter assignments logic
+  const filteredAssignments = useMemo(() => {
+    return assignments.filter(asn => {
+      if (asn.op_period_id !== operationalPeriodId || asn.is_orphaned) return false;
+
+      // View Mode Filter
+      if (viewMode === 'Operations') {
+        if (!['Assigned', 'Deployed'].includes(asn.status)) return false;
+      } else if (viewMode === 'Planning') {
+        if (asn.status !== 'Planned' || asn.team_id) return false;
+      }
+
+      const term = assignmentFilter.toLowerCase().trim();
+      if (!term) return true;
+
+      return (
+        asn.title.toLowerCase().includes(term) ||
+        (asn.resource_type && asn.resource_type.toLowerCase().includes(term)) ||
+        (asn.description && asn.description.toLowerCase().includes(term)) ||
+        (asn.segment && asn.segment.toLowerCase().includes(term))
+      );
+    });
+  }, [assignments, assignmentFilter, viewMode, operationalPeriodId]);
 
   // Get responder details for the team leader
   const getResponderName = (responderId) => {
@@ -277,6 +316,15 @@ const PlanningDashboard = ({
 
     try {
       setLoading(true);
+
+      // Ensure all members return to Staged status before deleting the team
+      const rIds = team.current_responders?.map(r => r.responder_id) || [];
+      if (rIds.length > 0 && updateResponder) {
+        // Update each responder's status to 'Staged'
+        await Promise.all(rIds.map(id => updateResponder(id, { status: 'Staged' })));
+        // Note: history closure and status are now synchronized through these updates
+      }
+
       if (deleteTeam) {
         await deleteTeam(team.team_id);
         
@@ -493,7 +541,23 @@ const PlanningDashboard = ({
 
   return (
     <div className="planning-dashboard" data-dragging={!!draggedItem} style={{ overflowY: 'auto', maxHeight: '100vh' }}>
-      <h1>Planning Dashboard</h1>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+        <h1 style={{ margin: 0 }}>Planning Dashboard</h1>
+        <div className="view-filter-container" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <label htmlFor="view-mode-select" style={{ fontSize: '13px', fontWeight: 600, color: '#475569' }}>View:</label>
+          <select 
+            id="view-mode-select"
+            className="status-update-select" 
+            style={{ width: 'auto', minWidth: '140px', height: '32px' }}
+            value={viewMode}
+            onChange={(e) => setViewMode(e.target.value)}
+          >
+            <option value="All">Incident (All)</option>
+            <option value="Operations">Operations (Active)</option>
+            <option value="Planning">Planning (Staged)</option>
+          </select>
+        </div>
+      </div>
 
       {/* Messages */}
       {error && (
@@ -520,8 +584,12 @@ const PlanningDashboard = ({
       <div className="dashboard-container" style={{ maxHeight: 'calc(100vh - 160px)', overflowY: 'auto', paddingBottom: '20px' }}>
         {/* Available Responders Section */}
         <div className="section responders-section">
-          <div className="section-header">
-            <h2>Available Responders ({availableRespondersList.length})</h2>
+          <div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h2>Responders ({availableRespondersList.length})</h2>
+            {/* Hidden spacer to ensure header height matches columns with buttons, aligning the search boxes */}
+            <div style={{ visibility: 'hidden' }}>
+              <button className="btn btn-primary" style={{ fontSize: '14px' }}>Spacer</button>
+            </div>
           </div>
 
           <div className="responder-filters" style={{ padding: '0 16px 12px', display: 'flex', gap: '8px' }}>
@@ -544,7 +612,7 @@ const PlanningDashboard = ({
               <p>No available responders in staging</p>
             </div>
           ) : (
-            <div className="responder-list">
+            <div className="responder-list" style={{ maxHeight: '600px', overflowY: 'auto' }}>
               {availableRespondersList.map(responder => (
                 <div
                   key={responder.responder_id}
@@ -581,20 +649,35 @@ const PlanningDashboard = ({
 
         {/* Staged Teams Section */}
         <div className="section teams-section">
-          <div className="section-header">
-            <h2>Staged Teams ({stagedTeams.length})</h2> {/* Removed button here */}
+          <div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h2>Teams ({filteredTeams.length})</h2>
             <div>
               <button className="btn btn-primary" onClick={openNewTeamForm} style={{ fontSize: '14px' }}>New Team</button>
             </div>
           </div>
 
-          {stagedTeams.length === 0 ? (
+          <div className="responder-filters" style={{ padding: '0 16px 12px', display: 'flex', gap: '8px' }}>
+            <input 
+              type="text" 
+              placeholder="Search team or leader..." 
+              value={teamFilter}
+              onChange={(e) => setTeamFilter(e.target.value)}
+              style={{ flex: 1, padding: '6px 10px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+            />
+            {teamFilter && (
+              <button className="btn btn-secondary btn-sm" onClick={() => setTeamFilter('')} style={{ fontSize: '10px' }}>
+                Clear
+              </button>
+            )}
+          </div>
+
+          {filteredTeams.length === 0 ? (
             <div className="empty-state">
-              <p>No staged teams available in this operational period</p>
+              <p>No teams matching criteria</p>
             </div>
           ) : (
             <div className="team-list">
-              {stagedTeams.map(team => (
+              {filteredTeams.map(team => (
                 <div
                   key={team.team_id}
                   className={`team-card ${isTeamHighlighted(team.team_id) ? 'selected' : ''}`}
@@ -647,20 +730,35 @@ const PlanningDashboard = ({
 
         {/* Assignments Section */}
         <div className="section assignments-section">
-          <div className="section-header">
-            <h2>Available Assignments ({availableAssignments.length})</h2>
+          <div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h2>Assignments ({filteredAssignments.length})</h2>
             <div>
               <button className="btn btn-primary" onClick={openNewAssignmentForm} style={{ fontSize: '14px' }}>New Assignment</button>
             </div>
           </div>
 
-          {availableAssignments.length === 0 ? (
+          <div className="responder-filters" style={{ padding: '0 16px 12px', display: 'flex', gap: '8px' }}>
+            <input 
+              type="text" 
+              placeholder="Search assignment..." 
+              value={assignmentFilter}
+              onChange={(e) => setAssignmentFilter(e.target.value)}
+              style={{ flex: 1, padding: '6px 10px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+            />
+            {assignmentFilter && (
+              <button className="btn btn-secondary btn-sm" onClick={() => setAssignmentFilter('')} style={{ fontSize: '10px' }}>
+                Clear
+              </button>
+            )}
+          </div>
+
+          {filteredAssignments.length === 0 ? (
             <div className="empty-state">
-              <p>No available assignments in this operational period</p>
+              <p>No assignments matching criteria</p>
             </div>
           ) : (
             <div className="assignment-list">
-              {availableAssignments.map(assignment => (
+              {filteredAssignments.map(assignment => (
                 <div
                   key={assignment.assignment_id}
                   className={`assignment-card ${isAssignmentHighlighted(assignment.assignment_id) ? 'selected' : ''}`}

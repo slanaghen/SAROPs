@@ -37,6 +37,41 @@ const TeamFormModal = ({
   };
 
   const [teamForm, setTeamForm] = useState(() => getInitialState(initialData));
+  const [staffTeamId, setStaffTeamId] = useState(null);
+  const [allTeams, setAllTeams] = useState([]);
+  const [selectedRecipientId, setSelectedRecipientId] = useState('');
+  const { incidentData } = useIncident();
+
+  // Resolve the Staff team ID for centralized communications
+  useEffect(() => {
+    const fetchStaffTeamId = async () => {
+      if (!incidentData?.opPeriodId) return;
+      const { data } = await supabase
+        .from('teams')
+        .select('team_id')
+        .eq('op_period_id', incidentData.opPeriodId)
+        .eq('type', 'Staff')
+        .maybeSingle();
+      if (data) setStaffTeamId(data.team_id);
+    };
+    fetchStaffTeamId();
+
+    // Fetch all active teams for the recipient dropdown in staff communications
+    const fetchAllTeams = async () => {
+      if (!incidentData?.opPeriodId) return;
+      const { data } = await supabase
+        .from('teams')
+        .select('team_id, team_name_number, type')
+        .eq('op_period_id', incidentData.opPeriodId)
+        .neq('type', 'Staff') // Exclude staff from recipient list
+        .neq('status', 'Disbanded')
+        .order('team_name_number');
+      if (data) setAllTeams(data);
+    };
+    fetchAllTeams();
+  }, [incidentData?.opPeriodId]);
+
+  const messagingChannelId = staffTeamId || teamForm.team_id;
 
   useEffect(() => {
     setTeamForm(getInitialState(initialData));
@@ -46,26 +81,26 @@ const TeamFormModal = ({
   const [messageText, setMessageText] = useState('');
 
   const fetchMessages = useCallback(async () => {
-    if (!teamForm.team_id) return;
+    if (!messagingChannelId) return;
     const { data } = await supabase
       .from('team_messages')
       .select('*')
-      .eq('team_id', teamForm.team_id)
+      .eq('team_id', messagingChannelId)
       .order('created_at', { ascending: true });
     if (data) setMessages(data);
-  }, [teamForm.team_id]);
+  }, [messagingChannelId]);
 
   useEffect(() => {
-    if (!isOpen || !teamForm.team_id) return;
+    if (!isOpen || !messagingChannelId) return;
     fetchMessages();
     
     const channel = supabase
-      .channel(`staff-team-msgs-${teamForm.team_id}`)
+      .channel(`staff-team-msgs-${messagingChannelId}`)
       .on('postgres_changes', { 
         event: 'INSERT', 
         schema: 'public', 
         table: 'team_messages', 
-        filter: `team_id=eq.${teamForm.team_id}` 
+        filter: `team_id=eq.${messagingChannelId}` 
       }, payload => setMessages(prev => {
         // Prevent duplicate if the local insert response arrived first
         if (prev.some(m => m.id === payload.new.id)) return prev;
@@ -73,15 +108,25 @@ const TeamFormModal = ({
       }))
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
-  }, [isOpen, teamForm.team_id, fetchMessages]);
+    return () => { if (channel) supabase.removeChannel(channel); };
+  }, [isOpen, messagingChannelId, fetchMessages]);
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
-    if (!messageText.trim() || !teamForm.team_id) return;
+    if (!messageText.trim() || !messagingChannelId) return;
+
+    let senderDisplay = staffName;
+    if (teamForm.type !== 'Staff') {
+      // Staff messaging from a specific field team's editor
+      senderDisplay = `${staffName} (to ${teamForm.team_name_number})`;
+    } else if (selectedRecipientId) {
+      const recipient = allTeams.find(t => t.team_id === selectedRecipientId);
+      senderDisplay = `${staffName} (to ${recipient?.team_name_number || 'Team'})`;
+    }
+
     const { data, error: sendErr } = await supabase.from('team_messages').insert({
-      team_id: teamForm.team_id,
-      sender_name: staffName,
+      team_id: messagingChannelId,
+      sender_name: senderDisplay,
       message_text: messageText.trim()
     })
     .select()
@@ -435,7 +480,22 @@ const TeamFormModal = ({
 
         {teamForm.team_id && (
           <div className="form-row" style={{ borderTop: '1px solid #eee', paddingTop: '16px', marginTop: '16px' }}>
-            <label>Team Communications</label>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <label style={{ margin: 0 }}>Team Communications</label>
+              {isStaffTeam && (
+                <select 
+                  className="status-update-select" 
+                  style={{ width: 'auto', height: '24px', fontSize: '11px', padding: '0 4px', border: '1px solid #cbd5e1' }}
+                  value={selectedRecipientId}
+                  onChange={(e) => setSelectedRecipientId(e.target.value)}
+                >
+                  <option value="">Broadcast (To All)</option>
+                  {allTeams.map(t => (
+                    <option key={t.team_id} value={t.team_id}>{t.team_name_number}</option>
+                  ))}
+                </select>
+              )}
+            </div>
             <div className="messages-log" style={{ maxHeight: '150px', overflowY: 'auto', marginBottom: '10px', background: '#f8fafc', padding: '10px', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
               {messages.length === 0 ? <p style={{ color: '#94a3b8', fontSize: '12px' }}>No messages found.</p> : (
                 messages.map((m, i) => (
