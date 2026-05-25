@@ -31,10 +31,20 @@ const AdminPage = () => {
   const [opRefresh, setOpRefresh] = useState(OPERATIONS_REFRESH_INTERVAL / 1000);
   const [resRefresh, setResRefresh] = useState(RESPONDER_REFRESH_INTERVAL / 1000);
   const [sartopoRefresh, setSartopoRefresh] = useState(SARTOPO_REFRESH_INTERVAL / 1000);
+  const [appliedSettings, setAppliedSettings] = useState({
+    op: OPERATIONS_REFRESH_INTERVAL / 1000,
+    res: RESPONDER_REFRESH_INTERVAL / 1000,
+    sartopo: SARTOPO_REFRESH_INTERVAL / 1000
+  });
+
+  const isSettingsDirty = opRefresh !== appliedSettings.op || 
+                          resRefresh !== appliedSettings.res || 
+                          sartopoRefresh !== appliedSettings.sartopo;
   const [isTeamsExpanded, setIsTeamsExpanded] = useState(false);
   const [isAssignmentsExpanded, setIsAssignmentsExpanded] = useState(false);
   const [isIncidentsExpanded, setIsIncidentsExpanded] = useState(false);
   const [isAdminsExpanded, setIsAdminsExpanded] = useState(false);
+  const [selectedDeleteIncidentId, setSelectedDeleteIncidentId] = useState('');
 
   const fetchAdmins = async () => {
     if (!isAdmin) return;
@@ -160,6 +170,18 @@ const AdminPage = () => {
     }
   };
 
+  const handleApplySettings = () => {
+    setOperationsRefreshInterval(opRefresh * 1000);
+    setResponderRefreshInterval(resRefresh * 1000);
+    setSartopoRefreshInterval(sartopoRefresh * 1000);
+    setAppliedSettings({
+      op: opRefresh,
+      res: resRefresh,
+      sartopo: sartopoRefresh
+    });
+    setSuccess('System refresh intervals updated successfully.');
+  };
+
   useEffect(() => {
     if (isAdmin) {
       fetchAdmins();
@@ -240,7 +262,7 @@ const AdminPage = () => {
       const { error: updateError } = await supabase
         .from('responders')
         .update({ 
-          status: 'Cleared',
+          status: 'CheckedOut',
           checkout_datetime: now
         })
         .eq('responder_id', id);
@@ -253,7 +275,7 @@ const AdminPage = () => {
       }
 
       const responder = allResponders.find(r => r.responder_id === id);
-      await recordAction?.(`Admin checked out responder "${responder?.name || 'Unknown'}" (ID: ${id}). Fields modified: status="Cleared", checkout_datetime="${now}".`);
+      await recordAction?.(`Admin checked out responder "${responder?.name || 'Unknown'}" (ID: ${id}). Fields modified: status="CheckedOut", checkout_datetime="${now}".`);
 
       setSuccess('Responder checked out.');
       fetchAllResponders();
@@ -630,13 +652,13 @@ const AdminPage = () => {
       <div className="section-card" style={{ marginBottom: '24px' }}>
         <h2>System Settings</h2>
         <p className="subtitle" style={{ fontSize: '13px', margin: '0 0 16px' }}>Configure global refresh and polling intervals (in seconds).</p>
-        <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
           <label style={{ flex: 1, minWidth: '150px', marginBottom: 0 }}>
             Operations Refresh
             <input 
               type="number" 
               value={opRefresh} 
-              onChange={(e) => { const v = parseInt(e.target.value, 10) || 0; setOpRefresh(v); setOperationsRefreshInterval(v * 1000); }}
+              onChange={(e) => setOpRefresh(parseInt(e.target.value, 10) || 0)}
               min="5"
             />
           </label>
@@ -645,7 +667,7 @@ const AdminPage = () => {
             <input 
               type="number" 
               value={resRefresh} 
-              onChange={(e) => { const v = parseInt(e.target.value, 10) || 0; setResRefresh(v); setResponderRefreshInterval(v * 1000); }}
+              onChange={(e) => setResRefresh(parseInt(e.target.value, 10) || 0)}
               min="5"
             />
           </label>
@@ -654,10 +676,49 @@ const AdminPage = () => {
             <input 
               type="number" 
               value={sartopoRefresh} 
-              onChange={(e) => { const v = parseInt(e.target.value, 10) || 0; setSartopoRefresh(v); setSartopoRefreshInterval(v * 1000); }}
+              onChange={(e) => setSartopoRefresh(parseInt(e.target.value, 10) || 0)}
               min="5"
             />
           </label>
+          <button className="btn btn-primary" onClick={handleApplySettings} disabled={!isSettingsDirty} style={{ height: '38px' }}>
+            Apply
+          </button>
+        </div>
+      </div>
+
+      <div className="section-card" style={{ marginBottom: '24px' }}>
+        <h2>Data Management</h2>
+        <p className="subtitle" style={{ fontSize: '13px', margin: '0 0 16px' }}>Manage incident records and perform cascading deletions.</p>
+        <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end' }}>
+          <label style={{ flex: 1, marginBottom: 0 }}>
+            Select Incident to Delete
+            <select 
+              value={selectedDeleteIncidentId} 
+              onChange={(e) => setSelectedDeleteIncidentId(e.target.value)}
+              style={{ width: '100%' }}
+            >
+              <option value="">— Select an Incident —</option>
+              {allIncidents.map(inc => (
+                <option key={inc.incident_id} value={inc.incident_id}>
+                  {inc.name} (#{inc.number}) {inc.end_datetime ? '(Ended)' : '(Active)'}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button 
+            className="btn btn-secondary" 
+            style={{ color: '#dc2626', borderColor: '#fecaca', height: '38px' }}
+            disabled={!selectedDeleteIncidentId || loading}
+            onClick={() => {
+              const inc = allIncidents.find(i => i.incident_id === selectedDeleteIncidentId);
+              if (inc) {
+                handleDeleteIncident(inc.incident_id, inc.name);
+                setSelectedDeleteIncidentId('');
+              }
+            }}
+          >
+            Delete Incident
+          </button>
         </div>
       </div>
 

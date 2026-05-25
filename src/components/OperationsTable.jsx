@@ -126,7 +126,7 @@ const OperationsTable = ({
               >
                 {row.assignmentName ? (
                   <div 
-                    className={`chip assignment-chip ${draggedItem?.id === row.id && draggedItem?.type === 'assignment' ? 'dragging' : ''} ${dropTarget?.id === row.id && dropTarget?.type === 'assignment' ? 'drop-target' : ''} ${row.hasBoth ? 'locked' : ''} ${row.assignmentName === 'Command Staff' ? 'staff-chip' : ''}`}
+                    className={`chip assignment-chip ${draggedItem?.id === row.id && draggedItem?.type === 'assignment' ? 'dragging' : ''} ${dropTarget?.id === row.id && dropTarget?.type === 'assignment' ? 'drop-target' : ''} ${row.hasBoth ? 'locked' : ''} ${row.assignmentName === 'Command Staff' ? 'staff-chip' : ''} ${row.assignmentOrigin === 'SARTopo' ? 'sartopo-chip' : ''}`}
                     draggable={!row.hasBoth}
                     onDragStart={!row.hasBoth ? (e) => onDragStart(e, row.id, 'assignment') : undefined}
                     onDragEnd={onDragEnd}
@@ -158,7 +158,7 @@ const OperationsTable = ({
               <td 
                 style={{ textAlign: 'center' }}
                 onDragOver={(e) => onDragOver(e, row.id, 'team')}
-                onDragEnter={(e) => onDragEnter(e, row.id, 'team')}
+                onDragEnter={(e) => { e.preventDefault(); onDragEnter(e, row.id, 'team'); }}
                 onDragLeave={onDragLeave}
                 onDrop={(e) => onDrop(e, row.id, 'team')}
               >

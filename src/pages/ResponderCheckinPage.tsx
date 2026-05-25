@@ -93,7 +93,7 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
 
     if (shouldRedirect && !checkInInProgress && !showTeamSelection && !loading) {
       const isStaff = accessLevel === 'command staff' || (incidentData && incidentData.name && accessLevel === 'admin');
-      const target = isStaff ? '/operations' : '/responder-dashboard';
+      const target = isStaff ? '/operations' : '/responder';
       
       console.info(`Active session detected, redirecting to ${target}`);
       navigate(target);
@@ -190,7 +190,7 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
         navigate('/operations');
       } else {
         console.log('Navigating to Responder Dashboard');
-        navigate('/responder-dashboard');
+        navigate('/responder');
       }
     }
     console.groupEnd();

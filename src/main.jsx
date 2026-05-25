@@ -46,7 +46,7 @@ const router = createBrowserRouter([
           </Suspense>
         ) 
       },
-      { path: "responder-dashboard", element: <ResponderDashboardPage /> },
+      { path: "responder", element: <ResponderDashboardPage /> },
       { path: "incident", element: <IncidentEditPage /> },
       { path: "admin", element: <AdminPage /> },
       { path: "action-log", element: <ActionLogPage /> },

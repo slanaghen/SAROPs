@@ -17,6 +17,12 @@ CREATE TYPE assignment_status AS ENUM (
   'Incomplete'
 );
 
+DROP TYPE IF EXISTS assignment_origin CASCADE;
+CREATE TYPE assignment_origin AS ENUM (
+  'SAROps',
+  'SARTopo'
+);
+
 DROP TYPE IF EXISTS team_status CASCADE;
 CREATE TYPE team_status AS ENUM (
   'Staged',
@@ -48,8 +54,7 @@ CREATE TYPE responder_status AS ENUM (
   'Attached',
   'Assigned',
   'Deployed',
-  'CheckedOut',
-  'Cleared'
+  'CheckedOut'
 );
 
 DROP TYPE IF EXISTS responder_type CASCADE;
@@ -150,6 +155,7 @@ CREATE TABLE teams (
   equipment JSONB DEFAULT '[]'::jsonb,
   last_par_check TIMESTAMP WITH TIME ZONE,
   par_status TEXT,
+  conversation_log TEXT NOT NULL DEFAULT '',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -191,6 +197,7 @@ CREATE TABLE assignments (
   team_id UUID REFERENCES teams(team_id) ON DELETE SET NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  origin assignment_origin NOT NULL DEFAULT 'SAROps',
   CONSTRAINT assignment_sartopo_unique UNIQUE (op_period_id, sartopo_id)
 );
 
@@ -580,6 +587,49 @@ $func$ LANGUAGE plpgsql SECURITY DEFINER;
 CREATE TRIGGER trigger_sync_team_status_from_assignment
 AFTER INSERT OR UPDATE OF status ON assignments
 FOR EACH ROW EXECUTE FUNCTION sync_team_status_on_assignment_update();
+
+-- Function to maintain a consolidated conversation string on the team record
+CREATE OR REPLACE FUNCTION update_team_conversation_log()
+RETURNS TRIGGER AS $func$
+DECLARE
+    staff_id UUID;
+BEGIN
+    -- 1. Update the log of the team the message was actually sent to.
+    UPDATE teams
+    SET conversation_log = conversation_log || 
+                           '[' || to_char(NEW.created_at AT TIME ZONE 'UTC', 'HH24:MI') || '] ' || 
+                           NEW.sender_name || ': ' || NEW.message_text || E'\n'
+    WHERE team_id = NEW.team_id;
+    
+    -- 2. If the message is NOT already for the Staff team (directed field comms),
+    -- also append it to the Staff team's master log for centralized awareness.
+    -- This handles directed messages from Staff -> Team and Team -> Staff.
+    IF NOT EXISTS (SELECT 1 FROM teams WHERE team_id = NEW.team_id AND type = 'Staff') THEN
+        -- Find the active Staff team for this OP period
+        SELECT t.team_id INTO staff_id
+        FROM teams t
+        JOIN teams target ON t.op_period_id = target.op_period_id
+        WHERE target.team_id = NEW.team_id
+          AND t.type = 'Staff'
+          AND t.status != 'Disbanded'
+        LIMIT 1;
+
+        IF staff_id IS NOT NULL THEN
+            UPDATE teams
+            SET conversation_log = conversation_log || 
+                                   '[' || to_char(NEW.created_at AT TIME ZONE 'UTC', 'HH24:MI') || '] ' || 
+                                   NEW.sender_name || ': ' || NEW.message_text || E'\n'
+            WHERE team_id = staff_id;
+        END IF;
+    END IF;
+
+    RETURN NEW;
+END;
+$func$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trigger_update_team_conversation_log
+AFTER INSERT ON team_messages
+FOR EACH ROW EXECUTE FUNCTION update_team_conversation_log();
 
 -- ============================================================================
 -- ROW LEVEL SECURITY (RLS) POLICIES

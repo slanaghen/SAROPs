@@ -1,4 +1,4 @@
-import { render, screen, cleanup, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, waitFor, within, act } from '@testing-library/react';
 import * as matchers from '@testing-library/jest-dom/matchers';
 import { vi, describe, it, expect, afterEach, beforeEach } from 'vitest';
 import { BrowserRouter } from 'react-router-dom';
@@ -228,8 +228,8 @@ describe('AdminPage Authentication Gate', () => {
     // Expand section to access the delete button
     fireEvent.click(screen.getByText(/Incident Management/i));
 
-    await screen.findByText('Ended Incident');
-    const deleteBtn = screen.getByRole('button', { name: /Delete/i });
+    const row = (await screen.findByText('Ended Incident')).closest('tr');
+    const deleteBtn = within(row).getByRole('button', { name: /Delete/i });
     fireEvent.click(deleteBtn);
 
     expect(window.confirm).toHaveBeenCalled();
@@ -326,9 +326,8 @@ describe('AdminPage Authentication Gate', () => {
 
     await waitFor(() => {
       expect(window.confirm).toHaveBeenCalled();
-      // Application now marks individual checkouts as 'Cleared'
       expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ 
-        status: 'Cleared',
+        status: 'CheckedOut',
         checkout_datetime: expect.any(String) 
       }));
       expect(mockEq).toHaveBeenCalledWith('responder_id', 'res-123');
@@ -411,7 +410,8 @@ describe('AdminPage Authentication Gate', () => {
 
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
     fireEvent.click(screen.getByText(/Assignment Management/i));
-    fireEvent.click(await screen.findByRole('button', { name: /Delete/i }));
+    const row = (await screen.findByText('Task to Delete')).closest('tr');
+    fireEvent.click(within(row).getByRole('button', { name: /Delete/i }));
 
     expect(supabase.from).toHaveBeenCalledWith('assignments');
   });
@@ -431,7 +431,8 @@ describe('AdminPage Authentication Gate', () => {
 
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
     fireEvent.click(screen.getByText(/Responder Management/i));
-    fireEvent.click(await screen.findByRole('button', { name: /Delete/i }));
+    const row = (await screen.findByText('Delete Me')).closest('tr');
+    fireEvent.click(within(row).getByRole('button', { name: /Delete/i }));
 
     expect(supabase.from).toHaveBeenCalledWith('responders');
   });

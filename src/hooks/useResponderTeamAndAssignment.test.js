@@ -1,18 +1,26 @@
 import { renderHook, waitFor } from '@testing-library/react';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
-import { useResponderTeamAndAssignment } from './useResponderTeamAndAssignment';
+import useResponderTeamAndAssignment from './useResponderTeamAndAssignment';
 
 describe('useResponderTeamAndAssignment Hook', () => {
   const mockResponderId = 'res-123';
   
-  const createMockSupabase = (teamData, assignmentData) => ({
-    from: vi.fn((table) => ({
-      select: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockReturnThis(),
-      single: vi.fn().mockResolvedValue({ data: teamData, error: null }),
-      maybeSingle: vi.fn().mockResolvedValue({ data: assignmentData, error: null }),
-    }))
-  });
+  const createMockSupabase = (responderData, membershipData) => {
+    const mockChannel = {
+      on: vi.fn().mockReturnThis(),
+      subscribe: vi.fn().mockReturnThis(),
+    };
+    return {
+      from: vi.fn((table) => {
+        // Handle multiple table fetches within the same hook call
+        if (table === 'responders') return globalThis.createSupabaseQueryMock(responderData);
+        if (table === 'team_responders') return globalThis.createSupabaseQueryMock(membershipData);
+        return globalThis.createSupabaseQueryMock(null);
+      }),
+      channel: vi.fn().mockReturnValue(mockChannel),
+      removeChannel: vi.fn()
+    };
+  };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -21,11 +29,14 @@ describe('useResponderTeamAndAssignment Hook', () => {
   it('successfully joins team and assignment data for a responder', async () => {
     const mockTeam = { team_id: 't1', team_name_number: 'Team Alpha' };
     const mockAsn = { assignment_id: 'a1', title: 'Search Area 1' };
+    // The refactored hook expects assignments to be nested under teams from the join
+    mockTeam.assignments = [mockAsn];
     
     // Mock team_responders join return
     const teamResponderEntry = { teams: mockTeam };
+    const responderRecord = { status: 'Assigned', access_level: 'responder' };
     
-    const mockSupabase = createMockSupabase(teamResponderEntry, mockAsn);
+    const mockSupabase = createMockSupabase(responderRecord, teamResponderEntry);
     
     const { result } = renderHook(() => useResponderTeamAndAssignment(mockSupabase, mockResponderId));
 
@@ -39,14 +50,7 @@ describe('useResponderTeamAndAssignment Hook', () => {
   });
 
   it('handles responders who are not currently on a team', async () => {
-    // Mock team_responders returning no rows (PGRST116 handled in hook)
-    const mockSupabase = {
-      from: vi.fn(() => ({
-        select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        single: vi.fn().mockResolvedValue({ data: null, error: { code: 'PGRST116' } }),
-      }))
-    };
+    const mockSupabase = createMockSupabase({ status: 'Staged' }, null);
 
     const { result } = renderHook(() => useResponderTeamAndAssignment(mockSupabase, mockResponderId));
 

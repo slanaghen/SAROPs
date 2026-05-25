@@ -28,6 +28,9 @@ vi.mock('../components/OperationsMap', () => ({
 const createSupabaseMock = (data, error = null) => {
   const mock = globalThis.createSupabaseQueryMock(data, error);
   mock.neq = vi.fn().mockReturnThis();
+  mock.in = vi.fn().mockReturnThis();
+  mock.not = vi.fn().mockReturnThis();
+  mock.gt = vi.fn().mockReturnThis();
   return mock;
 };
 
@@ -495,8 +498,9 @@ describe('ResponderDashboardPage', () => {
 
     // Mock responders list to satisfy lookups and triggers
     vi.mocked(supabase.from).mockImplementation((table) => {
-      if (table === 'responders') return globalThis.createSupabaseQueryMock([{ responder_id: 'r1', name: 'Steve' }]);
-      return globalThis.createSupabaseQueryMock([]);
+      if (table === 'responders') return createSupabaseMock([{ responder_id: 'r1', name: 'Steve' }]);
+      if (table === 'teams') return createSupabaseMock({ team_id: 'staff-123' });
+      return createSupabaseMock([]);
     });
 
     vi.mocked(useResponderTeamAndAssignment).mockReturnValue({
@@ -526,7 +530,8 @@ describe('ResponderDashboardPage', () => {
       id: 'm1', 
       sender_name: 'Command', 
       message_text: 'Proceed to Sector Bravo', 
-      created_at: new Date().toISOString() 
+      created_at: new Date().toISOString(),
+      team_id: 'staff-123'
     };
     
     await act(async () => {
@@ -672,8 +677,9 @@ describe('ResponderDashboardPage', () => {
     const mockInsert = vi.fn().mockReturnThis();
     supabase.from.mockImplementation((table) => {
       if (table === 'team_messages') {
-        const mock = createSupabaseMock([]);
+        const mock = createSupabaseMock([{ id: 'm1', sender_name: 'Steve', message_text: 'Test', created_at: new Date().toISOString() }]);
         mock.insert = mockInsert;
+        mock.in = vi.fn().mockReturnThis();
         mock.single = vi.fn().mockResolvedValue({ data: { id: 'm1', sender_name: 'Steve', message_text: 'Test', created_at: new Date().toISOString() }, error: null });
         return mock;
       }
@@ -724,18 +730,22 @@ describe('ResponderDashboardPage', () => {
       setCurrentTeamStatus: mockSetCurrentTeamStatus,
       setCurrentAssignmentStatus: mockSetCurrentAssignmentStatus,
     });
-    window.confirm = vi.fn().mockReturnValue(true);
+
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     
     render(<ResponderDashboardPage />);
     
     const leaveBtn = screen.getByRole('button', { name: /Leave Team/i });
     expect(leaveBtn).not.toBeDisabled();
     
-    fireEvent.click(leaveBtn);
+    await act(async () => {
+      fireEvent.click(leaveBtn);
+    });
 
     await waitFor(() => {
-      expect(removeResponderFromTeam).toHaveBeenCalledWith(supabase, 'r1', 't1');
+      expect(removeResponderFromTeam).toHaveBeenCalledWith(expect.anything(), 'r1', 't1');
       expect(mockRefetch).toHaveBeenCalled();
     });
+    confirmSpy.mockRestore();
   });
 });

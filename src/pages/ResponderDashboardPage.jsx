@@ -21,6 +21,8 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     responderName,
     accessLevel,
     setResponderStatus,
+    currentTeamStatus,
+    currentAssignmentStatus,
     setCurrentTeamStatus,
     setCurrentAssignmentStatus
   } = useIncident();
@@ -40,7 +42,6 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
   const [debriefValue, setDebriefValue] = useState('');
   const [isUpdatingAsnData, setIsUpdatingAsnData] = useState(false);
   const [icsRole, setIcsRole] = useState(null);
-  const [teamTimestamps, setTeamTimestamps] = useState({ last_par_check: null, created_at: null });
   const [staffTeamId, setStaffTeamId] = useState(null);
   const [currentTime, setCurrentTime] = useState(Date.now());
 
@@ -64,13 +65,14 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
         .select('team_id')
         .eq('op_period_id', incidentData.opPeriodId)
         .eq('type', 'Staff')
+        .neq('status', 'Disbanded')
         .maybeSingle();
       if (data) setStaffTeamId(data.team_id);
     };
     fetchStaffTeamId();
   }, [incidentData?.opPeriodId]);
 
-  const messagingChannelId = useMemo(() => staffTeamId || team?.team_id, [staffTeamId, team?.team_id]);
+  const messagingChannelId = team?.team_id;
 
   // Keep a live clock for timer displays and overdue calculations
   useEffect(() => {
@@ -80,8 +82,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
 
   // Memoized PAR status and time formatting to ensure visual parity with Operations page
   const { parRequired, timeSinceLastPar } = useMemo(() => {
-    // Combine hook data with manually fetched timestamps to ensure values are available even if junction join is partial
-    const lastCheck = team?.last_par_check || teamTimestamps.last_par_check || team?.created_at || teamTimestamps.created_at;
+    const lastCheck = team?.last_par_check || team?.created_at;
     if (!team || !parInterval || !lastCheck) {
       return { parRequired: false, timeSinceLastPar: '' };
     }
@@ -105,26 +106,8 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     }
 
     return { parRequired: required, timeSinceLastPar: displayTime };
-  }, [team, teamTimestamps, parInterval, currentTime]);
+  }, [team, parInterval, currentTime]);
 
-  // Synchronize the global context (banner) with the data fetched by this dashboard.
-  // This ensures the top banner stays in sync with real-time status changes detected by the dashboard
-  // (e.g. from polling or real-time subscriptions within the useResponderTeamAndAssignment hook).
-  useEffect(() => {
-    if (team?.status && team.status !== 'Disbanded') {
-      setCurrentTeamStatus(team.status);
-    } else {
-      setCurrentTeamStatus(null);
-    }
-  }, [team?.status, setCurrentTeamStatus]);
-
-  useEffect(() => {
-    if (assignment?.status) {
-      setCurrentAssignmentStatus(assignment.status);
-    } else {
-      setCurrentAssignmentStatus(null);
-    }
-  }, [assignment?.status, setCurrentAssignmentStatus]);
   
   const lastMessageCountRef = useRef(0);
   const prevTeamId = useRef(null);
@@ -165,87 +148,12 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
   }, [team?.team_id, assignment?.assignment_id, icsRole]);
 
   /**
-   * Supplemental function to fetch missing team metadata (timestamps) if the primary hook returns partial data.
-   * This ensures that 'last_par_check' is available even if the hook's junction join omitted it.
-   */
-  const refreshTeamMetadata = useCallback(async () => {
-    if (!team?.team_id) return;
-    const { data } = await supabase
-      .from('teams')
-      .select('last_par_check, created_at')
-      .eq('team_id', team.team_id)
-      .maybeSingle();
-    
-    if (data) {
-      setTeamTimestamps({ last_par_check: data.last_par_check, created_at: data.created_at });
-    }
-  }, [team?.team_id]);
-
-  /**
-   * Refreshes both the primary membership data and the supplemental team metadata.
+   * Refreshes dashboard data.
+   * Note: The built-in real-time listener in the hook handles most updates automatically.
    */
   const refreshAllData = useCallback(() => {
     refetch();
-    refreshTeamMetadata();
-  }, [refetch, refreshTeamMetadata]);
-
-  // Initial fetch of metadata when team is identified
-  useEffect(() => {
-    refreshTeamMetadata();
-  }, [team?.team_id, refreshTeamMetadata]);
-
-  // Real-time subscription to detect team assignments and status changes immediately
-  useEffect(() => {
-    if (!responderId) return;
-
-    const channel = supabase
-      .channel(`responder-team-sync-${responderId}`)
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
-        table: 'team_responders', 
-        filter: `responder_id=eq.${responderId}` 
-      }, (payload) => {
-        console.log('📡 Team membership change detected:', payload.eventType);
-        refreshAllData();
-      })
-      .on('postgres_changes', { 
-        event: 'UPDATE', 
-        schema: 'public', 
-        table: 'responders', 
-        filter: `responder_id=eq.${responderId}` 
-      }, (payload) => {
-        console.log('📡 Responder status change detected:', payload.new.status);
-        refreshAllData();
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [responderId, refreshAllData]);
-
-  // Real-time subscription to detect changes to the team itself (like Command resetting PAR)
-  useEffect(() => {
-    if (!team?.team_id) return;
-
-    const channel = supabase
-      .channel(`responder-team-data-sync-${team.team_id}`)
-      .on('postgres_changes', { 
-        event: 'UPDATE', 
-        schema: 'public', 
-        table: 'teams', 
-        filter: `team_id=eq.${team.team_id}` 
-      }, () => {
-        console.log('📡 Team data change detected (e.g. PAR reset)');
-        refreshAllData();
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [team?.team_id, refreshAllData]);
+  }, [refetch]);
 
   useEffect(() => {
     const fetchResponders = async () => {
@@ -294,8 +202,9 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       if ((accessLevel === 'command staff' || accessLevel === 'admin') && incidentId && responderId) {
         const { data } = await supabase
           .from('team_responders')
-          .select('role, teams!inner(type)')
+          .select('role, teams!inner(type, status)')
           .eq('teams.type', 'Staff')
+          .neq('teams.status', 'Disbanded')
           .eq('responder_id', responderId)
           .maybeSingle();
         if (data) setIcsRole(data.role);
@@ -317,30 +226,52 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
 
   const fetchMessages = useCallback(async () => {
     if (!messagingChannelId) return;
-    const { data } = await supabase
-      .from('team_messages')
-      .select('*')
-      .eq('team_id', messagingChannelId)
-      .order('created_at', { ascending: true });
+
+    const isStaff = accessLevel === 'command staff' || accessLevel === 'admin';
+    let query = supabase.from('team_messages').select('*');
+
+    if (isStaff && incidentData?.opPeriodId) {
+      // For Staff Dashboard: Aggregate all team messages in the OP for master awareness
+      query = query
+        .select('*, teams!inner(op_period_id)')
+        .eq('teams.op_period_id', incidentData.opPeriodId);
+    } else {
+      // For Responders: Fetch messages for my team plus any broadcasts from Staff
+      const targetIds = [messagingChannelId];
+      if (staffTeamId) targetIds.push(staffTeamId);
+      query = query.in('team_id', targetIds);
+    }
+
+    const { data } = await query.order('created_at', { ascending: true });
     if (Array.isArray(data)) setMessages(data);
-  }, [messagingChannelId]);
+  }, [messagingChannelId, staffTeamId, accessLevel, incidentData?.opPeriodId]);
 
   useEffect(() => {
     if (!messagingChannelId) return;
     setMessages([]); // Clear previous channel messages during transition
     fetchMessages();
     const channel = supabase
-      .channel(`team-msgs-${messagingChannelId}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'team_messages', filter: `team_id=eq.${messagingChannelId}` }, 
-        payload => setMessages(prev => {
-          const current = prev || [];
-          // Prevent duplicate if the local insert response arrived first
-          if (current.some(m => m.id === payload.new.id)) return current;
-          return [...current, payload.new];
-        }))
+      .channel(`responder-msgs-${messagingChannelId}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'team_messages' }, 
+        payload => {
+          const msg = payload.new;
+          const isStaff = accessLevel === 'command staff' || accessLevel === 'admin';
+          
+          // Logic: Staff Dashboard accepts all team messages. 
+          // Field Responders only accept their own channel or Staff broadcasts.
+          const isRelevant = isStaff || msg.team_id === messagingChannelId || msg.team_id === staffTeamId;
+          if (!isRelevant) return;
+
+          setMessages(prev => {
+            const current = prev || [];
+            // Prevent duplicate if the local insert response arrived first
+            if (current.some(m => m.id === msg.id)) return current;
+            return [...current, msg];
+          });
+        })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [messagingChannelId, fetchMessages]);
+  }, [messagingChannelId, staffTeamId, accessLevel, fetchMessages]);
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
@@ -374,6 +305,34 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       setMessageText('');
     }
   };
+
+  /**
+   * Helper function to determine visibility of dashboard sections
+   * based on the responder's current mission status and access level.
+   */
+  const getDashboardVisibilities = () => {
+    const isStaffOrAdmin = accessLevel === 'command staff' || accessLevel === 'admin';
+
+    // Show team if staff/admin (ICS view) or if responder has an active team attachment
+    const showTeam = isStaffOrAdmin || !!currentTeamStatus || (team && team.status !== 'Disbanded');
+
+    // Show assignment if staff/admin (ICS view) or if responder has an active tasking
+    const showAssignment = isStaffOrAdmin || !!currentAssignmentStatus || (
+      assignment &&
+      assignment.status !== 'Completed' &&
+      assignment.status !== 'Incomplete'
+    );
+
+    // Show empty state only for regular responders who are not attached to anything
+    const showEmptyState = !isStaffOrAdmin && 
+                           (!team || team.status === 'Disbanded') && 
+                           !currentTeamStatus && 
+                           !assignment;
+
+    return { showTeam, showAssignment, showEmptyState };
+  };
+
+  const { showTeam, showAssignment, showEmptyState } = getDashboardVisibilities();
 
   // Periodically refresh data to detect status changes from Command
   useEffect(() => {
@@ -429,12 +388,6 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       if (error) throw error;
       if (!data || data.length === 0) throw new Error('PAR update blocked: You must be the Team Leader to perform this action.');
       
-      // Optimistically update local timestamps to ensure the dashboard reflects the "just now" state immediately
-      setTeamTimestamps({
-        last_par_check: data[0].last_par_check,
-        created_at: data[0].created_at || teamTimestamps.created_at
-      });
-
       refreshAllData();
     } catch (err) {
       console.error('Error sending PAR:', err);
@@ -609,14 +562,14 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
         </div>
       )}
 
-      {(!team || team.status === 'Disbanded') && !assignment && accessLevel === 'responder' && (
+      {showEmptyState && (
         <div className="dashboard-section empty-state">
           <p>You are currently not attached to a team or your team is not assigned to an assignment.</p>
           <p>Please check in with incident command for your assignment.</p>
         </div>
       )}
 
-      {((team && team.status !== 'Disbanded') || accessLevel === 'command staff' || accessLevel === 'admin') && (
+      {showTeam && (
         <div className="dashboard-section team-info">
           <SectionHeader
             title={accessLevel === 'command staff' || accessLevel === 'admin' ? 'Staff Status' : `Your Team: ${team?.team_name_number}`} 
@@ -745,7 +698,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
         </div>
       )}
 
-      {((assignment && team?.status !== 'Disbanded' && assignment.status !== 'Completed' && assignment.status !== 'Incomplete') || accessLevel === 'command staff' || accessLevel === 'admin') && (
+      {showAssignment && (
         <div className="dashboard-section assignment-info">
           <SectionHeader
             title={accessLevel === 'command staff' || accessLevel === 'admin' ? 'ICS Chart' : `Team Assignment: ${assignment?.title}`} 
@@ -881,7 +834,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       {team && team.status !== 'Disbanded' && (
         <div className="dashboard-section messaging-info">
           <SectionHeader 
-            title="Team Leader Communications" 
+            title="Team Communications" 
             sectionKey="messages" 
             showBadge={messages.length > lastMessageCountRef.current && <span className="status-indicator active" style={{ fontSize: '9px' }}>NEW</span>}
           />

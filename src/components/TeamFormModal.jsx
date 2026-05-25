@@ -71,10 +71,12 @@ const TeamFormModal = ({
     fetchAllTeams();
   }, [incidentData?.opPeriodId]);
 
-  const messagingChannelId = staffTeamId || teamForm.team_id;
+  const isStaffTeam = teamForm.type === 'Staff';
+  const messagingChannelId = (isStaffTeam && selectedRecipientId) ? selectedRecipientId : teamForm.team_id;
 
   useEffect(() => {
     setTeamForm(getInitialState(initialData));
+    setSelectedRecipientId(''); // Reset recipient selection when switching teams or opening modal
   }, [initialData]);
 
   const [messages, setMessages] = useState([]);
@@ -92,6 +94,7 @@ const TeamFormModal = ({
 
   useEffect(() => {
     if (!isOpen || !messagingChannelId) return;
+    setMessages([]); // Clear previous messages when switching channels/recipients
     fetchMessages();
     
     const channel = supabase
@@ -250,7 +253,6 @@ const TeamFormModal = ({
     });
   };
 
-  const isStaffTeam = teamForm.type === 'Staff';
   const leaderRole = isStaffTeam ? 'Incident Commander' : 'Team Leader';
 
   const customMembers = (teamForm.responder_ids || []).filter(id => {
@@ -482,19 +484,6 @@ const TeamFormModal = ({
           <div className="form-row" style={{ borderTop: '1px solid #eee', paddingTop: '16px', marginTop: '16px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
               <label style={{ margin: 0 }}>Team Communications</label>
-              {isStaffTeam && (
-                <select 
-                  className="status-update-select" 
-                  style={{ width: 'auto', height: '24px', fontSize: '11px', padding: '0 4px', border: '1px solid #cbd5e1' }}
-                  value={selectedRecipientId}
-                  onChange={(e) => setSelectedRecipientId(e.target.value)}
-                >
-                  <option value="">Broadcast (To All)</option>
-                  {allTeams.map(t => (
-                    <option key={t.team_id} value={t.team_id}>{t.team_name_number}</option>
-                  ))}
-                </select>
-              )}
             </div>
             <div className="messages-log" style={{ maxHeight: '150px', overflowY: 'auto', marginBottom: '10px', background: '#f8fafc', padding: '10px', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
               {messages.length === 0 ? <p style={{ color: '#94a3b8', fontSize: '12px' }}>No messages found.</p> : (
@@ -509,7 +498,7 @@ const TeamFormModal = ({
                 ))
               )}
             </div>
-            <div style={{ display: 'flex', gap: '8px' }}>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
               <input 
                 type="text" 
                 value={messageText} 
@@ -518,6 +507,19 @@ const TeamFormModal = ({
                 style={{ flex: 1 }}
               />
               <button type="button" className="btn btn-secondary btn-sm" onClick={handleSendMessage}>Send</button>
+              {isStaffTeam && (
+                <select 
+                  className="status-update-select" 
+                  style={{ width: 'auto', height: '32px', fontSize: '12px', padding: '0 8px', border: '1px solid #cbd5e1' }}
+                  value={selectedRecipientId}
+                  onChange={(e) => setSelectedRecipientId(e.target.value)}
+                >
+                  <option value="">Broadcast (To All)</option>
+                  {allTeams.map(t => (
+                    <option key={t.team_id} value={t.team_id}>{t.team_name_number}</option>
+                  ))}
+                </select>
+              )}
             </div>
           </div>
         )}

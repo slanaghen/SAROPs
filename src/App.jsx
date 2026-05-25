@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from './lib/supabase';
 import { useIncident } from './context/IncidentContext';
+import useResponderTeamAndAssignment from './hooks/useResponderTeamAndAssignment';
 import logo from './assets/logo.png';
 import './styles.css';
 
@@ -66,96 +67,31 @@ function App() {
     }
   }, [isActive]);
 
-  // Global Real-time Session Sync
-  // Ensures the top banner and context state reflect DB changes immediately
+  // Centralized Real-time Session Sync
+  // Uses the shared operational hook to ensure the banner and global context
+  // are perfectly synchronized with the database state at all times.
+  const { team, assignment, responderRecord, loading: hookLoading } = useResponderTeamAndAssignment(supabase, responderId);
+
   useEffect(() => {
-    if (!isActive || !responderId) return;
+    if (!isActive || !responderId || hookLoading) return;
 
-    console.debug('🔄 Initializing global session sync for:', responderId);
-    const syncSession = async () => {
-      try {
-        // 1. Fetch latest responder status and access level
-        const { data: resp } = await supabase
-          .from('responders')
-          .select('status, access_level')
-          .eq('responder_id', responderId)
-          .maybeSingle();
+    if (responderRecord) {
+      setResponderStatus(responderRecord.status);
+      if (setAccessLevel) setAccessLevel(responderRecord.access_level);
+    }
 
-        if (resp) {
-          setResponderStatus(resp.status);
-          if (setAccessLevel) setAccessLevel(resp.access_level);
-        }
-
-        // 2. Fetch latest team and assignment context
-        const { data: membership } = await supabase
-          .from('team_responders')
-          .select('team_id, teams(status, assignments(status))')
-          .eq('responder_id', responderId)
-          .maybeSingle();
-
-        if (membership && membership.teams && membership.teams.status !== 'Disbanded') {
-          setCurrentTeamStatus(membership.teams.status);
-          const assignments = membership.teams.assignments;
-          const activeAsn = Array.isArray(assignments) ? assignments[0] : assignments;
-          setCurrentAssignmentStatus(activeAsn?.status || null);
-        } else {
-          setCurrentTeamStatus(null);
-          setCurrentAssignmentStatus(null);
-        }
-      } catch (err) {
-        console.error('Session sync error:', err);
-      }
-    };
-
-    syncSession();
-
-    // Force sync when window regains focus (handles sleep/wake issues)
-    window.addEventListener('focus', syncSession);
-
-    // Subscribe to real-time updates for this responder
-    const channel = supabase
-      .channel(`global-session-sync-${responderId}`)
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
-        table: 'responders', 
-        filter: `responder_id=eq.${responderId}` 
-      }, () => {
-        console.debug('📡 Responder record change detected, syncing...');
-        syncSession();
-      })
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
-        table: 'team_responders', 
-        filter: `responder_id=eq.${responderId}` 
-      }, () => {
-        console.debug('📡 Team membership change detected, syncing...');
-        syncSession();
-      })
-      .on('postgres_changes', { 
-        event: 'UPDATE', 
-        schema: 'public', 
-        table: 'teams' 
-      }, () => {
-        console.debug('📡 Team record change detected, syncing...');
-        syncSession();
-      })
-      .on('postgres_changes', { 
-        event: 'UPDATE', 
-        schema: 'public', 
-        table: 'assignments' 
-      }, () => {
-        console.debug('📡 Assignment record change detected, syncing...');
-        syncSession();
-      })
-      .subscribe();
-
-    return () => {
-      window.removeEventListener('focus', syncSession);
-      supabase.removeChannel(channel);
-    };
-  }, [isActive, responderId, setResponderStatus, setAccessLevel, setCurrentTeamStatus, setCurrentAssignmentStatus]);
+    if (team && team.status !== 'Disbanded') {
+      setCurrentTeamStatus(team.status);
+      const activeAsn = Array.isArray(team.assignments) ? team.assignments[0] : team.assignments;
+      setCurrentAssignmentStatus(activeAsn?.status || null);
+    } else {
+      setCurrentTeamStatus(null);
+      setCurrentAssignmentStatus(null);
+    }
+  }, [
+    isActive, responderId, responderRecord, team, assignment, hookLoading,
+    setResponderStatus, setAccessLevel, setCurrentTeamStatus, setCurrentAssignmentStatus
+  ]);
 
   // Audio and browser notification for status changes (responder, team, assignment)
   const prevStatusRef = useRef(responderStatus);
@@ -265,7 +201,7 @@ function App() {
               </button>
               {menuOpen && (
                 <div className="banner-dropdown">
-                  <Link to="/responder-dashboard" onClick={() => setMenuOpen(false)}>My Dashboard</Link>
+                  <Link to="/responder" onClick={() => setMenuOpen(false)}>My Dashboard</Link>
                   <Link to="/operations" onClick={() => setMenuOpen(false)}>Operations</Link>
                   <Link to="/planning" onClick={() => setMenuOpen(false)}>Planning</Link>
                   <Link to="/checkin" onClick={() => setMenuOpen(false)}>Check-in</Link>

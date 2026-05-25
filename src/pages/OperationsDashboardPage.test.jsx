@@ -12,8 +12,16 @@ expect.extend(matchers);
 // Mock dependencies
 vi.mock('../lib/supabase', () => ({
   supabase: {
-    from: vi.fn(),
-    rpc: vi.fn()
+    from: vi.fn(() => {
+      const mock = globalThis.createSupabaseQueryMock([]);
+      mock.neq = vi.fn().mockReturnThis();
+      return mock;
+    }),
+    rpc: vi.fn(),
+    channel: vi.fn().mockReturnThis(),
+    on: vi.fn().mockReturnThis(),
+    subscribe: vi.fn().mockReturnThis(),
+    removeChannel: vi.fn()
   },
 }));
 
@@ -30,8 +38,11 @@ vi.mock('../hooks/usePlanningDashboard', async () => {
 });
 
 describe('OperationsDashboardPage Logic', () => {
-  const createQueryMock = (data, error = null) => globalThis.createSupabaseQueryMock(data, error);
-
+   const createQueryMock = (data, error = null) => {
+    const mock = globalThis.createSupabaseQueryMock(data, error);
+    mock.neq = vi.fn().mockReturnThis();
+    return mock;
+  };
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();

@@ -5,48 +5,63 @@ import useResponderTeamAndAssignment from '../hooks/useResponderTeamAndAssignmen
 describe('useResponderTeamAndAssignment Hook', () => {
   const mockSupabase = {
     from: vi.fn(),
+    channel: vi.fn(),
+    removeChannel: vi.fn()
   };
 
   beforeEach(() => {
     vi.clearAllMocks();
+
+    // Re-establish mock implementations inside beforeEach to prevent leakage 
+    // or environment reset issues.
+    const mockChannel = {
+      on: vi.fn().mockReturnThis(),
+      subscribe: vi.fn().mockReturnThis(),
+    };
+    mockSupabase.channel.mockReturnValue(mockChannel);
   });
 
-  // Helper to mock Supabase "thenable" query chain
-  const mockQuery = (data, error = null) => ({
-    select: vi.fn().mockReturnThis(),
-    eq: vi.fn().mockReturnThis(),
-    single: vi.fn().mockReturnThis(),
-    maybeSingle: vi.fn().mockReturnThis(),
-    then: (onFulfilled) => Promise.resolve({ data, error }).then(onFulfilled),
-  });
+  // Use the global helper for consistent Supabase Query Mocks
+  const mockQuery = (data, error = null) => globalThis.createSupabaseQueryMock(data, error);
 
   it('starts in a loading state', () => {
-    const hangingPromise = new Promise(() => {});
+    // Mock a hanging promise to ensure loading stays true
+    const hangingQuery = {
+      ...mockQuery([]),
+      maybeSingle: vi.fn().mockReturnValue(new Promise(() => {})),
+      then: vi.fn().mockReturnValue(new Promise(() => {}))
+    };
+
     mockSupabase.from.mockReturnValue({
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
-      single: vi.fn().mockReturnValue(hangingPromise),
-      maybeSingle: vi.fn().mockReturnValue(hangingPromise), // Hangs to keep loading true
+      maybeSingle: vi.fn().mockReturnValue(hangingQuery),
+      then: vi.fn().mockReturnValue(hangingQuery)
     });
 
-    const { result } = renderHook(() => useResponderTeamAndAssignment(mockSupabase, 'res-123'));
+    const { result } = renderHook(() => useResponderTeamAndAssignment(mockSupabase, 'res-loading'));
     expect(result.current.loading).toBe(true);
   });
 
   it('successfully fetches team and assignment for a responder', async () => {
-    const mockTeam = { team_id: 't-1', team_name_number: 'Team Alpha' };
-    const mockAssignment = { assignment_id: 'a-1', title: 'Division A', team_id: 't-1', segment: 'A', probability_of_detection: null };
+    const mockAssignment = { assignment_id: 'a-1', title: 'Division A', team_id: 't-1', segment: 'A' };
+    const mockTeam = { 
+      team_id: 't-1', 
+      team_name_number: 'Team Alpha', 
+      status: 'Assigned',
+      assignments: [mockAssignment] 
+    };
 
     mockSupabase.from.mockImplementation((table) => {
+      if (table === 'responders') return mockQuery({ status: 'Assigned', access_level: 'responder' });
       if (table === 'team_responders') return mockQuery({ 
         team_id: 't-1', 
         teams: mockTeam // The hook expects team details nested under 'teams' from the join
       });
-      if (table === 'assignments') return mockQuery(mockAssignment);
       return mockQuery(null);
     });
 
-    const { result } = renderHook(() => useResponderTeamAndAssignment(mockSupabase, 'res-123'));
+    const { result } = renderHook(() => useResponderTeamAndAssignment(mockSupabase, 'res-success'));
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -59,7 +74,7 @@ describe('useResponderTeamAndAssignment Hook', () => {
   it('handles errors gracefully if membership fetch fails', async () => {
     mockSupabase.from.mockReturnValue(mockQuery(null, { message: 'Database error' }));
 
-    const { result } = renderHook(() => useResponderTeamAndAssignment(mockSupabase, 'res-123'));
+    const { result } = renderHook(() => useResponderTeamAndAssignment(mockSupabase, 'res-error'));
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -69,13 +84,15 @@ describe('useResponderTeamAndAssignment Hook', () => {
 
   it('handles case where responder is not in a team', async () => {
     mockSupabase.from.mockImplementation((table) => {
-        if (table === 'team_responders') return mockQuery(null); // No membership found
+        if (table === 'responders') return mockQuery({ status: 'Staged' });
+        if (table === 'team_responders') return mockQuery(null);
         return mockQuery(null);
     });
 
-    const { result } = renderHook(() => useResponderTeamAndAssignment(mockSupabase, 'res-123'));
+    const { result } = renderHook(() => useResponderTeamAndAssignment(mockSupabase, 'res-none'));
 
     await waitFor(() => {
+      expect(result.current.loading).toBe(false);
       expect(result.current.team).toBeNull();
       expect(result.current.assignment).toBeNull();
     });

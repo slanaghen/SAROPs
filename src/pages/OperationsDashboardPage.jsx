@@ -178,6 +178,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
         tacChannel: asnItem.frequency_primary || '—',
         assignmentId: asnItem.assignment_id,
         assignmentName: asnItem.title,
+        assignmentOrigin: asnItem.origin,
         assignmentType: asnItem.resource_type || '—',
         assignmentStatus: asnItem.status,
         teamName: matchingTeam?.team_name_number || '',

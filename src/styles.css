@@ -250,6 +250,29 @@ article {
   border-color: #1e3a8a !important;
 }
 
+.sartopo-chip {
+  background-color: #16a34a !important; /* Green-600 */
+  color: #ffffff !important;
+  border-color: #16a34a !important;
+}
+
+/* Highlighting for drag and drop targets to indicate valid linkage */
+.chip.drop-target {
+  background-color: #fef3c7 !important; /* Amber-100 */
+  color: #92400e !important; /* Amber-800 */
+  border: 2px dashed #d97706 !important; /* Amber-600 */
+  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.3);
+  transform: scale(1.05);
+  transition: transform 0.1s ease;
+  animation: pulse-drop-target 1.5s infinite;
+}
+
+@keyframes pulse-drop-target {
+  0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
+  70% { box-shadow: 0 0 0 10px rgba(245, 158, 11, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+}
+
 .status-indicator.assigned {
   background: #d97706; /* Dark Amber */
   color: white;
