@@ -11,51 +11,70 @@
  * @param {Object} feature - GeoJSON feature from SARTopo
  * @param {string} opPeriodId - UUID of the operational period
  * @param {Object|null} existing - Existing assignment record if performing an update
+ * @param {string|null} origin - Optional override for origin (defaults to SARTopo)
  * @returns {Object} Payload for Supabase upsert
  */
-export const mapSartopoToAssignment = (feature, opPeriodId, existing = null) => {
+export const mapSartopoToAssignment = (feature, opPeriodId, existing = null, origin = 'SARTopo') => {
   const p = feature.properties || {};
+
+  console.debug('[mapSartopoToAssignment] Incoming SARTopo properties:', p);
+  console.debug('[mapSartopoToAssignment] Existing SAROps assignment:', existing);
   
   // Extract values with fallbacks matching SARTopo's standard JSON structure
   const title = p.title || p.name || 'Untitled SARTopo Object';
   
-  // Normalize numeric fields (SARTopo often returns these as strings)
-  const pod = parseInt(p.unresponsive_pod || p.pod, 10) || 0;
-  const teamSize = parseInt(p.teamSize || p.personnel, 10) || 0;
+  // Map SARTopo priority integers or variations to SAROps labels
+  const rawPriority = p.priority || p.Priority || p.importance || p.priority_level;
+  let mappedPriority = existing?.priority || null;
+  
+  if (rawPriority !== undefined && rawPriority !== null) {
+    const pStr = String(rawPriority).toLowerCase();
+    if (pStr === '1' || pStr.includes('high')) mappedPriority = 'High';
+    else if (pStr === '2' || pStr.includes('medium') || pStr.includes('normal')) mappedPriority = 'Medium';
+    else if (pStr === '3' || pStr.includes('low')) mappedPriority = 'Low';
+    else mappedPriority = rawPriority; // Preserve other string values
+  }
 
-  return {
+  // Normalize numeric fields (SARTopo often returns these as strings)
+  const podValue = parseInt(p.unresponsive_pod || p.unresponsivePOD || p.pod || p.probabilityOfDetection, 10);
+  const teamSizeValue = parseInt(p.teamSize || p.team_size || p.personnel || p.size || p.personnel_count, 10);
+
+  const payload = {
     // Primary/Foreign Keys
-    // Use assignment_id if we are updating an existing record, otherwise let DB generate UUID
-    ...(existing?.id && { assignment_id: existing.id }),
+    // Omit assignment_id (PK) to ensure uniform payloads in bulk upsert operations.
+    // Conflict resolution is handled via the natural unique key (op_period_id, sartopo_id).
     op_period_id: opPeriodId,
     sartopo_id: feature.id,
     
     // Operational State
     status: existing?.status || 'Planned',
-    origin: 'SARTopo',
+    origin: existing?.origin || origin,
     is_orphaned: false,
     
     // Core Data
-    title: title,
-    segment: p.segment || '',
-    resource_type: p.resource_type || p.class || 'Search Team',
-    team_size: teamSize,
-    frequency_primary: p.primary_frequency || p.frequency || '',
-    description: p.description || p.comments || '',
-    priority: p.priority || 'Normal',
+    title: title, // Title is NOT NULL in DB, so always provide a value
+    segment: p.segment || p.division || p.sector || existing?.segment || null,
+    resource_type: p.resource_type || p.resourceType || p.class || p.type || existing?.resource_type || null,
+    team_size: isNaN(teamSizeValue) ? (existing?.team_size || null) : teamSizeValue,
+    frequency_primary: p.primary_frequency || p.primaryFrequency || p.frequency || p.tac || p.tac_channel || p.comms || existing?.frequency_primary || null,
+    description: p.description || p.comments || p.notes || existing?.description || null,
+    priority: mappedPriority,
+    hazards: p.hazards || p.safety || existing?.hazards || null,
     
-    // Style/GIS Metadata (Used for syncing back to SARTopo)
-    folder_id: p.folderId || null,
-    color: p.color || null,
-    stroke: p.stroke || null,
-    fill: p.fill || null,
-    
+    // Extended SARTopo Fields
+    transportation: p.transportation || p.travel_method || existing?.transportation || null,
+    time_allocated: p.time_allocated || p.timeAllocated || p.duration || existing?.time_allocated || null,
+    prepared_by: p.prepared_by || p.preparedBy || p.author || existing?.prepared_by || null,
+
     // Calculations
-    probability_of_detection: pod,
+    probability_of_detection: isNaN(podValue) ? (existing?.probability_of_detection || null) : podValue,
     
     // Metadata
     updated_at: new Date().toISOString()
   };
+
+  console.debug('[mapSartopoToAssignment] Final generated payload:', payload);
+  return payload;
 };
 
 /**
@@ -77,10 +96,6 @@ export const mapAssignmentToSartopo = (assignment) => {
     primary_frequency: assignment.frequency_primary || '',
     description: assignment.description || '',
     unresponsive_pod: assignment.probability_of_detection || 0,
-    priority: assignment.priority || 'Normal',
-    folderId: assignment.folder_id,
-    color: assignment.color,
-    stroke: assignment.stroke,
-    fill: assignment.fill
+    priority: assignment.priority || 'Normal'
   };
 };

@@ -462,6 +462,41 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     }
   };
 
+  const handleCancelAssignment = async () => {
+    if (!team?.team_id || !assignment?.assignment_id) return;
+    
+    const msg = `Mark this assignment as "Incomplete"? This will disband your team and return you to Staged status.`;
+    if (!window.confirm(msg)) return;
+
+    setIsUpdatingAsnData(true);
+    try {
+      // Update assignment: status -> Incomplete and save mission results.
+      // Cascades to Team (Disbanded) and Responders (Staged) automatically via DB triggers.
+      const { data: asnData, error: asnError } = await supabase
+        .from('assignments')
+        .update({ 
+          status: 'Incomplete',
+          probability_of_detection: podValue === '' ? null : parseInt(podValue, 10),
+          debrief_narrative: debriefValue.trim()
+        })
+        .eq('assignment_id', assignment.assignment_id)
+        .select();
+      
+      if (asnError) throw asnError;
+      if (!asnData || asnData.length === 0) throw new Error('Action blocked: Unauthorized assignment update.');
+      
+      setResponderStatus('Staged');
+      setCurrentTeamStatus(null);
+      setCurrentAssignmentStatus(null);
+      refreshAllData();
+    } catch (err) {
+      console.error('Error cancelling assignment:', err);
+      alert('Failed to cancel assignment: ' + err.message);
+    } finally {
+      setIsUpdatingAsnData(false);
+    }
+  };
+
   const handleDeploy = async () => {
     if (!team?.team_id || !assignment?.assignment_id) return;
     
@@ -810,14 +845,25 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
                     {isUpdatingAsnData ? 'Saving...' : 'Save Mission Data'}
                   </button>
 
-                  <button 
-                    className="btn btn-primary" 
-                    onClick={handleCompleteAssignment}
-                    disabled={isUpdatingAsnData || podValue === '' || !debriefValue.trim()}
-                    style={{ width: '100%', backgroundColor: '#059669', borderColor: '#059669', fontSize: '18px' }}
-                  >
-                    {isUpdatingAsnData ? 'Completing...' : 'Complete Assignment'}
-                  </button>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button 
+                      className="btn btn-primary" 
+                      onClick={handleCompleteAssignment}
+                      disabled={isUpdatingAsnData || podValue === '' || !debriefValue.trim()}
+                      style={{ flex: 1, backgroundColor: '#059669', borderColor: '#059669', fontSize: '18px' }}
+                    >
+                      {isUpdatingAsnData ? 'Completing...' : 'Complete'}
+                    </button>
+
+                    <button 
+                      className="btn btn-secondary" 
+                      onClick={handleCancelAssignment}
+                      disabled={isUpdatingAsnData || podValue === '' || !debriefValue.trim()}
+                      style={{ flex: 1, color: '#dc2626', borderColor: '#fecaca', fontSize: '18px' }}
+                    >
+                      {isUpdatingAsnData ? 'Cancelling...' : 'Cancel'}
+                    </button>
+                  </div>
                 </div>
               )}
 

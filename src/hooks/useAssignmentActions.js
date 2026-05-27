@@ -23,54 +23,33 @@ export const useAssignmentActions = ({
   const updateResourceStatus = useCallback(async (assignmentId, teamId, newStatus) => {
     try {
       setLoading(true);
-      let finalTeamStatus = newStatus;
       let unlinkRequired = false;
-      const now = new Date().toISOString();
 
-      if (['Completed', 'Incomplete'].includes(newStatus)) {
-        finalTeamStatus = 'Disbanded';
-        unlinkRequired = false; // Keep link for history/accountability
-      } else if (newStatus === 'Planned') {
-        finalTeamStatus = 'Staged';
+      if (newStatus === 'Planned') {
         unlinkRequired = true;
       }
 
-      let teamUpdatePayload = { status: finalTeamStatus };
-      if (['Assigned', 'Deployed'].includes(finalTeamStatus)) { // Only set last_par_check for active statuses
-        teamUpdatePayload.last_par_check = now;
-      } else { // Clear last_par_check for non-active statuses
-        teamUpdatePayload.last_par_check = null;
-      }
-
+      // Update the primary assignment record.
+      // Note: Database triggers handle cascading this status to the Team (Disbanded/Staged/Assigned)
+      // and all individual Responders automatically.
       const { error: asnError } = await supabaseClient
         .from('assignments')
         .update({ status: newStatus, team_id: unlinkRequired ? null : teamId })
         .eq('assignment_id', assignmentId);
+
       if (asnError) throw asnError;
 
+      // Manual sync for 'Assigned' and 'Planned' status changes
       if (teamId) {
-        const { error: teamError } = await supabaseClient.from('teams').update(teamUpdatePayload).eq('team_id', teamId);
-        if (teamError) throw teamError;
-
-        const { data: members } = await supabaseClient.from('team_responders').select('responder_id').eq('team_id', teamId);
-        const memberIds = members?.map(m => m.responder_id) || [];
-        
-        if (memberIds.length > 0) {
-          if (finalTeamStatus === 'Disbanded') {
-            await Promise.all([
-              supabaseClient.from('responders').update({ status: 'Staged' }).in('responder_id', memberIds),
-              supabaseClient.from('responder_team_history').update({ detached_datetime: now }).eq('team_id', teamId).is('detached_datetime', null)
-            ]);
-            if (responderId && memberIds.includes(responderId)) setResponderStatus('Staged');
-          } else if (['Assigned', 'Deployed'].includes(finalTeamStatus)) {
-            await supabaseClient.from('responders').update({ status: finalTeamStatus }).in('responder_id', memberIds);
-          }
+        if (newStatus === 'Assigned') {
+          await supabaseClient.from('teams').update({ status: 'Assigned', last_par_check: new Date().toISOString() }).eq('team_id', teamId);
+        } else if (unlinkRequired) {
+          await supabaseClient.from('teams').update({ status: 'Staged', last_par_check: null }).eq('team_id', teamId);
         }
       }
 
       const assignment = assignments.find(a => a.assignment_id === assignmentId);
-      const team = teams.find(t => t.team_id === teamId);
-      await recordAction(`Resource status update: Assignment "${assignment?.title || 'Unknown'}" set to ${newStatus}${teamId ? `, Team "${team?.team_name_number || 'No Team'}" set to ${finalTeamStatus}` : ''}.`);
+      await recordAction(`Resource status update: Assignment "${assignment?.title || 'Unknown'}" set to ${newStatus}. Automated trigger applied to associated team/responders.`);
       await fetchDashboardData();
       return { success: true };
     } catch (err) {
@@ -92,10 +71,6 @@ export const useAssignmentActions = ({
       await recordAction(`Assigned team "${team?.team_name_number || 'Unknown'}" to assignment "${assignment?.title || 'Unknown'}". Statuses set to "Assigned".`);
 
       await supabaseClient.from('teams').update({ status: 'Assigned', last_par_check: new Date().toISOString() }).eq('team_id', teamId);
-      const { data: members } = await supabaseClient.from('team_responders').select('responder_id').eq('team_id', teamId);
-      if (members?.length) {
-        await supabaseClient.from('responders').update({ status: 'Assigned' }).in('responder_id', members.map(m => m.responder_id));
-      }
       await fetchDashboardData();
       return { success: true };
     } catch (err) {
@@ -142,17 +117,11 @@ export const useAssignmentActions = ({
         description: payload.description || '',
         probability_of_detection: payload.probability_of_detection ?? null,
         debrief_narrative: payload.debrief_narrative || '',
-        team_name: payload.team_name || null,
         priority: payload.priority || null,
         transportation: payload.transportation || null,
         time_allocated: payload.time_allocated || null,
-        segment_area: payload.segment_area || null,
         hazards: payload.hazards || null,
         prepared_by: payload.prepared_by || null,
-        folder_id: payload.folder_id || null,
-        color: payload.color || null,
-        stroke: payload.stroke || null,
-        fill: payload.fill || null,
         op_period_id: operationalPeriodId,
         status: payload.status || 'Planned',
         team_id: payload.team_id || null,

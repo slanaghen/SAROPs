@@ -238,13 +238,24 @@ const IncidentEditPage = () => {
       const fetchedFeatures = data?.result?.state?.features || data?.features || [];
       
       if (fetchedFeatures.length > 0) {
+        // Fetch existing assignments for this OP to enable data reconciliation (merging)
+        const { data: existingAsns } = await supabase
+          .from('assignments')
+          .select('*')
+          .eq('op_period_id', opId);
+
+        const existingMap = new Map(existingAsns?.map(a => [a.sartopo_id, a]) || []);
+
         const payloads = fetchedFeatures
           .filter(f => f.properties?.class === 'Assignment')
-          .map(f => mapSartopoToAssignment(f, opId))
+          .map(f => {
+            const existing = existingMap.get(f.id);
+            return mapSartopoToAssignment(f, opId, existing);
+          })
           .filter(Boolean);
 
         if (payloads.length > 0) {
-          await supabase.from('assignments').upsert(payloads, { onConflict: 'assignment_id' });
+          await supabase.from('assignments').upsert(payloads, { onConflict: 'op_period_id,sartopo_id' });
         }
       }
       console.log('[IncidentEdit] SARTopo auto-sync complete.');

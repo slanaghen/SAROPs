@@ -37,7 +37,11 @@ describe('SARTopoDataPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
-    global.fetch = vi.fn();
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ features: [] }),
+      text: async () => 'OK'
+    });
   });
 
   afterEach(cleanup);
@@ -181,7 +185,9 @@ describe('SARTopoDataPage', () => {
       sartopo_id: 'feature-1',
       title: 'Clue 1',
       resource_type: 'Search Team',
-      priority: 'High'
+      priority: 'High',
+      origin: 'SARTopo',
+      status: 'Planned',
     });
   });
 
@@ -259,8 +265,8 @@ describe('SARTopoDataPage', () => {
 
     render(<SARTopoDataPage />);
     
-    const uploadBtn = await screen.findByText('Upload to SARTopo');
-    fireEvent.click(uploadBtn);
+    const generateBtn = await screen.findByRole('button', { name: /Generate JSON/i });
+    fireEvent.click(generateBtn);
 
     expect(await screen.findByText(/Map Upload to SARTopo \(1\)/i)).toBeInTheDocument();
     expect(screen.getByText(/"Task 1"/i)).toBeInTheDocument();
@@ -368,6 +374,7 @@ describe('SARTopoDataPage', () => {
     global.fetch.mockResolvedValue({
       ok: true,
       status: 200,
+      json: vi.fn().mockResolvedValue({ features: [] }),
       text: vi.fn().mockResolvedValue('OK')
     });
 
@@ -380,18 +387,20 @@ describe('SARTopoDataPage', () => {
     const mockKey = 'x7+lOzSEs6+q6m37cUV2S7a19ucAKUxEve60nzRYq6k=';
     vi.stubEnv('VITE_SARTOPO_API_KEY', mockKey);
 
-    // Expect fetch to be called for each assignment using the /features/ endpoint
+    // Expect fetch to be called 3 times: 1 for GET Map State, and 2 for the POST updates
     await waitFor(() => {
-      expect(global.fetch).toHaveBeenCalledTimes(2);
+      expect(global.fetch).toHaveBeenCalledTimes(3);
+      // Verify the Get-Modify-Push Step 1 uses the reliable /since/0 endpoint
+      expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/since/0'));
       expect(global.fetch).toHaveBeenCalledWith(
-        expect.stringContaining(`/sartopo-api/api/v1/map/MAP123/features/s1?k=${mockKey}`),
+        expect.stringContaining(`/sartopo-api/api/v1/map/MAP123/features?readCode=${mockKey}`),
         expect.objectContaining({
           method: 'POST',
           body: expect.stringContaining('"id":"s1"')
         })
       );
       expect(global.fetch).toHaveBeenCalledWith(
-        expect.stringContaining(`/sartopo-api/api/v1/map/MAP123/features/s2?k=${mockKey}`),
+        expect.stringContaining(`/sartopo-api/api/v1/map/MAP123/features?readCode=${mockKey}`),
         expect.objectContaining({
           method: 'POST',
           body: expect.any(String)

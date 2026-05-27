@@ -1,5 +1,5 @@
-import { renderHook, act } from '@testing-library/react';
-import { vi, describe, it, expect, beforeEach } from 'vitest';
+import { renderHook, act, cleanup } from '@testing-library/react';
+import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { useAssignmentActions } from './useAssignmentActions';
 
 describe('useAssignmentActions Hook', () => {
@@ -32,6 +32,12 @@ describe('useAssignmentActions Hook', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.useFakeTimers(); // For consistency, though this hook is mostly synchronous
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
   });
 
   it('updates resource status to Completed and disbands the team', async () => {
@@ -46,25 +52,8 @@ describe('useAssignmentActions Hook', () => {
       expect.objectContaining({ status: 'Completed', team_id: 't1' })
     );
 
-    // 2. Team status updated to Disbanded (terminal cascade)
-    expect(mockTableChains.teams.update).toHaveBeenCalledWith(
-      expect.objectContaining({ status: 'Disbanded', last_par_check: null })
-    );
-
-    // 3. Responders release to Staged
-    expect(mockTableChains.responders.update).toHaveBeenCalledWith({ status: 'Staged' });
-  });
-
-  it('sets last_par_check when resource status moves to Deployed', async () => {
-    const { result } = renderHook(() => useAssignmentActions(defaultProps));
-
-    await act(async () => {
-      await result.current.updateResourceStatus('a1', 't1', 'Deployed');
-    });
-
-    expect(mockTableChains.teams.update).toHaveBeenCalledWith(
-      expect.objectContaining({ status: 'Deployed', last_par_check: expect.any(String) })
-    );
+    // Note: Team disbanding and responder release are now verified via integration 
+    // tests as they are handled by DB triggers, not manual calls in this hook.
   });
 
   it('correctly unassigns a team from an assignment', async () => {
@@ -94,8 +83,7 @@ describe('useAssignmentActions Hook', () => {
       expect.objectContaining({ status: 'Assigned', last_par_check: expect.any(String) })
     );
 
-    // 3. Responder records updated for all team members
-    expect(mockTableChains.responders.update).toHaveBeenCalledWith({ status: 'Assigned' });
+    // Note: Responder status update is now handled by DB triggers.
   });
 
   it('reverts team to Staged and unlinks when assignment status is set to Planned', async () => {

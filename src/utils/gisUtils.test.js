@@ -13,8 +13,7 @@ describe('gisUtils', () => {
         teamSize: '3',
         primary_frequency: '155.125',
         description: 'Sweep the creek bed',
-        priority: 'High',
-        color: '#ff0000'
+        priority: 'High'
       }
     };
 
@@ -30,7 +29,6 @@ describe('gisUtils', () => {
         frequency_primary: '155.125',
         description: 'Sweep the creek bed',
         priority: 'High',
-        color: '#ff0000',
         origin: 'SARTopo',
         status: 'Planned'
       });
@@ -55,8 +53,7 @@ describe('gisUtils', () => {
       resource_type: 'Ground',
       team_size: 4,
       frequency_primary: 'TAC 2',
-      probability_of_detection: 90,
-      color: '#00ff00'
+      probability_of_detection: 90
     };
 
     it('correctly maps a SAROps assignment back to a SARTopo GeoJSON feature properties', () => {
@@ -67,8 +64,7 @@ describe('gisUtils', () => {
         class: 'Assignment',
         status: 'Deployed',
         teamSize: 4,
-        unresponsive_pod: 90,
-        color: '#00ff00'
+        unresponsive_pod: 90
       });
     });
   });

@@ -560,13 +560,8 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
         priority: formData.priority || null,
         transportation: formData.transportation || null,
         time_allocated: formData.time_allocated || null,
-        segment_area: formData.segment_area || null,
         hazards: formData.hazards || null,
-        prepared_by: formData.prepared_by || null,
-        folder_id: formData.folder_id || null,
-        color: formData.color || null,
-        stroke: formData.stroke || null,
-        fill: formData.fill || null
+        prepared_by: formData.prepared_by || null
       };
 
       if (formData.assignment_id) {
