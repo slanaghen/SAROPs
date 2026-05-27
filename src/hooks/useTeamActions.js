@@ -60,13 +60,22 @@ export const useTeamActions = ({
         ]);
       }
 
-      const membersInfo = (teamPayload.responder_ids || [])
-        .map(id => {
-          const responder = responders.find(r => r.responder_id === id);
+      // Fetch fresh names from DB to ensure they are known before logging
+      let membersInfo = '';
+      if (teamPayload.responder_ids?.length) {
+        const { data: nameData } = await supabaseClient
+          .from('responders')
+          .select('responder_id, name')
+          .in('responder_id', teamPayload.responder_ids);
+
+        membersInfo = teamPayload.responder_ids.map(id => {
+          // Prioritize name from local responders list to ensure availability during logging
+          const responder = responders?.find(r => r.responder_id === id) || nameData?.find(r => r.responder_id === id);
           const role = teamPayload.responder_roles?.[id];
           return `${responder?.name || 'Unknown'} (${role || 'Member'})`;
-        })
-        .join(', ');
+        }).join(', ');
+      }
+
       const actionMessage = `Created team "${teamPayload.team_name_number}" (Type: ${teamPayload.type}, Status: ${teamPayload.status}).` +
         (membersInfo ? ` Members: ${membersInfo}.` : '');
       await recordAction(actionMessage);
@@ -177,7 +186,22 @@ export const useTeamActions = ({
         ...toRemove.map(id => detachResponderFromTeam(id, teamId))
       ]);
 
-      const membersInfo = (finalResponderIds || []).map(id => { /* ... same as createTeam ... */ }).join(', ');
+      // Fetch fresh names from DB to ensure they are known before logging
+      let membersInfo = '';
+      if (finalResponderIds?.length) {
+        const { data: nameData } = await supabaseClient
+          .from('responders')
+          .select('responder_id, name')
+          .in('responder_id', finalResponderIds);
+
+        membersInfo = finalResponderIds.map(id => {
+          // Prioritize name from local responders list to ensure availability during logging
+          const responder = responders?.find(r => r.responder_id === id) || nameData?.find(r => r.responder_id === id);
+          const role = responder_roles?.[id];
+          return `${responder?.name || 'Unknown'} (${role || 'Member'})`;
+        }).join(', ');
+      }
+
       const actionMessage = `Updated team "${updates.team_name_number || data.team_name_number}" (ID: ${teamId}, Type: ${updates.type || data.type}, Status: ${updates.status || data.status}).` +
         (membersInfo ? ` Members: ${membersInfo}.` : '');
       await recordAction(actionMessage);
