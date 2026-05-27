@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase'; // Assuming this is the centralized Supabase client
 import { useIncident } from '../context/IncidentContext';
+import { checkIsParOverdue, formatTimeSince } from '../utils/operationalUtils';
 import useResponderTeamAndAssignment from '../hooks/useResponderTeamAndAssignment'; // The new hook
 import { removeResponderFromTeam } from '../services/responderService';
-import { RESPONDER_REFRESH_INTERVAL } from '../components/operationalConstants';
 import OperationsMap from '../components/OperationsMap';
 import '../styles/ResponderDashboard.css'; // New CSS file for styling
 
@@ -24,8 +24,11 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     currentTeamStatus,
     currentAssignmentStatus,
     setCurrentTeamStatus,
-    setCurrentAssignmentStatus
+    setCurrentAssignmentStatus,
+    showGlobalMap,
+    responderRefreshInterval
   } = useIncident();
+  const isStaffOrAdmin = accessLevel === 'command staff' || accessLevel === 'admin';
   const responderId = propId || contextId;
   const [responders, setResponders] = useState([]);
   const [isLeavingTeam, setIsLeavingTeam] = useState(false);
@@ -36,7 +39,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     opObjective: '',
     saNarrative: ''
   });
-  const [parInterval, setParInterval] = useState(0);
+  const [parInterval, setParInterval] = useState(incidentData?.parInterval || 0);
   const [sartopoId, setSartopoId] = useState(null);
   const [podValue, setPodValue] = useState('');
   const [debriefValue, setDebriefValue] = useState('');
@@ -44,6 +47,8 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
   const [icsRole, setIcsRole] = useState(null);
   const [staffTeamId, setStaffTeamId] = useState(null);
   const [currentTime, setCurrentTime] = useState(Date.now());
+  const [allTeams, setAllTeams] = useState([]); // For staff messaging dropdown
+  const [selectedTeamForMessaging, setSelectedTeamForMessaging] = useState(''); // For staff messaging dropdown
 
   // This hook must be called before any useMemos or useEffects that depend on 'team' or 'assignment'
   const { team, assignment, loading, error, refetch } = useResponderTeamAndAssignment(supabase, responderId); 
@@ -53,8 +58,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     narratives: true,
     team: true,
     assignment: true,
-    messages: true,
-    map: false
+    messages: true
   });
 
   // Resolve the Staff team ID to enable directed messaging to Incident Command
@@ -76,37 +80,13 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
   const messagingChannelId = team?.team_id;
 
   // Keep a live clock for timer displays and overdue calculations
-  useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(Date.now()), 15000);
-    return () => clearInterval(timer);
-  }, []);
+  useEffect(() => { const timer = setInterval(() => setCurrentTime(Date.now()), 15000); return () => clearInterval(timer); }, []);
 
   // Memoized PAR status and time formatting to ensure visual parity with Operations page
   const { parRequired, timeSinceLastPar } = useMemo(() => {
-    const lastCheck = team?.last_par_check || team?.created_at;
-    if (!team || !parInterval || !lastCheck) {
-      return { parRequired: false, timeSinceLastPar: '' };
-    }
-
-    const lastCheckMs = new Date(lastCheck).getTime();
-    if (isNaN(lastCheckMs)) return { parRequired: false, timeSinceLastPar: '—' };
-    
-    const diffMs = currentTime - lastCheckMs;
-    const minutesSince = diffMs / 60000;
-
-    // Same logic as OperationsDashboard: parInterval + 3 min grace. Staged, Disbanded, and Staff teams are exempt.
-    const required = team.status !== 'Staged' && team.status !== 'Disbanded' && team.type !== 'Staff' && parInterval > 0 && minutesSince > (parInterval + 3);
-
-    const totalMinutes = Math.floor(diffMs / 60000);
-    let displayTime = 'just now';
-    if (totalMinutes >= 1 && totalMinutes < 60) displayTime = `${totalMinutes}m ago`;
-    else if (totalMinutes >= 60) {
-      const hours = Math.floor(totalMinutes / 60);
-      const mins = totalMinutes % 60;
-      displayTime = `${hours}h ${mins}m ago`;
-    }
-
-    return { parRequired: required, timeSinceLastPar: displayTime };
+    const required = checkIsParOverdue(team, parInterval, currentTime);
+    const displayTime = formatTimeSince(team?.last_par_check || team?.created_at, null, currentTime);
+    return { parRequired: required, timeSinceLastPar: displayTime }; 
   }, [team, parInterval, currentTime]);
 
   
@@ -228,19 +208,16 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
   const fetchMessages = useCallback(async () => {
     if (!messagingChannelId) return;
 
-    const isStaff = accessLevel === 'command staff' || accessLevel === 'admin';
-    let query = supabase.from('team_messages').select('*');
+    let query = supabase.from('team_messages').select('*').eq('team_id', messagingChannelId);
 
-    if (isStaff && incidentData?.opPeriodId) {
-      // For Staff Dashboard: Aggregate all team messages in the OP for master awareness
-      query = query
-        .select('*, teams!inner(op_period_id)')
-        .eq('teams.op_period_id', incidentData.opPeriodId);
-    } else {
+    if (!isStaffOrAdmin) {
       // For Responders: Fetch messages for my team plus any broadcasts from Staff
-      const targetIds = [messagingChannelId];
-      if (staffTeamId) targetIds.push(staffTeamId);
+      const targetIds = [messagingChannelId]; // This is team?.team_id
+      if (staffTeamId) targetIds.push(staffTeamId); // Add staff broadcasts
       query = query.in('team_id', targetIds);
+    } else {
+      // Staff always targets a specific channel (either their own or a selected team)
+      query = query.eq('team_id', messagingChannelId);
     }
 
     const { data } = await query.order('created_at', { ascending: true });
@@ -256,11 +233,11 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'team_messages' }, 
         payload => {
           const msg = payload.new;
-          const isStaff = accessLevel === 'command staff' || accessLevel === 'admin';
           
-          // Logic: Staff Dashboard accepts all team messages. 
-          // Field Responders only accept their own channel or Staff broadcasts.
-          const isRelevant = isStaff || msg.team_id === messagingChannelId || msg.team_id === staffTeamId;
+          // For staff, only messages for the selected channel are relevant.
+          // For field responders, accept their channel or Staff broadcasts.
+          const isRelevant = isStaffOrAdmin ? (msg.team_id === messagingChannelId) : (msg.team_id === messagingChannelId || msg.team_id === staffTeamId);
+
           if (!isRelevant) return;
 
           setMessages(prev => {
@@ -272,15 +249,19 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
         })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [messagingChannelId, staffTeamId, accessLevel, fetchMessages]);
+  }, [messagingChannelId, staffTeamId, isStaffOrAdmin, fetchMessages]);
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
     if (!messageText.trim() || !messagingChannelId) return;
 
-    const senderDisplay = (team?.type !== 'Staff' && team?.team_name_number) 
-      ? `${responderName} (${team.team_name_number})` 
-      : responderName;
+    let senderDisplay = responderName;
+    if (isStaffOrAdmin) {
+      const recipientTeam = allTeams.find(t => t.team_id === selectedTeamForMessaging) || { team_name_number: 'Staff' };
+      senderDisplay = `${responderName} (to ${recipientTeam.team_name_number})`;
+    } else if (team?.type !== 'Staff' && team?.team_name_number) {
+      senderDisplay = `${responderName} (${team.team_name_number})`;
+    }
 
     const { data, error } = await supabase
       .from('team_messages')
@@ -312,7 +293,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
    * based on the responder's current mission status and access level.
    */
   const getDashboardVisibilities = () => {
-    const isStaffOrAdmin = accessLevel === 'command staff' || accessLevel === 'admin';
+    // isStaffOrAdmin is already defined above
 
     // Show team if staff/admin (ICS view) or if responder has an active team attachment
     const showTeam = isStaffOrAdmin || !!currentTeamStatus || (team && team.status !== 'Disbanded');
@@ -333,7 +314,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     return { showTeam, showAssignment, showEmptyState };
   };
 
-  const { showTeam, showAssignment, showEmptyState } = getDashboardVisibilities();
+  const { showTeam, showAssignment, showEmptyState } = getDashboardVisibilities(); // isStaffOrAdmin is used here
 
   // Periodically refresh data to detect status changes from Command
   useEffect(() => {
@@ -341,10 +322,10 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     
     const interval = setInterval(() => {
       refreshAllData();
-    }, RESPONDER_REFRESH_INTERVAL || 60000);
+    }, responderRefreshInterval || 60000);
 
     return () => clearInterval(interval);
-  }, [responderId, refreshAllData, RESPONDER_REFRESH_INTERVAL]);
+  }, [responderId, refreshAllData, responderRefreshInterval]);
 
   const handleLeaveTeam = async () => {
     if (!team || !responderId) return;
@@ -544,16 +525,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
 
   return (
     <div className="responder-dashboard-page">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-        <h1 style={{ margin: 0 }}>Responder Dashboard</h1>
-        <button 
-          className={`btn ${isExpanded.map ? 'btn-secondary' : 'btn-primary'}`}
-          onClick={() => setIsExpanded(prev => ({ ...prev, map: !prev.map }))}
-          style={{ padding: '8px 20px' }}
-        >
-          {isExpanded.map ? 'Hide Map' : 'Show Map'}
-        </button>
-      </div>
+      <h1 style={{ margin: 0, marginBottom: '16px' }}>Responder Dashboard</h1>
 
       <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
         {/* Left Content Panel */}
@@ -843,6 +815,24 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
 
       {team && team.status !== 'Disbanded' && (
         <div className="dashboard-section messaging-info">
+          {isStaffOrAdmin && (
+            <div style={{ marginBottom: '12px' }}>
+              <label htmlFor="message-recipient" style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>
+                Message Recipient
+              </label>
+              <select
+                id="message-recipient"
+                value={selectedTeamForMessaging}
+                onChange={(e) => setSelectedTeamForMessaging(e.target.value)}
+                style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+              >
+                <option value={staffTeamId}>Staff (Broadcast)</option> {/* Default to own staff channel */}
+                {allTeams.map(t => (
+                  <option key={t.team_id} value={t.team_id}>{t.team_name_number} ({t.type})</option>
+                ))}
+              </select>
+            </div>
+          )}
           <SectionHeader 
             title="Team Communications" 
             sectionKey="messages" 
@@ -880,7 +870,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
         </div>
 
         {/* Right Map Panel */}
-        {isExpanded.map && (
+        {showGlobalMap && (
           <div style={{ flex: 1, minWidth: '400px' }}>
           <div className="dashboard-section" style={{ padding: '12px 16px' }}>
             <h2 style={{ margin: 0, fontSize: '18px', marginBottom: '12px' }}>Operational Map</h2>
@@ -899,6 +889,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
                   assignments={assignment ? [assignment] : []} 
                   teams={team ? [team] : []} 
                   sartopoId={sartopoId} 
+                  layoutMode="map" // Always 'map' layout when shown here
                 />
             </div>
           </div>

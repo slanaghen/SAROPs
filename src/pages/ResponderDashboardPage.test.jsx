@@ -63,8 +63,7 @@ beforeEach(() => {
     responderName: 'Steve',
     accessLevel: 'responder',
     incidentId: 'inc-123',
-    incidentData: { opPeriodId: 'op-123', name: 'Test Incident' },
-    parInterval: 60, // Default PAR interval
+    incidentData: { opPeriodId: 'op-123', name: 'Test Incident', parInterval: 60 },
     setResponderStatus: vi.fn(),
     setCurrentTeamStatus: vi.fn(),
     setCurrentAssignmentStatus: vi.fn(),
@@ -305,7 +304,7 @@ describe('ResponderDashboardPage', () => {
     vi.mocked(useIncident).mockReturnValue({ 
       responderId: 'r1', 
       incidentId: 'inc-123',
-      incidentData: { opPeriodId: 'op-123' },
+      incidentData: { opPeriodId: 'op-123', parInterval: 60 },
       accessLevel: 'responder',
       setResponderStatus: vi.fn(),
       setCurrentTeamStatus: vi.fn(),

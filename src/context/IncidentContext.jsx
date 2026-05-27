@@ -30,6 +30,11 @@ export const IncidentProvider = ({ children }) => {
   const [currentTeamStatus, setCurrentTeamStatus] = useState(() => getSavedState('currentTeamStatus', null));
   const [currentAssignmentStatus, setCurrentAssignmentStatus] = useState(() => getSavedState('currentAssignmentStatus', null));
   const [isAdmin, setIsAdmin] = useState(() => getSavedState('isAdmin', false));
+  const [showGlobalMap, setShowGlobalMap] = useState(() => getSavedState('showGlobalMap', false)); // New global map visibility state
+  
+  const [operationsRefreshInterval, setOperationsRefreshInterval] = useState(() => getSavedState('operationsRefreshInterval', 60000));
+  const [responderRefreshInterval, setResponderRefreshInterval] = useState(() => getSavedState('responderRefreshInterval', 60000));
+  const [sartopoRefreshInterval, setSartopoRefreshInterval] = useState(() => getSavedState('sartopoRefreshInterval', 60000));
   
   const [responderId, setResponderId] = useState(() => {
     const rid = getSavedState('responderId', null);
@@ -57,9 +62,13 @@ export const IncidentProvider = ({ children }) => {
       isAdmin,
       currentTeamStatus,
       currentAssignmentStatus,
-      incidentData
+      incidentData,
+      showGlobalMap,
+      operationsRefreshInterval,
+      responderRefreshInterval,
+      sartopoRefreshInterval
     }));
-  }, [isActive, incidentId, responderId, responderName, responderStatus, accessLevel, isAdmin, incidentData, currentTeamStatus, currentAssignmentStatus]);
+  }, [isActive, incidentId, responderId, responderName, responderStatus, accessLevel, isAdmin, incidentData, currentTeamStatus, currentAssignmentStatus, showGlobalMap, operationsRefreshInterval, responderRefreshInterval, sartopoRefreshInterval]);
 
   const startIncident = (id, name, opNumber, opPeriodId, sartopo_id = null, parInterval = null) => {
     setIncidentId(id);
@@ -106,7 +115,15 @@ export const IncidentProvider = ({ children }) => {
       setResponderId,
       setAccessLevel,
       setResponderName,
-      setResponderStatus
+      setResponderStatus,
+      showGlobalMap,
+      setShowGlobalMap,
+      operationsRefreshInterval,
+      setOperationsRefreshInterval,
+      responderRefreshInterval,
+      setResponderRefreshInterval,
+      sartopoRefreshInterval,
+      setSartopoRefreshInterval
     }}>
       {children}
     </IncidentContext.Provider>

@@ -4,15 +4,15 @@ import { supabase } from '../lib/supabase';
 import { useIncident } from '../context/IncidentContext';
 import '../styles/IncidentEditPage.css'; // Reusing form styles for consistency
 import { usePlanningDashboard } from '../hooks/usePlanningDashboard'; // Import usePlanningDashboard
-import { 
-  OPERATIONS_REFRESH_INTERVAL, setOperationsRefreshInterval,
-  RESPONDER_REFRESH_INTERVAL, setResponderRefreshInterval,
-  SARTOPO_REFRESH_INTERVAL, setSartopoRefreshInterval
-} from '../components/operationalConstants';
 
 const AdminPage = () => {
-  const navigate = useNavigate();
-  const { isAdmin, setIsAdmin, incidentId, responderId, endIncident, logout } = useIncident();
+  const navigate = useNavigate(); 
+  const { 
+    isAdmin, setIsAdmin, incidentId, responderId, endIncident, logout, showGlobalMap, setShowGlobalMap,
+    operationsRefreshInterval, setOperationsRefreshInterval,
+    responderRefreshInterval, setResponderRefreshInterval,
+    sartopoRefreshInterval, setSartopoRefreshInterval
+  } = useIncident();
   const [admins, setAdmins] = useState([]);
   const [allIncidents, setAllIncidents] = useState([]);
   const [allResponders, setAllResponders] = useState([]);
@@ -29,13 +29,13 @@ const AdminPage = () => {
   const [isRespondersExpanded, setIsRespondersExpanded] = useState(false);
   const { recordAction } = usePlanningDashboard(supabase, incidentId); // Use recordAction from hook
 
-  const [opRefresh, setOpRefresh] = useState(OPERATIONS_REFRESH_INTERVAL / 1000);
-  const [resRefresh, setResRefresh] = useState(RESPONDER_REFRESH_INTERVAL / 1000);
-  const [sartopoRefresh, setSartopoRefresh] = useState(SARTOPO_REFRESH_INTERVAL / 1000);
+  const [opRefresh, setOpRefresh] = useState(operationsRefreshInterval / 1000);
+  const [resRefresh, setResRefresh] = useState(responderRefreshInterval / 1000);
+  const [sartopoRefresh, setSartopoRefresh] = useState(sartopoRefreshInterval / 1000);
   const [appliedSettings, setAppliedSettings] = useState({
-    op: OPERATIONS_REFRESH_INTERVAL / 1000,
-    res: RESPONDER_REFRESH_INTERVAL / 1000,
-    sartopo: SARTOPO_REFRESH_INTERVAL / 1000
+    op: operationsRefreshInterval / 1000,
+    res: responderRefreshInterval / 1000,
+    sartopo: sartopoRefreshInterval / 1000
   });
 
   const isSettingsDirty = opRefresh !== appliedSettings.op || 
@@ -748,6 +748,13 @@ const AdminPage = () => {
           </label>
           <button className="btn btn-primary" onClick={handleApplySettings} disabled={!isSettingsDirty} style={{ height: '38px' }}>
             Apply
+          </button>
+          <button
+            className={`btn ${showGlobalMap ? 'btn-secondary' : 'btn-primary'}`}
+            onClick={() => setShowGlobalMap(!showGlobalMap)}
+            style={{ height: '38px', marginLeft: '12px' }}
+          >
+            {showGlobalMap ? 'Hide Global Map' : 'Show Global Map'}
           </button>
         </div>
       </div>

@@ -7,13 +7,12 @@ import { usePlanningDashboard } from '../hooks/usePlanningDashboard';
 import TeamFormModal from '../components/TeamFormModal';
 import AssignmentFormModal from '../components/AssignmentFormModal';
 import BaseModal from '../components/BaseModal';
-import { OPERATIONS_REFRESH_INTERVAL } from '../components/operationalConstants';
 import OperationsToolbar from '../components/OperationsToolbar';
 import OperationsTable from '../components/OperationsTable';
 import OperationsMap from '../components/OperationsMap';
-
+import { checkIsParOverdue, formatTimeSince } from '../utils/operationalUtils';
 const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
-  const { incidentData, incidentId, responderName, user } = useIncident();
+  const { incidentData, incidentId, responderName, user, operationsRefreshInterval } = useIncident();
   const operationalPeriodId = propOpId || incidentData?.opPeriodId;
 
   const {
@@ -91,36 +90,6 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
 
   const commandStaffExists = useMemo(() => (teams || []).some(t => t.type === 'Staff'), [teams]);
 
-  /**
-   * Shared Helper: Calculates if a team is overdue for a PAR check.
-   */
-  const checkIsParOverdue = useCallback((team, interval) => {
-    if (!team || team.status === 'Staged' || team.type === 'Staff' || interval <= 0) return false;
-    const lastCheck = team.last_par_check ? new Date(team.last_par_check).getTime() : new Date(team.created_at || Date.now()).getTime();
-    const minutesSince = (currentTime - lastCheck) / 60000;
-    team.last_par_check = lastCheck;
-    // Threshold: interval + 3 minute grace period
-    return minutesSince > (interval + 3);
-  }, [currentTime]);
-
-  /**
-   * Shared Helper: Formats relative time strings for UI display.
-   */
-  const formatTimeSince = useCallback((timestamp, createdAt) => {
-    const lastCheck = timestamp || createdAt;
-    if (!lastCheck) return '—';
-    const lastCheckMs = new Date(lastCheck).getTime();
-    if (isNaN(lastCheckMs)) return '—';
-    const diffMs = currentTime - lastCheckMs;
-    const totalMinutes = Math.floor(diffMs / 60000);
-
-    if (totalMinutes < 1) return 'just now';
-    if (totalMinutes < 60) return `${totalMinutes}m ago`;
-    
-    const hours = Math.floor(totalMinutes / 60);
-    const mins = totalMinutes % 60;
-    return `${hours}h ${mins}m ago`;
-  }, [currentTime]);
 
   const getRawUuid = (rowId) => {
     if (!rowId) return null;
@@ -174,8 +143,8 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       const matchingTeam = asnItem.team_id ? teamById[asnItem.team_id] : null;
       return {
         id: `asn-${asnItem.assignment_id}`,
-        isParOverdue: checkIsParOverdue(matchingTeam, parInterval),
-        timeSincePar: matchingTeam ? formatTimeSince(matchingTeam.last_par_check, matchingTeam.created_at) : '',
+        isParOverdue: checkIsParOverdue(matchingTeam, parInterval, currentTime),
+        timeSincePar: matchingTeam ? formatTimeSince(matchingTeam.last_par_check, matchingTeam.created_at, currentTime) : '',
         tacChannel: asnItem.frequency_primary || '—',
         assignmentId: asnItem.assignment_id,
         assignmentName: asnItem.title,
@@ -199,8 +168,8 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
 
     const teamOnlyRows = (teams || []).filter(tItem => !assignmentTeamSet.has(tItem.team_id)).map(tItem => ({
       id: `team-${tItem.team_id}`,
-      isParOverdue: checkIsParOverdue(tItem, parInterval),
-      timeSincePar: formatTimeSince(tItem.last_par_check, tItem.created_at),
+      isParOverdue: checkIsParOverdue(tItem, parInterval, currentTime),
+      timeSincePar: formatTimeSince(tItem.last_par_check, tItem.created_at, currentTime),
       tacChannel: '', assignmentId: '', assignmentName: '', assignmentType: '', assignmentStatus: '',
       teamName: tItem.team_name_number, teamType: tItem.type, teamStatus: tItem.status,
       teamLeader: leaderById[tItem.leader_responder_id] || 'Unknown',
@@ -258,7 +227,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       const comparison = aVal < bVal ? -1 : 1;
       return sortConfig.direction === 'asc' ? comparison : -comparison;
     });
-    return result;
+    return result; // currentTime is a dependency for checkIsParOverdue and formatTimeSince
   }, [assignments, teams, teamById, leaderById, leaderIdentifierById, assignmentFilter, teamFilter, sortConfig, viewMode, parInterval, currentTime]);
 
   // Keep a live clock for timer displays and overdue calculations
@@ -277,10 +246,10 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
 
     const interval = setInterval(() => {
       fetchDashboardData();
-    }, OPERATIONS_REFRESH_INTERVAL || 60000);
+    }, operationsRefreshInterval || 60000);
 
     return () => clearInterval(interval);
-  }, [operationalPeriodId, fetchDashboardData, OPERATIONS_REFRESH_INTERVAL]);
+  }, [operationalPeriodId, fetchDashboardData, operationsRefreshInterval]);
 
   const recordAction = async (action) => {
     if (!incidentId) return;
@@ -678,15 +647,6 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
             <option value="Operations">Operations (Active)</option>
             <option value="Planning">Planning (Staged)</option>
           </select>
-
-          <button 
-            className={`btn ${isMapExpanded ? 'btn-secondary' : 'btn-primary'}`}
-            style={{ height: '32px', fontSize: '13px', padding: '0 12px' }}
-            onClick={() => setIsMapExpanded(!isMapExpanded)}
-          >
-            {isMapExpanded ? 'Hide Map' : 'Show Map'}
-          </button>
-
           <button 
             className="btn btn-secondary" 
             style={{ 

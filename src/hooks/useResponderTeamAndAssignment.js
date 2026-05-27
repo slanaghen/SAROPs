@@ -77,7 +77,6 @@ const useResponderTeamAndAssignment = (supabase, responderId) => {
             leader_responder_id,
             equipment,
             last_par_check,
-            conversation_log,
             created_at,
             assignments (
               assignment_id,
@@ -95,8 +94,6 @@ const useResponderTeamAndAssignment = (supabase, responderId) => {
         `)
         .eq('responder_id', responderId)
         .neq('teams.status', 'Disbanded')
-        .order('created_at', { referencedTable: 'teams', ascending: false })
-        .limit(1)
         .maybeSingle();
 
       if (fetchError) throw fetchError;

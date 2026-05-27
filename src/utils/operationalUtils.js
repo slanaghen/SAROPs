@@ -7,16 +7,16 @@
  * @returns {boolean} - True if the PAR check is overdue.
  */
 export const checkIsParOverdue = (team, parIntervalMinutes, now = Date.now()) => {
-  // If interval is 0, PAR is disabled
-  if (!parIntervalMinutes || parIntervalMinutes <= 0) return false;
+  // If no team is provided, or interval is 0, PAR is disabled/not applicable
+  if (!team || !parIntervalMinutes || parIntervalMinutes <= 0) return false;
 
   // Staged teams and Staff teams are exempt from PAR checks
   if (team.status === 'Staged' || team.type === 'Staff' || team.status === 'Disbanded') {
     return false;
   }
 
-  // Only Deployed teams are tracked for PAR
-  if (team.status !== 'Deployed') return false;
+  // Only Deployed or Assigned teams are tracked for PAR
+  if (team.status !== 'Deployed' && team.status !== 'Assigned') return false;
 
   if (!team.last_par_check) return false;
 
@@ -48,6 +48,5 @@ export const formatTimeSince = (timestamp, _, now = Date.now()) => {
   const hours = Math.floor(diffMinutes / 60);
   const minutes = diffMinutes % 60;
   
-  if (minutes === 0) return `${hours}h ago`;
   return `${hours}h ${minutes}m ago`;
 };
