@@ -498,7 +498,10 @@ describe('ResponderDashboardPage', () => {
     // Mock responders list to satisfy lookups and triggers
     vi.mocked(supabase.from).mockImplementation((table) => {
       if (table === 'responders') return createSupabaseMock([{ responder_id: 'r1', name: 'Steve' }]);
-      if (table === 'teams') return createSupabaseMock({ team_id: 'staff-123' });
+      if (table === 'teams') return createSupabaseMock([
+        { team_id: 'staff-123', team_name_number: 'Staff', type: 'Staff', status: 'Deployed' }, // Staff team
+        { team_id: 't1', team_name_number: 'Team 1', type: 'Ground', status: 'Assigned' } // Responder's team
+      ]);
       return createSupabaseMock([]);
     });
 
@@ -697,7 +700,7 @@ describe('ResponderDashboardPage', () => {
 
     render(<ResponderDashboardPage />);
 
-    const input = screen.getByPlaceholderText(/Send message to Command/i);
+    const input = screen.getByPlaceholderText(/Send message.../i);
     fireEvent.change(input, { target: { value: 'Requesting radio check' } });
     fireEvent.submit(input.closest('form'));
 
