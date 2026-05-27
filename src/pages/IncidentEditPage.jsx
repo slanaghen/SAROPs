@@ -162,20 +162,40 @@ const IncidentEditPage = () => {
     loadExistingData();
   }, [isActive, contextIncidentId, incidentData?.opPeriodId]);
 
+  // Robust SARTopo configuration parser (mirrored from SARTopoDataPage)
+  const sartopoConfig = useMemo(() => {
+    let mapId = incident.sartopo_id?.trim();
+    if (!mapId) return { id: null, query: '' };
+
+    let query = '';
+    if (mapId.includes('?')) {
+      const parts = mapId.split('?');
+      mapId = parts[0];
+      query = '?' + parts[1];
+    }
+
+    if (mapId.includes('/')) {
+      mapId = mapId.split('/').pop() || mapId.split('/').slice(-2, -1)[0];
+    }
+
+    // Inject Sync Key from environment variable if configured and not already present in the Map ID
+    // Note: Variable must be prefixed with VITE_ to be exposed to the client
+    const apiKey = import.meta.env.VITE_SARTOPO_API_KEY;
+    if (apiKey && !query.includes('k=')) {
+      query = query ? `${query}&k=${apiKey}` : `?k=${apiKey}`;
+    }
+
+    return { id: mapId, query };
+  }, [incident.sartopo_id]);
+
   // Helper to sync SARTopo data (logic mirrored from SARTopoDataPage)
-  const syncSartopoData = async (mapId, opId) => {
-    if (!mapId || !opId) return;
+  const syncSartopoData = async (config, opId) => {
+    if (!config.id || !opId) return;
     setIsSyncingSartopo(true);
     
     try {
-      let cleanMapId = mapId.trim();
-      // Extract ID from URL if provided (e.g. sartopo.com/m/XXXX)
-      if (cleanMapId.includes('/')) {
-        cleanMapId = cleanMapId.split('/').pop() || cleanMapId.split('/').slice(-2, -1)[0];
-      }
-
-      const fetchUrl = `/sartopo-api/api/v1/map/${cleanMapId}/features`;
-      const response = await fetch(fetchUrl, { credentials: 'include' });
+      const fetchUrl = `/sartopo-api/api/v1/map/${config.id}/features${config.query}`;
+      const response = await fetch(fetchUrl);
       
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       
@@ -202,14 +222,13 @@ const IncidentEditPage = () => {
 
   // Trigger SARTopo sync immediately when a map ID is entered or updated in Edit mode
   useEffect(() => {
-    const mapId = incident.sartopo_id?.trim();
     const opId = incidentData?.opPeriodId;
     
-    if (isActive && mapId && opId && mapId !== initialIncident.sartopo_id) {
-      const timer = setTimeout(() => syncSartopoData(mapId, opId), 1200);
+    if (isActive && sartopoConfig.id && opId && incident.sartopo_id !== initialIncident.sartopo_id) {
+      const timer = setTimeout(() => syncSartopoData(sartopoConfig, opId), 1200);
       return () => clearTimeout(timer);
     }
-  }, [incident.sartopo_id, isActive, incidentData?.opPeriodId, initialIncident.sartopo_id]);
+  }, [sartopoConfig, isActive, incidentData?.opPeriodId, initialIncident.sartopo_id]);
 
   // Detect if any changes have been made to the form
   const isDirty = useMemo(() => {
@@ -340,9 +359,8 @@ const IncidentEditPage = () => {
     const savedOpId = await saveData(false, true); // Keep isSaving true until navigation handles it, clean state
     if (savedOpId) {
       // Trigger background sync if a Map ID was provided during initial creation
-      const mapId = incident.sartopo_id?.trim();
-      if (!wasActive && mapId) {
-        syncSartopoData(mapId, savedOpId);
+      if (!wasActive && sartopoConfig.id) {
+        syncSartopoData(sartopoConfig, savedOpId);
       }
 
       // Auto check-in the creator if they provided details on the previous check-in page

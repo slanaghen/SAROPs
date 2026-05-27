@@ -53,7 +53,8 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     narratives: true,
     team: true,
     assignment: true,
-    messages: true
+    messages: true,
+    map: false
   });
 
   // Resolve the Staff team ID to enable directed messaging to Incident Command
@@ -871,21 +872,27 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
 
         {/* Right Map Panel */}
         <div style={{ flex: 1, minWidth: '400px' }}>
-          <div style={{ 
-            borderRadius: '12px', 
-            overflow: 'hidden', 
-            border: '1px solid #cbd5e1', 
-            boxShadow: '0 6px 22px rgba(0, 0, 0, 0.04)', 
-            background: '#fff', 
-            height: '650px', 
-            position: 'relative' 
-          }}>
-            <OperationsMap 
-              loading={loading} 
-              assignments={assignment ? [assignment] : []} 
-              teams={team ? [team] : []} 
-              sartopoId={sartopoId} 
-            />
+          <div className="dashboard-section" style={{ padding: '12px 16px' }}>
+            <SectionHeader title="Operational Map" sectionKey="map" />
+            {isExpanded.map && (
+              <div style={{ 
+                borderRadius: '12px', 
+                overflow: 'hidden', 
+                border: '1px solid #cbd5e1', 
+                boxShadow: '0 6px 22px rgba(0, 0, 0, 0.04)', 
+                background: '#fff', 
+                height: '650px', 
+                position: 'relative',
+                marginTop: '12px'
+              }}>
+                <OperationsMap 
+                  loading={loading} 
+                  assignments={assignment ? [assignment] : []} 
+                  teams={team ? [team] : []} 
+                  sartopoId={sartopoId} 
+                />
+              </div>
+            )}
           </div>
         </div>
       </div>

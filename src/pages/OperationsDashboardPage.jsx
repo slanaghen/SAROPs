@@ -45,6 +45,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   const [broadcastMessage, setBroadcastMessage] = useState('');
   const [currentTime, setCurrentTime] = useState(Date.now());
 
+  const [isMapExpanded, setIsMapExpanded] = useState(false);
   const contentWrapperRef = useRef(null);
   const [layoutMode, setLayoutMode] = useState(() => localStorage.getItem('sarops_layout_mode') || 'split');
 
@@ -746,12 +747,25 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
           )}
 
           {(layoutMode === 'map' || layoutMode === 'split') && (
-            <div className="map-panel" style={layoutMode === 'split' ? { 
+            <div className="map-panel section-card" style={layoutMode === 'split' ? { 
               flex: 1, 
-              minWidth: 0, 
-              aspectRatio: '1 / 1' 
-            } : { aspectRatio: '1 / 1' }}>
-              <OperationsMap loading={loading} assignments={assignments} teams={teams} sartopoId={sartopoId} layoutMode={layoutMode} />
+              minWidth: 0,
+              padding: '12px'
+            } : { margin: '0 auto 24px' }}>
+              <div 
+                onClick={() => setIsMapExpanded(!isMapExpanded)}
+                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', marginBottom: isMapExpanded ? '16px' : 0 }}
+              >
+                <h2 style={{ margin: 0 }}>Operational Map</h2>
+                <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 700 }}>
+                  {isMapExpanded ? 'COLLAPSE ▲' : 'EXPAND ▼'}
+                </span>
+              </div>
+              {isMapExpanded && (
+                <div style={{ aspectRatio: '1 / 1', position: 'relative' }}>
+                  <OperationsMap loading={loading} assignments={assignments} teams={teams} sartopoId={sartopoId} layoutMode={layoutMode} />
+                </div>
+              )}
             </div>
           )}
         </div>

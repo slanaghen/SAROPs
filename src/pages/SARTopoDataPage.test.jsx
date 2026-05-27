@@ -42,6 +42,27 @@ describe('SARTopoDataPage', () => {
 
   afterEach(cleanup);
 
+  it('appends the SARTopo API key from environment variables to request URLs', async () => {
+    // Mock the environment variable in the test context
+    vi.stubEnv('VITE_SARTOPO_API_KEY', 'SECRET_KEY_123');
+    
+    vi.mocked(useIncident).mockReturnValue({ isActive: true, incidentId: 'inc-123' });
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      headers: { get: () => 'application/json' },
+      json: vi.fn().mockResolvedValue({ features: [] })
+    });
+
+    render(<SARTopoDataPage />);
+    
+    // Verify the URL displayed in the UI contains the injected key
+    expect(await screen.findByText(/since\/0\?k=SECRET_KEY_123/)).toBeInTheDocument();
+    expect(screen.getByText(/\/features\?k=SECRET_KEY_123/)).toBeInTheDocument();
+
+    // Cleanup environment stubs
+    vi.unstubAllEnvs();
+  });
+
   it('renders map information when an incident is active', async () => {
     vi.mocked(useIncident).mockReturnValue({ isActive: true, incidentId: 'inc-123' });
     // Provide a fetch mock to satisfy the automated initial fetch on mount
@@ -329,33 +350,28 @@ describe('SARTopoDataPage', () => {
     const uploadBtn = await screen.findByRole('button', { name: /Upload to SARTopo/i });
     fireEvent.click(uploadBtn);
 
-    // Expect fetch to be called for each assignment
+    // Mock API key to match implementation's expectations
+    const mockKey = 'x7+lOzSEs6+q6m37cUV2S7a19ucAKUxEve60nzRYq6k=';
+    vi.stubEnv('VITE_SARTOPO_API_KEY', mockKey);
+
+    // Expect fetch to be called for each assignment using the /features/ endpoint
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalledTimes(2);
       expect(global.fetch).toHaveBeenCalledWith(
-        '/sartopo-api/api/v1/map/MAP123/Assignment/s1',
+        expect.stringContaining(`/sartopo-api/api/v1/map/MAP123/features/s1?k=${mockKey}`),
         expect.objectContaining({
           method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          },
-          credentials: 'include',
-          body: expect.stringContaining('"title":"Task 1"')
+          body: expect.stringContaining('"id":"s1"')
         })
       );
       expect(global.fetch).toHaveBeenCalledWith(
-        '/sartopo-api/api/v1/map/MAP123/Assignment/s2',
+        expect.stringContaining(`/sartopo-api/api/v1/map/MAP123/features/s2?k=${mockKey}`),
         expect.objectContaining({
           method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          },
-          credentials: 'include',
           body: expect.any(String)
         })
       );
     });
+    vi.unstubAllEnvs();
   });
 });

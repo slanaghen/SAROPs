@@ -43,6 +43,18 @@ const SARTopoDataPage = () => {
     if (mapId.includes('/')) {
       mapId = mapId.split('/').pop() || mapId.split('/').slice(-2, -1)[0];
     }
+
+    // Clean up trailing slashes or question marks before merging
+    if (mapId.endsWith('/')) mapId = mapId.slice(0, -1);
+    if (query === '?') query = '';
+
+    // Inject Sync Key from environment variable if configured and not already present in the Map ID
+    // Note: Variable must be prefixed with VITE_ to be exposed to the client
+    const apiKey = import.meta.env.VITE_SARTOPO_API_KEY?.trim();
+    if (apiKey && !query.includes('k=')) {
+      query = query ? `${query}&k=${apiKey}` : `?k=${apiKey}`;
+    }
+
     return { id: mapId, query };
   }, [sartopoId]);
 
@@ -199,7 +211,7 @@ const SARTopoDataPage = () => {
 
     try {
       // Using the Vite proxy configured in vite.config.js to bypass CORS
-      const response = await fetch(fetchUrl, { credentials: 'include' });
+      const response = await fetch(fetchUrl);
       
       if (!response.ok) {
         const text = await response.text();
@@ -402,10 +414,9 @@ const SARTopoDataPage = () => {
           continue;
         }
 
-        const objectType = feature.properties.class; // e.g., 'Assignment'
+        // Use the standard /features/ endpoint for individual updates
         const objectId = feature.id; // SARTopo ID
-
-        const uploadEndpoint = `/sartopo-api/api/v1/map/${mapId}/${objectType}/${objectId}${queryParams}`;
+        const uploadEndpoint = `/sartopo-api/api/v1/map/${mapId}/features/${objectId}${queryParams}`;
         
         try {
           const response = await fetch(uploadEndpoint, {
@@ -414,14 +425,14 @@ const SARTopoDataPage = () => {
               'Content-Type': 'application/json',
               'Accept': 'application/json'
             },
-            credentials: 'include',
             body: JSON.stringify(feature),
           });
 
           if (!response.ok) {
             const errorText = await response.text();
             if (response.status === 401) {
-              const msg = '401 Unauthorized: SARTopo requires a Sync Key to authorize writes. Ensure your Map ID includes a "?k=" parameter (e.g., ABCD?k=YOUR_KEY). Get this from the "Map -> API Sync" menu in SARTopo.';
+              const hasEnvKey = !!import.meta.env.VITE_SARTOPO_API_KEY;
+              const msg = `401 Unauthorized: SARTopo requires a Sync Key to authorize writes. ${!hasEnvKey ? 'VITE_SARTOPO_API_KEY is not configured in your .env file. ' : ''}Ensure your Map ID includes a "?k=" parameter or configure the global API key.`;
               throw new Error(msg);
             }
             throw new Error(`SARTopo API returned ${response.status}: ${errorText}`);
