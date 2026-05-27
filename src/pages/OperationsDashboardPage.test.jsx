@@ -54,6 +54,9 @@ describe('OperationsDashboardPage Logic', () => {
       responderName: 'Steve',
       user: { email: 'steve@example.com' },
       logout: vi.fn(),
+      operationsRefreshInterval: 60000,
+      showGlobalMap: false,
+      setShowGlobalMap: vi.fn(),
     });
   });
 

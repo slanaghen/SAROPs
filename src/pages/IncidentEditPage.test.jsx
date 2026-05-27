@@ -404,6 +404,7 @@ describe('IncidentEditPage', () => {
     await act(async () => {
       resolveFetch({
         ok: true,
+        headers: { get: (name) => name === 'content-type' ? 'application/json' : null },
         json: async () => ({ features: [] }),
       });
     });
@@ -411,7 +412,7 @@ describe('IncidentEditPage', () => {
     // Verify fetch was called for SARTopo data
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalledWith(
-        expect.stringContaining('/sartopo-api/api/v1/map/NEW_MAP_ID/features')
+        expect.stringContaining('/sartopo-api/api/v1/map/NEW_MAP_ID/since/0')
       );
     });
 

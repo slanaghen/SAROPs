@@ -26,7 +26,9 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     setCurrentTeamStatus,
     setCurrentAssignmentStatus,
     showGlobalMap,
-    responderRefreshInterval
+    setShowGlobalMap,
+    responderRefreshInterval,
+    startIncident
   } = useIncident();
   const isStaffOrAdmin = accessLevel === 'command staff' || accessLevel === 'admin';
   const responderId = propId || contextId;
@@ -168,11 +170,14 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
 
       try {
         const [incRes, opRes] = await Promise.all([
-          supabase.from('incidents').select('notes, sartopo_id').eq('incident_id', incidentId).maybeSingle(),
+          supabase.from('incidents').select('notes, sartopo_id, show_map').eq('incident_id', incidentId).maybeSingle(),
           supabase.from('operational_periods').select('situation_narrative, situational_awareness_narrative, par_check_interval').eq('op_period_id', incidentData.opPeriodId).maybeSingle()
         ]);
 
         if (incRes.data || opRes.data) {
+          if (incRes.data?.show_map !== undefined && incRes.data.show_map !== showGlobalMap) {
+            setShowGlobalMap(incRes.data.show_map);
+          }
           setNarratives({
             incidentNotes: incRes.data?.notes || '',
             opObjective: opRes.data?.situation_narrative || '',
@@ -180,6 +185,16 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
           });
           if (incRes.data?.sartopo_id) setSartopoId(incRes.data.sartopo_id);
           if (opRes.data?.par_check_interval !== undefined) setParInterval(opRes.data.par_check_interval);
+
+          // Sync with global context to ensure other pages (Map/PDFs) have current incident metadata
+          startIncident(
+            incidentId, 
+            incidentData?.name || '', 
+            incidentData?.opNumber || '', 
+            incidentData?.opPeriodId || '',
+            incRes.data?.sartopo_id,
+            opRes.data?.par_check_interval
+          );
         }
       } catch (err) {
         console.error('Error fetching narratives:', err);

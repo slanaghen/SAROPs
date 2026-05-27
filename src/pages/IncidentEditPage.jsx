@@ -52,6 +52,8 @@ const IncidentEditPage = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [isSyncingSartopo, setIsSyncingSartopo] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false); // Flag specifically to bypass navigation blocker
+  const [sartopoIdValidationMessage, setSartopoIdValidationMessage] = useState(null);
+  const [sartopoSyncErrorMessage, setSartopoSyncErrorMessage] = useState(null);
   const [incident, setIncident] = useState(defaultIncident);
   const [initialIncident, setInitialIncident] = useState(defaultIncident);
 
@@ -162,6 +164,17 @@ const IncidentEditPage = () => {
     loadExistingData();
   }, [isActive, contextIncidentId, incidentData?.opPeriodId]);
 
+  // Client-side validation for SARTopo ID
+  useEffect(() => {
+    const currentMapId = incident.sartopo_id?.trim();
+    if (currentMapId && currentMapId.length > 0 && currentMapId.length < 4) {
+      setSartopoIdValidationMessage('Map ID is too short (min 4 characters).');
+    } else {
+      setSartopoIdValidationMessage(null);
+    }
+    setSartopoSyncErrorMessage(null); // Clear sync error when ID changes
+  }, [incident.sartopo_id]);
+
   // Robust SARTopo configuration parser (mirrored from SARTopoDataPage)
   const sartopoConfig = useMemo(() => {
     let mapId = incident.sartopo_id?.trim();
@@ -178,9 +191,13 @@ const IncidentEditPage = () => {
       mapId = mapId.split('/').pop() || mapId.split('/').slice(-2, -1)[0];
     }
 
+    // Clean up trailing slashes or question marks before merging
+    if (mapId.endsWith('/')) mapId = mapId.slice(0, -1);
+    if (query === '?') query = '';
+
     // Inject Sync Key from environment variable if configured and not already present in the Map ID
     // Note: Variable must be prefixed with VITE_ to be exposed to the client
-    const apiKey = import.meta.env.VITE_SARTOPO_API_KEY;
+    const apiKey = import.meta.env.VITE_SARTOPO_API_KEY?.trim();
     if (apiKey && !query.includes('k=')) {
       query = query ? `${query}&k=${apiKey}` : `?k=${apiKey}`;
     }
@@ -192,12 +209,30 @@ const IncidentEditPage = () => {
   const syncSartopoData = async (config, opId) => {
     if (!config.id || !opId) return;
     setIsSyncingSartopo(true);
+    setSartopoSyncErrorMessage(null); // Clear previous sync error
     
     try {
-      const fetchUrl = `/sartopo-api/api/v1/map/${config.id}/features${config.query}`;
+      // Align with SARTopoDataPage: use /since/0 for a complete map snapshot
+      const fetchUrl = `/sartopo-api/api/v1/map/${config.id}/since/0${config.query}`;
       const response = await fetch(fetchUrl);
       
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      if (!response.ok) {
+        const text = await response.text();
+        // If the response is HTML, SARTopo is likely returning an error page (404/403)
+        if (text.includes('<!DOCTYPE html>')) {
+          throw new Error(`SARTopo returned an error page (HTTP ${response.status}). Verify the Map ID is correct and ensure "API Access" is enabled in map settings.`);
+        }
+        throw new Error(`SARTopo API returned ${response.status}: ${response.statusText || 'Unknown error'}`);
+      }
+
+      // Check content type to prevent JSON parsing errors if we received HTML (matching SARTopoDataPage)
+      const contentType = response.headers.get('content-type');
+      if (contentType && !contentType.includes('application/json')) {
+        const text = await response.text();
+        if (text.includes('<!DOCTYPE html>')) {
+          throw new Error('SARTopo returned an HTML page instead of GeoJSON data. This often happens if the Map ID is invalid.');
+        }
+      }
       
       const data = await response.json();
       const fetchedFeatures = data?.result?.state?.features || data?.features || [];
@@ -215,6 +250,7 @@ const IncidentEditPage = () => {
       console.log('[IncidentEdit] SARTopo auto-sync complete.');
     } catch (err) {
       console.error('Background SARTopo sync failed:', err);
+      setSartopoSyncErrorMessage(err.message || 'SARTopo sync failed.');
     } finally {
       setIsSyncingSartopo(false);
     }
@@ -224,11 +260,12 @@ const IncidentEditPage = () => {
   useEffect(() => {
     const opId = incidentData?.opPeriodId;
     
-    if (isActive && sartopoConfig.id && opId && incident.sartopo_id !== initialIncident.sartopo_id) {
+    // Only attempt sync if Map ID is reasonably valid (at least 4 chars) and no validation message
+    if (isActive && sartopoConfig.id && sartopoConfig.id.length >= 4 && !sartopoIdValidationMessage && opId && incident.sartopo_id !== initialIncident.sartopo_id) {
       const timer = setTimeout(() => syncSartopoData(sartopoConfig, opId), 1200);
       return () => clearTimeout(timer);
     }
-  }, [sartopoConfig, isActive, incidentData?.opPeriodId, initialIncident.sartopo_id]);
+  }, [sartopoConfig, isActive, incidentData?.opPeriodId, initialIncident.sartopo_id, sartopoIdValidationMessage]);
 
   // Detect if any changes have been made to the form
   const isDirty = useMemo(() => {
@@ -589,14 +626,19 @@ const IncidentEditPage = () => {
 
               <label>
                 SARTopo Map ID
-                {isSyncingSartopo && (
-                  <span style={{ marginLeft: '8px', fontSize: '11px', color: '#0369a1', fontWeight: 600 }}>🔄 Syncing...</span>
+                {(isSyncingSartopo || sartopoIdValidationMessage || sartopoSyncErrorMessage) && (
+                  <span style={{ marginLeft: '8px', fontSize: '11px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                    {isSyncingSartopo && <span style={{ color: '#0369a1' }}>🔄 Syncing...</span>}
+                    {sartopoIdValidationMessage && <span style={{ color: '#dc2626' }}>⚠️ {sartopoIdValidationMessage}</span>}
+                    {sartopoSyncErrorMessage && <span style={{ color: '#dc2626' }}>❌ Sync Failed: {sartopoSyncErrorMessage}</span>}
+                  </span>
                 )}
                 <input
                   type="text"
                   value={incident.sartopo_id}
                   onChange={(e) => handleIncidentChange('sartopo_id', e.target.value)}
                   placeholder="e.g. 9ABC"
+                  style={{ borderColor: (sartopoIdValidationMessage || sartopoSyncErrorMessage) ? '#dc2626' : undefined }}
                 />
               </label>
             </div>

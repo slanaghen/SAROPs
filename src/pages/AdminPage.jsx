@@ -4,6 +4,11 @@ import { supabase } from '../lib/supabase';
 import { useIncident } from '../context/IncidentContext';
 import '../styles/IncidentEditPage.css'; // Reusing form styles for consistency
 import { usePlanningDashboard } from '../hooks/usePlanningDashboard'; // Import usePlanningDashboard
+import { 
+  OPERATIONS_REFRESH_INTERVAL, setOperationsRefreshInterval,
+  RESPONDER_REFRESH_INTERVAL, setResponderRefreshInterval,
+  SARTOPO_REFRESH_INTERVAL, setSartopoRefreshInterval
+} from '../components/operationalConstants';
 
 const AdminPage = () => {
   const navigate = useNavigate(); 
@@ -29,13 +34,13 @@ const AdminPage = () => {
   const [isRespondersExpanded, setIsRespondersExpanded] = useState(false);
   const { recordAction } = usePlanningDashboard(supabase, incidentId); // Use recordAction from hook
 
-  const [opRefresh, setOpRefresh] = useState(operationsRefreshInterval / 1000);
-  const [resRefresh, setResRefresh] = useState(responderRefreshInterval / 1000);
-  const [sartopoRefresh, setSartopoRefresh] = useState(sartopoRefreshInterval / 1000);
+  const [opRefresh, setOpRefresh] = useState(OPERATIONS_REFRESH_INTERVAL / 1000);
+  const [resRefresh, setResRefresh] = useState(RESPONDER_REFRESH_INTERVAL / 1000);
+  const [sartopoRefresh, setSartopoRefresh] = useState(SARTOPO_REFRESH_INTERVAL / 1000);
   const [appliedSettings, setAppliedSettings] = useState({
-    op: operationsRefreshInterval / 1000,
-    res: responderRefreshInterval / 1000,
-    sartopo: sartopoRefreshInterval / 1000
+    op: OPERATIONS_REFRESH_INTERVAL / 1000,
+    res: RESPONDER_REFRESH_INTERVAL / 1000,
+    sartopo: SARTOPO_REFRESH_INTERVAL / 1000
   });
 
   const isSettingsDirty = opRefresh !== appliedSettings.op || 
@@ -201,6 +206,18 @@ const AdminPage = () => {
       sartopo: sartopoRefresh
     });
     setSuccess('System refresh intervals updated successfully.');
+  };
+
+  /**
+   * Toggles map visibility for the current incident in the database.
+   */
+  const handleToggleGlobalMap = async () => {
+    const nextValue = !showGlobalMap;
+    setShowGlobalMap(nextValue);
+    
+    if (incidentId) {
+      await supabase.from('incidents').update({ show_map: nextValue }).eq('incident_id', incidentId);
+    }
   };
 
   useEffect(() => {
@@ -751,7 +768,7 @@ const AdminPage = () => {
           </button>
           <button
             className={`btn ${showGlobalMap ? 'btn-secondary' : 'btn-primary'}`}
-            onClick={() => setShowGlobalMap(!showGlobalMap)}
+            onClick={handleToggleGlobalMap}
             style={{ height: '38px', marginLeft: '12px' }}
           >
             {showGlobalMap ? 'Hide Global Map' : 'Show Global Map'}

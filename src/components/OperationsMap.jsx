@@ -6,7 +6,8 @@ const OperationsMap = ({
   assignments, 
   teams, 
   sartopoId,
-  layoutMode
+  layoutMode,
+  style
 }) => {
   const mapContainer = useRef(null);
   const map = useRef(null);
@@ -140,7 +141,7 @@ const OperationsMap = ({
   }
 
   return (
-    <div className="map-wrapper" style={{ position: 'relative', height: '100%' }}>
+    <div className="map-wrapper" style={{ position: 'relative', height: '100%', ...style }}>
       <div 
         ref={mapContainer} 
         className="map-container" 

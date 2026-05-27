@@ -12,7 +12,9 @@ import OperationsTable from '../components/OperationsTable';
 import OperationsMap from '../components/OperationsMap';
 import { checkIsParOverdue, formatTimeSince } from '../utils/operationalUtils';
 const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
-  const { incidentData, incidentId, responderName, user, operationsRefreshInterval, showGlobalMap } = useIncident();
+  const { 
+    incidentData, incidentId, responderName, user, operationsRefreshInterval, showGlobalMap, setShowGlobalMap 
+  } = useIncident();
   const operationalPeriodId = propOpId || incidentData?.opPeriodId;
 
   const {
@@ -45,16 +47,25 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   const [currentTime, setCurrentTime] = useState(Date.now());
 
   const contentWrapperRef = useRef(null);
-  const [layoutMode, setLayoutMode] = useState(() => localStorage.getItem('sarops_layout_mode') || 'split');
 
   const [splitWidth, setSplitWidth] = useState(50); // percentage for table width in split view
   const isResizing = useRef(false);
 
+  useEffect(() => {
+    console.debug('[OperationsDashboard] showGlobalMap value:', showGlobalMap);
+  }, [showGlobalMap]);
+
+  // Sync context state with Database setting found in the joined incident record
+  useEffect(() => {
+    if (opPeriod?.incidents?.show_map !== undefined && opPeriod.incidents.show_map !== showGlobalMap) {
+      setShowGlobalMap(opPeriod.incidents.show_map);
+    }
+  }, [opPeriod, setShowGlobalMap, showGlobalMap]);
+
   // Persist layout choices when they change
   useEffect(() => {
     localStorage.setItem('sarops_view_mode', viewMode);
-    localStorage.setItem('sarops_layout_mode', layoutMode);
-  }, [viewMode, layoutMode]);
+  }, [viewMode]);
 
   const handleMouseMove = useCallback((e) => {
     if (!isResizing.current || !contentWrapperRef.current) return;
@@ -677,12 +688,25 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       )}
 
       {!error && (
-        <div ref={contentWrapperRef} className={`operations-content-wrapper layout-${layoutMode}`} style={loading ? { opacity: 0.8 } : {}}>
-          {(layoutMode === 'table' || layoutMode === 'split') && (
+        <div 
+          ref={contentWrapperRef} 
+          className={`operations-content-wrapper ${showGlobalMap ? 'layout-split' : 'layout-table'}`} 
+          style={{
+            ...(loading ? { opacity: 0.8 } : {}),
+            display: showGlobalMap ? 'flex' : 'block',
+            flexDirection: showGlobalMap ? 'row' : 'column',
+            flexWrap: 'nowrap',
+            alignItems: 'stretch',
+            height: 'calc(100vh - 200px)',
+            gap: showGlobalMap ? '12px' : '0',
+            overflow: 'hidden'
+          }}
+        >
             <div className="table-panel" style={{
-              ...(layoutMode === 'split' ? { width: showGlobalMap ? `${splitWidth}%` : '100%', flexShrink: 0 } : {}),
+              width: showGlobalMap ? `${splitWidth}%` : '100%',
+              flexShrink: 0, 
               overflowY: 'auto',
-              maxHeight: 'calc(100vh - 200px)',
+              height: '100%',
               border: '1px solid #e2e8f0',
               borderRadius: '8px',
               background: '#fff'
@@ -706,21 +730,36 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
               onDragOver={handleDragOver} onDragEnter={handleDragEnter} onDragLeave={() => setDropTarget(null)} onDrop={handleDrop}
             />
           </div>
-        )}
-          {layoutMode === 'split' && showGlobalMap && (
+
+          {showGlobalMap && (
             <div className="resizer-handle" onMouseDown={startResizing} style={{ width: '10px', cursor: 'col-resize', backgroundColor: '#f1f5f9', borderLeft: '1px solid #e2e8f0', borderRight: '1px solid #e2e8f0', zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <div style={{ width: '2px', height: '24px', backgroundColor: '#cbd5e1', borderRadius: '1px' }} />
             </div>
           )}
 
-          {(layoutMode === 'map' || layoutMode === 'split') && showGlobalMap && (
-            <div className="map-panel section-card" style={layoutMode === 'split' ? { 
-              flex: 1, 
-              minWidth: 0,
-              padding: '12px'
-            } : { margin: '0 auto 24px' }}>
-              <div style={{ aspectRatio: '1 / 1', position: 'relative' }}>
-                <OperationsMap loading={loading} assignments={assignments} teams={teams} sartopoId={sartopoId} layoutMode={layoutMode} />
+          {showGlobalMap && (
+            <div className="map-panel" style={{ flex: 1, minWidth: '400px', overflowY: 'auto' }}>
+              <div className="dashboard-section" style={{ padding: '12px 16px' }}>
+                <h2 style={{ margin: 0, fontSize: '18px', marginBottom: '12px' }}>Operational Map</h2>
+                <div style={{ 
+                    borderRadius: '12px', 
+                    overflow: 'hidden', 
+                    border: '1px solid #cbd5e1', 
+                    boxShadow: '0 6px 22px rgba(0, 0, 0, 0.04)', 
+                    background: '#fff', 
+                    height: '650px', 
+                    position: 'relative',
+                    marginTop: '12px'
+                  }}>
+                    <OperationsMap 
+                      loading={loading} 
+                      assignments={assignments} 
+                      teams={teams} 
+                      sartopoId={sartopoId} 
+                      layoutMode="map" 
+                      style={{ height: '100%' }} 
+                    />
+                </div>
               </div>
             </div>
           )}
