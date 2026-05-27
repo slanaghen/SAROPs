@@ -47,7 +47,10 @@ const createMockChain = (resolvedValue = { error: null, data: null }) => ({
   then: vi.fn((onFulfilled) => Promise.resolve(resolvedValue).then(onFulfilled)),
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 describe('IncidentEditPage', () => {
   beforeEach(() => {
@@ -350,6 +353,99 @@ describe('IncidentEditPage', () => {
       expect(mockFrom).toHaveBeenCalledWith('responders');
       expect(chain.insert).toHaveBeenCalledWith(expect.objectContaining({ name: 'Creator Steve' }));
       expect(mockStartIncident).toHaveBeenCalled();
+    });
+  });
+
+  it('triggers SARTopo auto-sync when sartopo_id is entered/updated in an active incident', async () => {
+    const mockSyncSartopoData = vi.fn();
+    // Mock the module where syncSartopoData is defined
+    vi.mock('../utils/gisUtils', () => ({
+      mapSartopoToAssignment: vi.fn(),
+    }));
+    // Mock fetch to return a controlled promise to verify the "Syncing..." state
+    let resolveFetch;
+    const fetchPromise = new Promise((resolve) => {
+      resolveFetch = resolve;
+    });
+    global.fetch = vi.fn().mockReturnValue(fetchPromise);
+
+    vi.mocked(useIncident).mockReturnValue({
+      isActive: true,
+      incidentId: 'inc-123',
+      incidentData: { name: 'Active Incident', opNumber: '1', opPeriodId: 'op-123', sartopo_id: '' },
+      startIncident: vi.fn(),
+      endIncident: vi.fn(),
+      setResponderId: vi.fn(),
+      setResponderName: vi.fn(),
+      setAccessLevel: vi.fn(),
+      setResponderStatus: vi.fn(),
+    });
+
+    const router = createMemoryRouter([{ path: "/", element: <IncidentEditPage /> }]);
+    render(<RouterProvider router={router} />);
+    
+    // 1. Wait for initial auth loading to finish using real timers
+    const sartopoInput = await screen.findByLabelText(/SARTopo Map ID/i); 
+
+    // 2. Enable fake timers only for the debounce/sync interaction
+    vi.useFakeTimers();
+    fireEvent.change(sartopoInput, { target: { value: 'NEW_MAP_ID' } });
+
+    // 3. Advance timers past the debounce period (1200ms)
+    act(() => {
+      vi.advanceTimersByTime(1200);
+    });
+
+    // 4. Switch to real timers and wait for "Syncing..." to appear
+    vi.useRealTimers();
+    expect(await screen.findByText(/Syncing/i)).toBeInTheDocument();
+
+    // 5. Resolve the fetch promise to allow the sync process to finish
+    await act(async () => {
+      resolveFetch({
+        ok: true,
+        json: async () => ({ features: [] }),
+      });
+    });
+
+    // Verify fetch was called for SARTopo data
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/sartopo-api/api/v1/map/NEW_MAP_ID/features')
+      );
+    });
+
+    // Expect "Syncing..." indicator to disappear
+    expect(screen.queryByText(/Syncing/i)).not.toBeInTheDocument();
+  });
+
+  it('updates the global IncidentContext with sartopo_id and parInterval on save', async () => {
+    const mockStartIncident = vi.fn();
+    vi.mocked(useIncident).mockReturnValue({
+      isActive: false,
+      incidentId: null,
+      incidentData: { name: '', opNumber: '', opPeriodId: '' },
+      startIncident: mockStartIncident,
+      endIncident: vi.fn(),
+      setResponderId: vi.fn(), setResponderName: vi.fn(), setAccessLevel: vi.fn(), setResponderStatus: vi.fn(),
+    });
+
+    const router = createMemoryRouter([{ path: "/", element: <IncidentEditPage /> }]);
+    render(<RouterProvider router={router} />);
+
+    fireEvent.change(await screen.findByLabelText(/SARTopo Map ID/i), { target: { value: 'MAPID_CTX' } });
+    fireEvent.change(await screen.findByLabelText(/PAR\/Status Check Interval \(minutes\)/i), { target: { value: '15' } });
+    fireEvent.submit(await screen.findByRole('button', { name: /Start Incident Tracking/i }));
+
+    await waitFor(() => {
+      expect(mockStartIncident).toHaveBeenCalledWith(
+        expect.any(String), // incidentId
+        expect.any(String), // incidentName
+        expect.any(String), // opNumber
+        expect.any(String), // opPeriodId
+        'MAPID_CTX', // sartopoId
+        15 // parInterval
+      );
     });
   });
 });

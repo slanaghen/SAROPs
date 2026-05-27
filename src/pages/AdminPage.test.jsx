@@ -21,7 +21,6 @@ vi.mock('../lib/supabase', () => ({
   supabase: { // Define the mock structure here
     from: vi.fn(() => {
       const mock = globalThis.createSupabaseQueryMock([]);
-      mock.neq = vi.fn().mockReturnThis();
       return mock;
     }),
     rpc: vi.fn(() => globalThis.createSupabaseQueryMock(null)),
@@ -36,11 +35,13 @@ vi.mock('../lib/supabase', () => ({
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
 });
 
 describe('AdminPage Authentication Gate', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.useRealTimers();
     // Set default mock for useIncident for tests that don't override it
     vi.mocked(useIncident).mockReturnValue({
       isAdmin: false,
@@ -100,6 +101,7 @@ describe('AdminPage Authentication Gate', () => {
       isAdmin: true,
       setIsAdmin: vi.fn(),
       logout: vi.fn(),
+      endIncident: vi.fn(),
     });
 
     // Mock data for incidents and responders
@@ -129,7 +131,12 @@ describe('AdminPage Authentication Gate', () => {
   });
 
   it('should toggle visibility of management sections and show correct counts', async () => {
-    vi.mocked(useIncident).mockReturnValue({ isAdmin: true });
+    vi.mocked(useIncident).mockReturnValue({
+      isAdmin: true,
+      setIsAdmin: vi.fn(),
+      logout: vi.fn(),
+      endIncident: vi.fn(),
+    });
     supabase.from.mockImplementation(() => {
       const query = {
         select: vi.fn().mockReturnThis(),
@@ -154,7 +161,12 @@ describe('AdminPage Authentication Gate', () => {
   });
 
   it('should disband a team and release responders', async () => {
-    vi.mocked(useIncident).mockReturnValue({ isAdmin: true });
+    vi.mocked(useIncident).mockReturnValue({
+      isAdmin: true,
+      setIsAdmin: vi.fn(),
+      logout: vi.fn(),
+      endIncident: vi.fn(),
+    });
     window.confirm = vi.fn().mockReturnValue(true);
     const mockTeam = { team_id: 't1', team_name_number: 'Team Alpha', status: 'Staged', type: 'Staff' };
     const mockMember = { responder_id: 'r1' };
@@ -191,14 +203,20 @@ describe('AdminPage Authentication Gate', () => {
     fireEvent.click(disbandBtn);
 
     expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('Disband team "Team Alpha"'));
-    expect(supabase.from).toHaveBeenCalledWith('responders'); // Verify cascade to responders
+    expect(supabase.from).toHaveBeenCalledWith('teams'); // Verify primary status update
     
-    // Verify "is/are" phrasing in logs
-    await waitFor(() => expect(mockRecordAction).toHaveBeenCalledWith(expect.stringContaining('status="Disbanded", last_par_check=null. All members status are "Staged"')));
+    await waitFor(() => expect(mockRecordAction).toHaveBeenCalledWith(
+      `Admin disbanded team "${mockTeam.team_name_number}" (ID: ${mockTeam.team_id}, Type: ${mockTeam.type}). Fields modified: status="Disbanded", last_par_check=null. Automated trigger: All members released to "Staged"`
+    ));
   });
 
   it('prompts for confirmation before deleting an incident', async () => {
-    vi.mocked(useIncident).mockReturnValue({ isAdmin: true });
+    vi.mocked(useIncident).mockReturnValue({
+      isAdmin: true,
+      setIsAdmin: vi.fn(),
+      logout: vi.fn(),
+      endIncident: vi.fn(),
+    });
     window.confirm = vi.fn().mockReturnValue(true);
     
     // Mock an ended incident so the Delete button is rendered
@@ -293,7 +311,13 @@ describe('AdminPage Authentication Gate', () => {
   });
 
   it('should check out a responder', async () => {
-    vi.mocked(useIncident).mockReturnValue({ isAdmin: true, logout: vi.fn(), responderId: 'res-123' });
+    vi.mocked(useIncident).mockReturnValue({
+      isAdmin: true,
+      setIsAdmin: vi.fn(),
+      logout: vi.fn(),
+      endIncident: vi.fn(),
+      responderId: 'res-123'
+    });
     window.confirm = vi.fn().mockReturnValue(true);
 
     const mockResponder = { responder_id: 'res-123', name: 'Test Responder', status: 'Staged', checkin_datetime: new Date().toISOString(), checkout_datetime: null };
@@ -336,9 +360,11 @@ describe('AdminPage Authentication Gate', () => {
 
   it('performs bulk cleanup of resources when ending an active incident', async () => {
     vi.mocked(useIncident).mockReturnValue({ 
-      isAdmin: true, 
+      isAdmin: true,
+      setIsAdmin: vi.fn(),
+      logout: vi.fn(),
       incidentId: 'inc-123',
-      endIncident: vi.fn()
+      endIncident: vi.fn(),
     });
     window.confirm = vi.fn().mockReturnValue(true);
 
@@ -380,6 +406,79 @@ describe('AdminPage Authentication Gate', () => {
     expect(supabase.from).toHaveBeenCalledWith('incidents');
   });
 
+  it('should clean incident resources when "Clean Incident" button is clicked', async () => {
+    vi.mocked(useIncident).mockReturnValue({
+      isAdmin: true,
+      setIsAdmin: vi.fn(),
+      logout: vi.fn(),
+      endIncident: vi.fn(),
+    });
+    window.confirm = vi.fn().mockReturnValue(true);
+
+    const mockIncident = {
+      incident_id: 'inc-clean',
+      name: 'Incident to Clean',
+      number: '123',
+      start_datetime: new Date().toISOString(),
+      end_datetime: null, // Active incident
+      operational_periods: [{ op_period_id: 'op-clean', op_number: 1, start_datetime: new Date().toISOString() }]
+    };
+    const mockAssignment = { assignment_id: 'a1', status: 'Deployed', op_period_id: 'op-clean' };
+    const mockTeam = { team_id: 't1', status: 'Assigned', op_period_id: 'op-clean' };
+    const mockResponder = { responder_id: 'r1', incident_id: 'inc-clean', status: 'Attached' };
+
+    const mockUpdate = vi.fn().mockReturnThis();
+    const mockEq = vi.fn().mockReturnThis();
+    const mockIs = vi.fn().mockReturnThis();
+    const mockSelect = vi.fn().mockReturnThis();
+
+    supabase.from.mockImplementation((table) => {
+      let data = [];
+      if (table === 'incidents') data = [mockIncident];
+      else if (table === 'operational_periods') data = { op_period_id: 'op-clean' };
+      else if (table === 'assignments') data = [mockAssignment];
+      else if (table === 'teams') data = [mockTeam];
+      else if (table === 'responders') data = [mockResponder];
+
+      return {
+        select: mockSelect,
+        update: mockUpdate,
+        eq: mockEq,
+        is: mockIs,
+        neq: vi.fn().mockReturnThis(),
+        order: vi.fn().mockReturnThis(),
+        maybeSingle: vi.fn().mockResolvedValue({ data: Array.isArray(data) ? data[0] : data, error: null }),
+        then: (onFulfilled) => Promise.resolve({ data, error: null }).then(onFulfilled)
+      };
+    });
+
+    render(<BrowserRouter><AdminPage /></BrowserRouter>);
+
+    // Expand Incident Management to select the incident
+    fireEvent.click(screen.getByText(/Incident Management/i));
+
+    const selectIncident = await screen.findByLabelText(/Select Incident/i);
+    fireEvent.change(selectIncident, { target: { value: 'inc-clean' } });
+
+    const cleanBtn = await screen.findByRole('button', { name: /Clean Incident/i });
+    fireEvent.click(cleanBtn);
+
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('Clean resources for incident "Incident to Clean"'));
+
+    await waitFor(() => {
+      // Verify assignments are updated
+      expect(supabase.from).toHaveBeenCalledWith('assignments');
+      expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ status: 'Incomplete', team_id: null }));
+      expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ status: 'Planned', team_id: null }));
+      // Verify teams are disbanded
+      expect(supabase.from).toHaveBeenCalledWith('teams');
+      expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ status: 'Disbanded', last_par_check: null }));
+      // Verify responders are checked out
+      expect(supabase.from).toHaveBeenCalledWith('responders');
+      expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ status: 'CheckedOut' }));
+    });
+  });
+
   it('successfully signs out the administrator and redirects to check-in', async () => {
     const mockLogout = vi.fn();
     vi.mocked(useIncident).mockReturnValue({ isAdmin: true, logout: mockLogout });
@@ -396,7 +495,12 @@ describe('AdminPage Authentication Gate', () => {
   });
 
   it('should delete an assignment when confirmed', async () => {
-    vi.mocked(useIncident).mockReturnValue({ isAdmin: true });
+    vi.mocked(useIncident).mockReturnValue({
+      isAdmin: true,
+      setIsAdmin: vi.fn(),
+      logout: vi.fn(),
+      endIncident: vi.fn(),
+    });
     window.confirm = vi.fn().mockReturnValue(true);
     const mockAsn = { assignment_id: 'a1', title: 'Task to Delete', status: 'Planned' };
     
@@ -417,7 +521,12 @@ describe('AdminPage Authentication Gate', () => {
   });
 
   it('should delete a responder when confirmed', async () => {
-    vi.mocked(useIncident).mockReturnValue({ isAdmin: true });
+    vi.mocked(useIncident).mockReturnValue({
+      isAdmin: true,
+      setIsAdmin: vi.fn(),
+      logout: vi.fn(),
+      endIncident: vi.fn(),
+    });
     window.confirm = vi.fn().mockReturnValue(true);
     const mockRes = { responder_id: 'r1', name: 'Delete Me', status: 'Staged', checkin_datetime: new Date().toISOString(), agency: 'SAR', identifier: 'K9-1' };
 
@@ -438,7 +547,12 @@ describe('AdminPage Authentication Gate', () => {
   });
 
   it('should remove an administrator when confirmed', async () => {
-    vi.mocked(useIncident).mockReturnValue({ isAdmin: true });
+    vi.mocked(useIncident).mockReturnValue({
+      isAdmin: true,
+      setIsAdmin: vi.fn(),
+      logout: vi.fn(),
+      endIncident: vi.fn(),
+    });
     window.confirm = vi.fn().mockReturnValue(true);
     
     const mockAdmins = [
@@ -466,7 +580,12 @@ describe('AdminPage Authentication Gate', () => {
   });
 
   it('prompts for confirmation and calls seed_data_specific RPC', async () => {
-    vi.mocked(useIncident).mockReturnValue({ isAdmin: true });
+    vi.mocked(useIncident).mockReturnValue({
+      isAdmin: true,
+      setIsAdmin: vi.fn(),
+      logout: vi.fn(),
+      endIncident: vi.fn(),
+    });
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     supabase.rpc.mockResolvedValue({ error: null });
 
@@ -479,5 +598,56 @@ describe('AdminPage Authentication Gate', () => {
     expect(supabase.rpc).toHaveBeenCalledWith('seed_data_specific');
     
     confirmSpy.mockRestore();
+  });
+
+  it('prompts for confirmation and calls reinitialize_database RPC', async () => {
+    const mockLogout = vi.fn();
+    vi.mocked(useIncident).mockReturnValue({
+      isAdmin: true,
+      setIsAdmin: vi.fn(),
+      logout: mockLogout,
+      endIncident: vi.fn(),
+    });
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    
+    supabase.rpc.mockResolvedValue({ error: null });
+
+    render(<BrowserRouter><AdminPage /></BrowserRouter>);
+    
+    const resetBtn = await screen.findByRole('button', { name: /Re-initialize Database/i });
+    fireEvent.click(resetBtn);
+
+    await waitFor(() => {
+      expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('DANGER'));
+      expect(supabase.rpc).toHaveBeenCalledWith('reinitialize_database');
+      expect(mockLogout).toHaveBeenCalled();
+    });
+    
+    confirmSpy.mockRestore();
+  });
+
+  it('disables the Re-initialize Database button while a reset operation is in progress', async () => {
+    vi.mocked(useIncident).mockReturnValue({
+      isAdmin: true,
+      setIsAdmin: vi.fn(),
+      logout: vi.fn(),
+      endIncident: vi.fn(),
+    });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    
+    // Use a controlled promise that we can resolve later to avoid hanging the test runner
+    let resolveReset;
+    const resetPromise = new Promise((resolve) => { resolveReset = resolve; });
+    supabase.rpc.mockReturnValue(resetPromise);
+
+    render(<BrowserRouter><AdminPage /></BrowserRouter>);
+    
+    const resetBtn = await screen.findByRole('button', { name: /Re-initialize Database/i });
+    fireEvent.click(resetBtn);
+
+    expect(resetBtn).toBeDisabled();
+    expect(resetBtn).toHaveTextContent(/Resetting/i);
+    
+    resolveReset({ error: null }); // Resolve to allow clean termination
   });
 });

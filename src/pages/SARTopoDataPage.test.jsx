@@ -42,6 +42,32 @@ describe('SARTopoDataPage', () => {
 
   afterEach(cleanup);
 
+  it('sartopoConfig correctly parses Map ID and injects API Key', async () => {
+    vi.stubEnv('VITE_SARTOPO_API_KEY', 'SECRET_KEY');
+    vi.mocked(useIncident).mockReturnValue({ 
+      isActive: true, 
+      incidentId: 'inc-123',
+      incidentData: { sartopo_id: 'https://sartopo.com/m/ABCD?foo=bar' } 
+    });
+
+    // Component fetches sartopo_id on mount; override the default mock to return the complex URL
+    fromMock.maybeSingle.mockResolvedValueOnce({ 
+      data: { sartopo_id: 'https://sartopo.com/m/ABCD?foo=bar' }, error: null 
+    });
+
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      headers: { get: () => 'application/json' },
+      json: vi.fn().mockResolvedValue({ features: [] })
+    });
+
+    render(<SARTopoDataPage />);
+    
+    // Check that the displayed Download URL has both the original query and the injected key
+    expect(await screen.findByText(/ABCD\/since\/0\?foo=bar&k=SECRET_KEY/)).toBeInTheDocument();
+    vi.unstubAllEnvs();
+  });
+
   it('appends the SARTopo API key from environment variables to request URLs', async () => {
     // Mock the environment variable in the test context
     vi.stubEnv('VITE_SARTOPO_API_KEY', 'SECRET_KEY_123');

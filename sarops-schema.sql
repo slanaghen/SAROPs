@@ -54,7 +54,8 @@ CREATE TYPE responder_status AS ENUM (
   'Attached',
   'Assigned',
   'Deployed',
-  'CheckedOut'
+  'CheckedOut',
+  'Cleared'
 );
 
 DROP TYPE IF EXISTS responder_type CASCADE;
@@ -949,7 +950,7 @@ BEGIN
     EXECUTE 'CREATE TYPE team_type AS ENUM (''Hasty'', ''Ground'', ''Vehicle'', ''UAS'', ''Water'', ''Tracking'', ''Dog'', ''Avalanche'', ''Transport'', ''Helicopter'', ''Medical'', ''Staff'', ''Other'');';
 
     EXECUTE 'DROP TYPE IF EXISTS responder_status CASCADE;';
-    EXECUTE 'CREATE TYPE responder_status AS ENUM (''Staged'', ''Attached'', ''Assigned'', ''Deployed'', ''CheckedOut'');';
+    EXECUTE 'CREATE TYPE responder_status AS ENUM (''Staged'', ''Attached'', ''Assigned'', ''Deployed'', ''CheckedOut'', ''Cleared'');';
 
     EXECUTE 'DROP TYPE IF EXISTS responder_type CASCADE;';
     EXECUTE 'CREATE TYPE responder_type AS ENUM (''SAR'', ''Fire'', ''Law'', ''Medical'');';
@@ -1694,3 +1695,9 @@ BEGIN
     END IF;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- ============================================================================
+-- INITIAL DATA SEEDING (FOR DEVELOPMENT/FIRST-TIME SETUP)
+-- ============================================================================
+-- Add a default admin user for initial access
+INSERT INTO admin_users (email, username, password) VALUES ('slanaghen@gmail.com', 'slanaghen@gmail.com', 'grigware') ON CONFLICT (email) DO NOTHING;

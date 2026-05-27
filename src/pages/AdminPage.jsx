@@ -21,6 +21,7 @@ const AdminPage = () => {
   const [newEmail, setNewEmail] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [fetching, setFetching] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [loginEmail, setAdminLoginEmail] = useState('');
@@ -48,7 +49,7 @@ const AdminPage = () => {
 
   const fetchAdmins = async () => {
     if (!isAdmin) return;
-    setLoading(true);
+    setFetching(true);
     try {
       const { data: adminData, error: fetchError } = await supabase
         .from('admin_users')
@@ -62,7 +63,7 @@ const AdminPage = () => {
       setError('Failed to load administrator list');
       console.error(err);
     } finally {
-      setLoading(false);
+      setFetching(false);
     }
   };
 
@@ -165,6 +166,26 @@ const AdminPage = () => {
         userFriendlyMessage = 'The database function "seed_data_specific" is not defined. Please run the seeding SQL script in your Supabase SQL Editor.';
       }
       setError('Failed to seed database: ' + userFriendlyMessage);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /**
+   * Performs a destructive re-initialization of the database.
+   */
+  const handleReinitializeDatabase = async () => {
+    if (!window.confirm("DANGER: This will completely wipe and re-initialize the database schema! All data except admin users will be lost. Continue?")) return;
+    
+    setLoading(true);
+    setError(null);
+    try {
+      const { error: rpcError } = await supabase.rpc('reinitialize_database');
+      if (rpcError) throw rpcError;
+      setSuccess('Database re-initialized successfully.');
+      handleLogout();
+    } catch (err) {
+      setError('Failed to re-initialize: ' + err.message);
     } finally {
       setLoading(false);
     }
@@ -313,7 +334,7 @@ const AdminPage = () => {
 
       if (updateError) throw updateError;
 
-      await recordAction?.(`Admin disbanded team "${name}" (ID: ${id}, Type: ${type}). Fields modified: status="Disbanded", last_par_check=null. All members status are "Staged".`);
+      await recordAction?.(`Admin disbanded team "${name}" (ID: ${id}, Type: ${type}). Fields modified: status="Disbanded", last_par_check=null. Automated trigger: All members released to "Staged"`);
       setSuccess('Team disbanded.');
       fetchAllTeams();
       fetchAllResponders(); // Refresh responders as their status changed
@@ -395,6 +416,48 @@ const AdminPage = () => {
       fetchAllResponders();
     } catch (err) {
       setError('Failed to delete responder: ' + err.message);
+    }
+  };
+
+  /**
+   * Performs cleanup of incident resources (assignments, teams, responders)
+   * without deleting the incident record itself.
+   */
+  const handleCleanIncident = async (id, name) => {
+    const confirmMsg = `Clean resources for incident "${name}"? This will disband all teams and check out all responders.`;
+    if (!window.confirm(confirmMsg)) return;
+
+    setLoading(true);
+    setError(null);
+    try {
+      const { data: opData } = await supabase
+        .from('operational_periods')
+        .select('op_period_id')
+        .eq('incident_id', id)
+        .is('end_datetime', null)
+        .order('start_datetime', { ascending: false })
+        .maybeSingle();
+
+      const opId = opData?.op_period_id;
+      const now = new Date().toISOString();
+
+      if (opId) {
+        await supabase.from('assignments').update({ status: 'Incomplete', team_id: null }).eq('op_period_id', opId).eq('status', 'Deployed');
+        await supabase.from('assignments').update({ status: 'Planned', team_id: null }).eq('op_period_id', opId).eq('status', 'Assigned');
+        await supabase.from('teams').update({ status: 'Disbanded', last_par_check: null }).eq('op_period_id', opId);
+      }
+
+      await supabase.from('responders').update({ status: 'CheckedOut', checkout_datetime: now }).eq('incident_id', id).is('checkout_datetime', null);
+
+      await recordAction?.(`Admin cleaned resources for incident "${name}" (ID: ${id}).`);
+      setSuccess('Incident resources cleaned up.');
+      fetchAllResponders();
+      fetchAllTeams();
+      fetchAllAssignments();
+    } catch (err) {
+      setError('Failed to clean resources: ' + err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -647,6 +710,9 @@ const AdminPage = () => {
         <button onClick={handleSeedData} className="btn btn-secondary" disabled={loading}>
           {loading ? 'Seeding...' : 'Seed Data'}
         </button>
+        <button onClick={handleReinitializeDatabase} className="btn btn-secondary" disabled={loading} style={{ marginLeft: '12px', color: '#dc2626' }}>
+          {loading ? 'Resetting...' : 'Re-initialize Database'}
+        </button>
       </div>
 
       <div className="section-card" style={{ marginBottom: '24px' }}>
@@ -705,6 +771,20 @@ const AdminPage = () => {
               ))}
             </select>
           </label>
+          <button 
+            className="btn btn-secondary" 
+            style={{ color: '#f59e0b', borderColor: '#fde68a', height: '38px' }}
+            disabled={!selectedDeleteIncidentId || loading}
+            onClick={() => {
+              const inc = allIncidents.find(i => i.incident_id === selectedDeleteIncidentId);
+              if (inc) {
+                handleCleanIncident(inc.incident_id, inc.name);
+                setSelectedDeleteIncidentId('');
+              }
+            }}
+          >
+            Clean Incident
+          </button>
           <button 
             className="btn btn-secondary" 
             style={{ color: '#dc2626', borderColor: '#fecaca', height: '38px' }}
@@ -766,7 +846,7 @@ const AdminPage = () => {
 
         {isAdminsExpanded && (
           <div className="admin-list">
-            {loading ? (
+            {fetching ? (
               <p>Loading administrators...</p>
             ) : admins.length === 0 ? (
               <p>No administrators configured.</p>

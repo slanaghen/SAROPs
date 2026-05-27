@@ -23,17 +23,17 @@ export const STAFF_PREDEFINED_ROLES = [
 /**
  * Polling interval for background data refreshes on the Operations Dashboard.
  */
-export let OPERATIONS_REFRESH_INTERVAL = 60000; // 60 seconds
+export let OPERATIONS_REFRESH_INTERVAL = 1000; // 1 second
 export const setOperationsRefreshInterval = (ms: number) => { OPERATIONS_REFRESH_INTERVAL = ms; };
 
 /**
  * Polling interval for background data refreshes on the Responder Dashboard.
  */
-export let RESPONDER_REFRESH_INTERVAL = 60000; // 60 seconds
+export let RESPONDER_REFRESH_INTERVAL = 1000; // 1 second
 export const setResponderRefreshInterval = (ms: number) => { RESPONDER_REFRESH_INTERVAL = ms; };
 
 /**
  * Polling interval for background SARTopo data fetches.
  */
-export let SARTOPO_REFRESH_INTERVAL = 60000; // 60 seconds
+export let SARTOPO_REFRESH_INTERVAL = 1000; // 1 second
 export const setSartopoRefreshInterval = (ms: number) => { SARTOPO_REFRESH_INTERVAL = ms; };

@@ -37,7 +37,7 @@ export const IncidentProvider = ({ children }) => {
   });
 
   const [incidentData, setIncidentData] = useState(() => {
-    const data = getSavedState('incidentData', { name: '', opNumber: '', opPeriodId: '' });
+    const data = getSavedState('incidentData', { name: '', opNumber: '', opPeriodId: '', sartopo_id: null, parInterval: null });
     if (data.opPeriodId && !uuidRegex.test(data.opPeriodId)) data.opPeriodId = '';
     return data;
   });
@@ -61,9 +61,9 @@ export const IncidentProvider = ({ children }) => {
     }));
   }, [isActive, incidentId, responderId, responderName, responderStatus, accessLevel, isAdmin, incidentData, currentTeamStatus, currentAssignmentStatus]);
 
-  const startIncident = (id, name, opNumber, opPeriodId) => {
+  const startIncident = (id, name, opNumber, opPeriodId, sartopo_id = null, parInterval = null) => {
     setIncidentId(id);
-    setIncidentData({ name, opNumber, opPeriodId });
+    setIncidentData({ name, opNumber, opPeriodId, sartopo_id, parInterval });
     setIsActive(true);
   };
 
@@ -81,7 +81,7 @@ export const IncidentProvider = ({ children }) => {
     setAccessLevel('');
     setCurrentTeamStatus(null);
     setCurrentAssignmentStatus(null);
-    setIncidentData({ name: '', opNumber: '', opPeriodId: '' });
+    setIncidentData({ name: '', opNumber: '', opPeriodId: '', sartopo_id: null, parInterval: null });
     localStorage.removeItem(STORAGE_KEY);
   };
 

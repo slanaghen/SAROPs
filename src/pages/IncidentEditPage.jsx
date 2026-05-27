@@ -298,7 +298,14 @@ const IncidentEditPage = () => {
         if (opError) throw opError;
         opPeriodId = incidentData?.opPeriodId;
 
-        startIncident(newIncidentId, incident.name, operationalPeriod.op_number, incidentData?.opPeriodId);
+        startIncident(
+          newIncidentId, 
+          incident.name, 
+          operationalPeriod.op_number, 
+          incidentData?.opPeriodId,
+          incident.sartopo_id,
+          finalParInterval
+        );
       } else {
         // 1. Create Incident in Supabase
         const { error: incError } = await supabase
@@ -332,7 +339,14 @@ const IncidentEditPage = () => {
         if (opError) throw opError;
 
         // 4. Update global state with real IDs
-        startIncident(newIncidentId, incident.name, operationalPeriod.op_number, opPeriodId);
+        startIncident(
+          newIncidentId, 
+          incident.name, 
+          operationalPeriod.op_number, 
+          opPeriodId,
+          incident.sartopo_id,
+          finalParInterval
+        );
       }
 
       if (shouldCleanState) {
