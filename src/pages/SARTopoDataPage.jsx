@@ -23,6 +23,7 @@ const SARTopoDataPage = () => {
   const [isSartopoAssignmentsExpanded, setIsSartopoAssignmentsExpanded] = useState(true);
   const [isMapUploadExpanded, setIsMapUploadExpanded] = useState(true);
   const [isMapDownloadExpanded, setIsMapDownloadExpanded] = useState(true);
+  const [showUploadGeometry, setShowUploadGeometry] = useState(false); // New state for upload filter
   const [showAllDownloadObjects, setShowAllDownloadObjects] = useState(false); // New state for download filter
   const [showDownloadGeometry, setShowDownloadGeometry] = useState(false);
   const [isAutoRefreshEnabled, setIsAutoRefreshEnabled] = useState(() => {
@@ -294,13 +295,26 @@ const SARTopoDataPage = () => {
       // The gt filter in the query handles the incremental logic
       const assignmentsToExport = (assignments || []).filter(asn => asn.origin === 'SARTopo' && asn.sartopo_id);
 
+      // Requirement: Reconciliation requires the base SARTopo JSON state.
+      if (!features && assignmentsToExport.length > 0) {
+        alert('Local map state is empty. Please click "Download from SARTopo" first to load the base metadata for your assignments.');
+        return;
+      }
+
+      const fetchedFeatures = features?.result?.state?.features || features?.features || [];
+      const sartopoMap = new Map(fetchedFeatures.map(f => [f.id, f]));
+
       const geojson = {
         type: 'FeatureCollection',
-        features: assignmentsToExport.map(asn => ({
-          type: 'Feature',
-          id: asn.sartopo_id,
-          properties: mapAssignmentToSartopo(asn)
-        }))
+        features: assignmentsToExport.map(asn => {
+          const existing = sartopoMap.get(asn.sartopo_id);
+          return {
+            geometry: existing?.geometry || null,
+            id: asn.sartopo_id,
+            type: 'Feature',
+            properties: mapAssignmentToSartopo(asn, existing?.properties || {})
+          };
+        })
       };
 
       setUploadGeoJSON(geojson);
@@ -326,7 +340,7 @@ const SARTopoDataPage = () => {
     } finally {
       setIsGeneratingUpload(false);
     }
-  }, [incidentData?.opPeriodId, lastUploadTime, setSyncedAssignmentNames]);
+  }, [incidentData?.opPeriodId, lastUploadTime, setSyncedAssignmentNames, features]);
   
   // Ref to hold the latest fetcher to avoid dependency loops with the refresh function
   const fetcherRef = useRef(handleFetchFeatures);
@@ -381,39 +395,45 @@ const SARTopoDataPage = () => {
       const fetchedFeatures = currentMapData?.result?.state?.features || currentMapData?.features || [];
       const sartopoFeatureLookup = new Map(fetchedFeatures.map(f => [f.id, f]));
 
-      // Prepare the list of assignments intended for upload from SAROps
-      const geojsonToUpload = await generateUploadGeoJSON(); // This will also update uploadGeoJSON state
-      if (!geojsonToUpload || geojsonToUpload.features.length === 0) {
-        alert('No assignments to upload. Ensure SARTopo assignments exist and are updated.');
+      // Step 2: Isolate Object & Mutate Key
+      // Fetch assignments from Supabase directly to perform reconciliation against Step 1 map state
+      let query = supabase
+        .from('assignments')
+        .select('*')
+        .eq('op_period_id', incidentData.opPeriodId)
+        .eq('origin', 'SARTopo')
+        .not('sartopo_id', 'is', null);
+
+      if (lastUploadTime > 0) {
+        query = query.gt('updated_at', new Date(lastUploadTime).toISOString());
+      }
+
+      const { data: assignmentsToSync, error: fetchError } = await query;
+      if (fetchError) throw fetchError;
+
+      if (!assignmentsToSync || assignmentsToSync.length === 0) {
+        alert('No new or updated assignments found for upload.');
         return;
       }
 
-      for (const feature of geojsonToUpload.features) {
-        if (!feature.id || !feature.properties?.class) {
-          console.warn('Skipping malformed feature:', feature);
+      for (const asn of assignmentsToSync) {
+        const existingSartopoFeature = sartopoFeatureLookup.get(asn.sartopo_id);
+        
+        if (!existingSartopoFeature) {
+          console.warn(`Feature ${asn.sartopo_id} not found in SARTopo. Skipping.`);
           failCount++;
-          failedAssignments.push(feature.properties?.title || 'Unknown');
+          failedAssignments.push(asn.title || 'Unknown');
           continue;
         }
 
-        // Step 2: Isolate Object & Mutate Key
-        // Locate the assignment object matching the target id and merge properties
-        const existingSartopoFeature = sartopoFeatureLookup.get(feature.id);
-        
-        let payload;
-        if (existingSartopoFeature) {
-          // Safely merge: Preserve geometry, folderId, and styling keys while updating SAROps operational fields
-          payload = {
-            ...existingSartopoFeature,
-            properties: {
-              ...existingSartopoFeature.properties,
-              ...feature.properties // Apply updates to title, description, priority, etc.
-            }
-          };
-        } else {
-          // Fallback if the feature was deleted from SARTopo since the last sync
-          payload = feature;
-        }
+        // Step 2 (Strict): Mutate the object from Step 1 "field by field"
+        // Requirement: Order keys as geometry, id, type, properties for strict v1 API compliance
+        const payload = {
+          geometry: existingSartopoFeature.geometry || null,
+          id: existingSartopoFeature.id,
+          type: existingSartopoFeature.type || 'Feature',
+          properties: mapAssignmentToSartopo(asn, existingSartopoFeature.properties)
+        };
 
         // Step 3: POST Payload
         const uploadEndpoint = `/sartopo-api/api/v1/map/${mapId}/features?readCode=${apiKey}`;
@@ -439,10 +459,17 @@ const SARTopoDataPage = () => {
           }
           successCount++;
         } catch (uploadErr) {
-          console.error(`Failed to upload assignment ${feature.id}:`, uploadErr);
+          console.error(`Failed to upload assignment ${asn.sartopo_id}:`, uploadErr);
           failCount++;
-          failedAssignments.push(feature.properties?.title || 'Unknown');
+          failedAssignments.push(asn.title || 'Unknown');
         }
+      }
+
+      // Update high-water mark for future incremental uploads
+      if (successCount > 0) {
+        const latestUpdate = Math.max(...assignmentsToSync.map(a => new Date(a.updated_at).getTime()));
+        setLastUploadTime(latestUpdate);
+        setSyncedAssignmentNames(assignmentsToSync.map(a => a.title));
       }
 
       if (failCount === 0) {
@@ -480,14 +507,14 @@ const SARTopoDataPage = () => {
             <p style={{ margin: '4px 0 0', color: '#64748b', fontSize: '14px' }}>
               SARTopo Map ID: <code style={{ color: '#0369a1', fontWeight: 700 }}>{sartopoId || 'Not Configured'}</code>
             </p>
-            {fetchUrl && (
-              <p style={{ margin: '4px 0 0', color: '#64748b', fontSize: '12px' }}>
-                Download URL: <code style={{ color: '#0369a1' }}>{fetchUrl}</code>
+            {lastFetchTime > 0 && (
+              <p style={{ margin: '2px 0 0', color: '#64748b', fontSize: '12px' }}>
+                Latest Download: <span style={{ color: '#0369a1', fontWeight: 500 }}>{new Date(lastFetchTime).toLocaleString()}</span>
               </p>
             )}
-            {uploadUrl && (
-              <p style={{ margin: '4px 0 0', color: '#64748b', fontSize: '12px' }}>
-                Upload URL: <code style={{ color: '#0369a1' }}>{uploadUrl}</code>
+            {lastUploadTime > 0 && (
+              <p style={{ margin: '2px 0 0', color: '#64748b', fontSize: '12px' }}>
+                Latest Upload: <span style={{ color: '#0369a1', fontWeight: 500 }}>{new Date(lastUploadTime).toLocaleString()}</span>
               </p>
             )}
           </div>
@@ -575,6 +602,14 @@ const SARTopoDataPage = () => {
                 Reset
               </button>
               <button 
+                className="btn btn-secondary btn-sm" 
+                onClick={(e) => { e.stopPropagation(); setShowUploadGeometry(!showUploadGeometry); }}
+                style={{ padding: '2px 8px', fontSize: '11px', minHeight: 'auto', width: 'auto' }}
+                title={showUploadGeometry ? "Hide coordinates data" : "Show coordinates data"}
+              >
+                {showUploadGeometry ? 'Hide Geometry' : 'Show Geometry'}
+              </button>
+              <button 
                 className="btn btn-primary btn-sm" 
                 onClick={(e) => { e.stopPropagation(); generateUploadGeoJSON(); }}
                 disabled={isGeneratingUpload || !incidentData?.opPeriodId}
@@ -600,7 +635,10 @@ const SARTopoDataPage = () => {
                 borderRadius: '8px',
                 margin: 0
               }}>
-                {uploadGeoJSON ? JSON.stringify(uploadGeoJSON, null, 2) : '// No upload data generated yet. Click "Upload to SARTopo" above.'}
+                {uploadGeoJSON ? JSON.stringify(uploadGeoJSON, (key, value) => {
+                  if (!showUploadGeometry && key === 'geometry') return undefined;
+                  return value;
+                }, 2) : '// No upload data generated yet. Click "Generate JSON" above.'}
               </pre>
             </div>
           )}

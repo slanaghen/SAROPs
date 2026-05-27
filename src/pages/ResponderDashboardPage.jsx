@@ -30,7 +30,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     responderRefreshInterval,
     startIncident
   } = useIncident();
-  const isStaffOrAdmin = accessLevel === 'command staff' || accessLevel === 'admin';
+  const isStaffOrAdmin = accessLevel === 'staff' || accessLevel === 'admin';
   const responderId = propId || contextId;
   const [responders, setResponders] = useState([]);
   const [isLeavingTeam, setIsLeavingTeam] = useState(false);
@@ -207,7 +207,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
   // Fetch ICS Role for command staff
   useEffect(() => {
     const fetchIcsRole = async () => {
-      if ((accessLevel === 'command staff' || accessLevel === 'admin') && incidentId && responderId) {
+      if ((accessLevel === 'staff' || accessLevel === 'admin') && incidentId && responderId) {
         const { data } = await supabase
           .from('team_responders')
           .select('role, teams!inner(type, status)')
@@ -616,7 +616,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       {showTeam && (
         <div className="dashboard-section team-info">
           <SectionHeader
-            title={accessLevel === 'command staff' || accessLevel === 'admin' ? 'Staff Status' : `Your Team: ${team?.team_name_number}`} 
+            title={accessLevel === 'staff' || accessLevel === 'admin' ? 'Staff Status' : `Your Team: ${team?.team_name_number}`} 
             sectionKey="team" 
             showBadge={team && parRequired ? (
               <span 
@@ -645,7 +645,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
 
           {isExpanded.team && (
             <div style={{ marginTop: '10px' }}>
-              {accessLevel === 'command staff' || accessLevel === 'admin' ? (
+              {accessLevel === 'staff' || accessLevel === 'admin' ? (
                 <div className="staff-status-card" style={{ padding: '24px', background: '#f0f9ff', borderRadius: '12px', border: '1px solid #bae6fd', textAlign: 'center' }}>
                   <div style={{ fontSize: '32px', marginBottom: '12px' }}>🛡️</div>
                   <h3 style={{ color: '#0369a1', marginBottom: '8px' }}>{icsRole ? icsRole.toUpperCase() : 'Staff'}</h3>
@@ -745,12 +745,12 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       {showAssignment && (
         <div className="dashboard-section assignment-info">
           <SectionHeader
-            title={accessLevel === 'command staff' || accessLevel === 'admin' ? 'ICS Chart' : `Team Assignment: ${assignment?.title}`} 
+            title={accessLevel === 'staff' || accessLevel === 'admin' ? 'ICS Chart' : `Team Assignment: ${assignment?.title}`} 
             sectionKey="assignment" 
           />
           {isExpanded.assignment && (
             <div style={{ marginTop: '10px' }}>
-              {accessLevel === 'command staff' || accessLevel === 'admin' ? (
+              {accessLevel === 'staff' || accessLevel === 'admin' ? (
                 <div style={{ padding: '16px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: '12px' }}>
                   <div style={{ fontSize: '24px' }}>📋</div>
                   <div>

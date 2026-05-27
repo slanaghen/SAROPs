@@ -185,7 +185,7 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
     // This is important if they were assigned an ICS role before checking in
     try {
       const existingResponder = await getResponderByIdentifier(supabase, data.identifier.trim());
-      if (existingResponder && (existingResponder.access_level === 'command staff' || existingResponder.access_level === 'admin')) {
+      if (existingResponder && (existingResponder.access_level === 'staff' || existingResponder.access_level === 'admin')) {
         initialAccessLevel = existingResponder.access_level;
         initialStatus = 'Assigned'; // Command staff are 'Assigned' by default
       }
@@ -217,29 +217,17 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
     e.preventDefault();
     setInternalError(null);
 
-    // Read values directly from the submitted form and apply formatting
-    const formEl = e.currentTarget;
-    const fd = new FormData(formEl);
-    const submitted = {
-      name: (fd.get('name') as string) || '',
-      agency: (fd.get('agency') as string) || '',
-      identifier: (fd.get('identifier') as string) || '',
-      cell_phone: formatPhoneNumber((fd.get('cell_phone') as string) || ''),
-      special_skills: fd.getAll('special_skills').filter(v => v !== '').join(', '),
-      responder_type: (fd.get('responder_type') as ResponderType) || '',
-      incident_id: selectedIncidentId,
-    };
+    // Use the component's Tracked state as the source of truth
+    const submittedData = { ...formData, incident_id: selectedIncidentId };
 
-    // Update controlled state to reflect formatted values and snapshot confirmation data
-    setFormData(submitted);
-    setConfirmationData(submitted);
-
-    if (!validateForm(submitted)) {
+    if (!validateForm(submittedData)) {
       return;
     }
 
+    setConfirmationData(submittedData);
+
     // Create responder object from submitted values and show confirmation
-    const responder = await createResponderObject(submitted, selectedIncidentId);
+    const responder = await createResponderObject(submittedData, selectedIncidentId);
     console.debug('ResponderCheckin submit -> responder:', responder);
     setConfirmedResponder(responder);
     setShowConfirmation(true);
@@ -309,7 +297,6 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
       <div className="checkin-container">
         <div className="checkin-header">
           <h1>Responder Check-In</h1>
-          <p className="subtitle">Welcome to the incident. Please enter your information.</p>
         </div>
 
         {/* Error Alert */}

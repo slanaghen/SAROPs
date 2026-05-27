@@ -23,17 +23,26 @@ vi.mock('../lib/supabase', () => ({
       onAuthStateChange: vi.fn().mockReturnValue({ data: { subscription: { unsubscribe: vi.fn() } } }),
       signOut: vi.fn().mockResolvedValue({ error: null }),
     },
-    from: vi.fn(() => ({
-      select: vi.fn().mockReturnThis(),
-      is: vi.fn().mockReturnThis(),
-      order: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockReturnThis(),
-      maybeSingle: vi.fn().mockReturnThis(),
-      insert: vi.fn().mockReturnThis(),
-      update: vi.fn().mockReturnThis(),
-      // Supabase queries are thenable
-      then: (cb: any, rej?: any) => Promise.resolve({ data: [], error: null }).then(cb, rej)
-    }))
+    from: vi.fn().mockImplementation(() => ({
+        select: vi.fn().mockReturnThis(),
+        is: vi.fn().mockReturnThis(),
+        order: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        maybeSingle: vi.fn().mockReturnThis(),
+        single: vi.fn().mockReturnThis(),
+        insert: vi.fn().mockReturnThis(),
+        update: vi.fn().mockReturnThis(),
+        then: vi.fn((cb: any, rej?: any) => 
+          Promise.resolve({ data: [], error: null }).then(cb, rej)
+        )
+    })),
+    // Define channel as a function that returns a chainable object
+    // to prevent "is not a function" errors during useEffect mount.
+    channel: vi.fn(() => ({
+      on: vi.fn().mockReturnThis(),
+      subscribe: vi.fn().mockReturnThis()
+    })),
+    removeChannel: vi.fn()
   }
 }));
 
@@ -54,6 +63,31 @@ vi.mock('../context/IncidentContext', () => ({
 describe('ResponderCheckinPage Routing', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Provide a safe default mock for useIncident to prevent crashes and accidental redirects
+    vi.mocked(useIncident).mockReturnValue({
+      isActive: false,
+      incidentId: null, // This maps to contextIncidentId
+      incidentData: { name: '', opNumber: '', opPeriodId: '', sartopo_id: null, parInterval: null },
+      startIncident: vi.fn(),
+      endIncident: vi.fn(),
+      logout: vi.fn(),
+      currentTeamStatus: null,
+      currentAssignmentStatus: null,
+      setCurrentTeamStatus: vi.fn(),
+      setCurrentAssignmentStatus: vi.fn(),
+      setResponderId: vi.fn(),
+      setResponderName: vi.fn(),
+      setAccessLevel: vi.fn(),
+      setResponderStatus: vi.fn(),
+      responderName: '',
+      responderStatus: '',
+      accessLevel: '',
+      isAdmin: false,
+    } as any);
+
+    // Reset supabase auth mocks to safe defaults
+    vi.mocked(supabase.auth.getSession).mockResolvedValue({ data: { session: null } } as any);
+    vi.mocked(supabase.auth.signInAnonymously).mockResolvedValue({ data: { user: { id: 'test-user' } }, error: null } as any);
   });
 
   afterEach(() => {
@@ -65,7 +99,7 @@ describe('ResponderCheckinPage Routing', () => {
       isActive: true,
       responderName: 'Steve',
       responderStatus: 'Staged',
-      accessLevel: 'command staff',
+      accessLevel: 'staff',
       incidentData: { name: 'Command Center' },
       startIncident: vi.fn(),
       setResponderName: vi.fn(),
@@ -92,12 +126,21 @@ describe('ResponderCheckinPage Routing', () => {
     } as any);
 
     const mockStartIncident = vi.fn();
+    // Ensure a comprehensive mock is provided to prevent logic skips or crashes
     vi.mocked(useIncident).mockReturnValue({
       isActive: false,
+      incidentId: null,
+      incidentData: { name: '', opNumber: '', opPeriodId: '', sartopo_id: null, parInterval: null },
       startIncident: mockStartIncident,
-      setResponderName: vi.fn(),
-      setResponderStatus: vi.fn(),
+      endIncident: vi.fn(),
       setResponderId: vi.fn(),
+      setResponderName: vi.fn(),
+      setAccessLevel: vi.fn(),
+      setResponderStatus: vi.fn(),
+      responderName: '',
+      responderStatus: '',
+      accessLevel: '',
+      isAdmin: false,
     } as any);
 
     // Mock that we are fetching incidents and find one with a staff team that has no leader
@@ -117,7 +160,7 @@ describe('ResponderCheckinPage Routing', () => {
           } else if (table === 'teams') {
             data = { team_id: 'staff-team-uuid', leader_responder_id: null };
           } else if (table === 'responders') {
-            data = { responder_id: 'r1', access_level: 'command staff' };
+            data = { responder_id: 'r1', access_level: 'staff' };
           }
           return Promise.resolve({ data, error: null }).then(onFulfilled);
         })
@@ -126,7 +169,11 @@ describe('ResponderCheckinPage Routing', () => {
       return mockQueryChain as any;
     });
 
-    render(<MemoryRouter><ResponderCheckinPage /></MemoryRouter>);
+    render(
+      <MemoryRouter initialEntries={['/checkin']}>
+        <ResponderCheckinPage />
+      </MemoryRouter>
+    );
 
     // Wait for incidents to load and be displayed in the dropdown
     await screen.findByText(/Test/i);
@@ -185,7 +232,8 @@ describe('ResponderCheckinPage Routing', () => {
     await screen.findByLabelText(/Full Name/i);
 
     // Submit empty form
-    fireEvent.click(screen.getByLabelText('SAR')); // Select responder type to pass that validation
+    // Use getByRole for more robust radio button interaction
+    fireEvent.click(screen.getByRole('radio', { name: /SAR/i }));
     const continueBtn = screen.getByRole('button', { name: /Continue to Confirmation/i });
     fireEvent.click(continueBtn);
 

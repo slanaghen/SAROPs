@@ -80,11 +80,67 @@ describe('CheckOutPage', () => {
       // Specifically find the mock result associated with the 'responders' table call
       const respondersCallIdx = vi.mocked(supabase.from).mock.calls.findIndex(c => c[0] === 'responders');
       const respondersQuery = vi.mocked(supabase.from).mock.results[respondersCallIdx].value;
-      expect(respondersQuery.update).toHaveBeenCalledWith(expect.objectContaining({ status: 'Cleared' }));
+      expect(respondersQuery.update).toHaveBeenCalledWith(expect.objectContaining({ status: 'CheckedOut' }));
       
       expect(supabase.auth.signOut).toHaveBeenCalled();
       expect(mockLogout).toHaveBeenCalled();
       expect(mockNavigate).toHaveBeenCalledWith('/checkin');
     });
+  });
+
+  it('allows check-out for Admins in Assigned status', async () => {
+    const mockLogout = vi.fn();
+    vi.mocked(useIncident).mockReturnValue({
+      isActive: true,
+      responderId: 'admin-1',
+      responderName: 'Steve Admin',
+      responderStatus: 'Assigned', // Admins/Staff are Assigned by default
+      accessLevel: 'admin',
+      logout: mockLogout,
+    } as any);
+
+    render(<MemoryRouter><CheckOutPage /></MemoryRouter>);
+    const confirmBtn = screen.getByText(/Confirm Check-Out/i);
+    fireEvent.click(confirmBtn);
+
+    await waitFor(() => {
+      expect(supabase.from).toHaveBeenCalledWith('responders');
+      expect(mockLogout).toHaveBeenCalled();
+    });
+  });
+
+  it('nullifies leadership on active teams before completing checkout', async () => {
+    vi.mocked(useIncident).mockReturnValue({
+      isActive: true, responderId: 'ldr-1', responderStatus: 'Staged', accessLevel: 'responder', logout: vi.fn()
+    } as any);
+
+    render(<MemoryRouter><CheckOutPage /></MemoryRouter>);
+    fireEvent.click(screen.getByText(/Confirm Check-Out/i));
+    expect(supabase.from).toHaveBeenCalledWith('teams');
+  });
+
+  it('blocks check-out if the responder is currently Attached to a team', async () => {
+    vi.mocked(useIncident).mockReturnValue({
+      isActive: true, responderId: 'r1', responderName: 'Steve', responderStatus: 'Attached', accessLevel: 'responder', logout: vi.fn(),
+    } as any);
+    render(<MemoryRouter><CheckOutPage /></MemoryRouter>);
+    fireEvent.click(screen.getByText(/Confirm Check-Out/i));
+    expect(await screen.findByText(/Check-out unsuccessful/i)).toBeInTheDocument();
+  });
+
+  it('updates database status before signing out to ensure session is valid for the write', async () => {
+    vi.mocked(useIncident).mockReturnValue({
+      isActive: true, responderId: 'r1', responderStatus: 'Staged', accessLevel: 'responder', logout: vi.fn(),
+    } as any);
+    
+    render(<MemoryRouter><CheckOutPage /></MemoryRouter>);
+    fireEvent.click(screen.getByText(/Confirm Check-Out/i));
+
+    // Wait for the asynchronous checkout process to reach the sign-out step
+    await waitFor(() => expect(supabase.auth.signOut).toHaveBeenCalled());
+
+    const signOutCallIdx = vi.mocked(supabase.auth.signOut).mock.invocationCallOrder[0];
+    const dbUpdateCallIdx = vi.mocked(supabase.from).mock.invocationCallOrder[0];
+    expect(dbUpdateCallIdx).toBeLessThan(signOutCallIdx);
   });
 });

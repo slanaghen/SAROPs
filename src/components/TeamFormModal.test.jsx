@@ -1,8 +1,9 @@
-import { render, screen, fireEvent, cleanup, within } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, within, waitFor } from '@testing-library/react';
 import * as matchers from '@testing-library/jest-dom/matchers';
 import { vi, describe, it, expect, afterEach, beforeEach } from 'vitest';
 import TeamFormModal from './TeamFormModal';
 import { useIncident } from '../context/IncidentContext';
+import { supabase } from '../lib/supabase';
 
 expect.extend(matchers);
 
@@ -10,9 +11,19 @@ vi.mock('../context/IncidentContext', () => ({
   useIncident: vi.fn(),
 }));
 
-afterEach(() => {
-  cleanup();
-});
+vi.mock('../lib/supabase', () => ({
+  supabase: {
+    from: vi.fn(() => globalThis.createSupabaseQueryMock([])),
+    channel: vi.fn().mockImplementation(() => {
+      const mockChannel = {
+        on: vi.fn().mockImplementation(() => mockChannel),
+        subscribe: vi.fn().mockImplementation(() => mockChannel)
+      };
+      return mockChannel;
+    }),
+    removeChannel: vi.fn(),
+  },
+}));
 
 describe('TeamFormModal', () => {
   beforeEach(() => {
@@ -23,6 +34,10 @@ describe('TeamFormModal', () => {
       user: { email: 'steve@example.com' },
       incidentData: { opPeriodId: 'op-123' }
     });
+  });
+
+  afterEach(() => {
+    cleanup();
   });
 
   const mockResponders = [
@@ -200,5 +215,71 @@ describe('TeamFormModal', () => {
     render(<TeamFormModal {...legacyProps} />);
     
     expect(screen.getByLabelText(/Type/i)).toHaveValue('Vehicle');
+  });
+
+  it('updates the messaging channel when a specific recipient is selected in Staff mode', async () => {
+    const mockAllTeams = [
+      { team_id: 't-field-1', team_name_number: 'Ground 1', type: 'Ground' }
+    ];
+    
+    // Mock the teams fetch for the recipient dropdown
+    vi.mocked(supabase.from).mockImplementation((table) => {
+      if (table === 'teams') return globalThis.createSupabaseQueryMock(mockAllTeams);
+      return globalThis.createSupabaseQueryMock([]);
+    });
+
+    const staffProps = {
+      ...defaultProps,
+      initialData: { team_id: 'staff-id', type: 'Staff', team_name_number: 'Staff' }
+    };
+    
+    render(<TeamFormModal {...staffProps} />);
+
+    // Wait for the recipient dropdown to populate with the field team option.
+    // This ensures the initial mount fetches (Call 1) are processed and the component is stable.
+    await screen.findByText('Ground 1');
+    const recipientSelect = screen.getByDisplayValue(/Broadcast/i);
+    expect(recipientSelect).toBeInTheDocument();
+
+    // Select "Ground 1" from the dropdown
+    fireEvent.change(recipientSelect, { target: { value: 't-field-1' } });
+
+    // Verify messaging history fetch was re-triggered for the new channel
+    await waitFor(() => {
+      const messageCalls = vi.mocked(supabase.from).mock.calls.filter(c => c[0] === 'team_messages');
+      // At least two calls: one for initial Staff channel, one for the selected field team
+      expect(messageCalls.length).toBeGreaterThan(1);
+    });
+  });
+
+  it('removes a responder from the team when dropped back into the staged pool', async () => {
+    const propsWithMember = {
+      ...defaultProps,
+      initialData: { 
+        ...defaultProps.initialData, 
+        responder_ids: ['r1'],
+        responder_roles: { 'r1': 'Medic' }
+      }
+    };
+    render(<TeamFormModal {...propsWithMember} />);
+
+    const memberChip = screen.getByText('Responder 1').closest('[draggable="true"]');
+    const pool = screen.getByText(/Staged Responders/i).closest('.responder-pool');
+
+    const dataTransfer = { setData: vi.fn(), getData: vi.fn().mockReturnValue('r1') };
+    fireEvent.dragStart(memberChip, { dataTransfer });
+    fireEvent.drop(pool, { dataTransfer });
+
+    expect(within(pool).getByText('Responder 1')).toBeInTheDocument();
+  });
+
+  it('prevents adding the same responder twice to the team composition', () => {
+    render(<TeamFormModal {...defaultProps} initialData={{ ...defaultProps.initialData, responder_ids: ['r1'] }} />);
+    const compositionTable = screen.getByRole('table');
+    const dataTransfer = { getData: vi.fn().mockReturnValue('r1') };
+    
+    // Attempt to drop R1 onto the member row again
+    fireEvent.drop(within(compositionTable).getByText(/Drop chips here/i), { dataTransfer });
+    expect(within(compositionTable).getAllByText('Responder 1')).toHaveLength(1);
   });
 });

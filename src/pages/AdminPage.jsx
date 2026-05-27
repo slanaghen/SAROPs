@@ -18,13 +18,20 @@ const AdminPage = () => {
     responderRefreshInterval, setResponderRefreshInterval,
     sartopoRefreshInterval, setSartopoRefreshInterval
   } = useIncident();
-  const [admins, setAdmins] = useState([]);
+  const [users, setUsers] = useState([]);
   const [allIncidents, setAllIncidents] = useState([]);
   const [allResponders, setAllResponders] = useState([]);
   const [allTeams, setAllTeams] = useState([]);
   const [allAssignments, setAllAssignments] = useState([]);
   const [newEmail, setNewEmail] = useState('');
   const [newPassword, setNewPassword] = useState('');
+  const [newName, setNewName] = useState('');
+  const [newAgency, setNewAgency] = useState('');
+  const [newIdentifier, setNewIdentifier] = useState('');
+  const [newPhone, setNewPhone] = useState('');
+  const [newAccessLevel, setNewAccessLevel] = useState('responder');
+  const [newResponderType, setNewResponderType] = useState('SAR');
+  const [newSpecialSkills, setNewSpecialSkills] = useState('');
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [error, setError] = useState(null);
@@ -49,23 +56,23 @@ const AdminPage = () => {
   const [isTeamsExpanded, setIsTeamsExpanded] = useState(false);
   const [isAssignmentsExpanded, setIsAssignmentsExpanded] = useState(false);
   const [isIncidentsExpanded, setIsIncidentsExpanded] = useState(false);
-  const [isAdminsExpanded, setIsAdminsExpanded] = useState(false);
+  const [isUsersExpanded, setIsUsersExpanded] = useState(false);
   const [selectedDeleteIncidentId, setSelectedDeleteIncidentId] = useState('');
 
-  const fetchAdmins = async () => {
+  const fetchUsers = async () => {
     if (!isAdmin) return;
     setFetching(true);
     try {
-      const { data: adminData, error: fetchError } = await supabase
-        .from('admin_users')
-        .select('email, username, created_at')
+      const { data: userData, error: fetchError } = await supabase
+        .from('users')
+        .select('*')
         .order('email');
 
       if (fetchError) throw fetchError;
-      console.log('All admins info retrieved from table:', adminData);
-      setAdmins(adminData || []);
+      console.log('All users info retrieved from table:', userData);
+      setUsers(userData || []);
     } catch (err) {
-      setError('Failed to load administrator list');
+      setError('Failed to load system user list');
       console.error(err);
     } finally {
       setFetching(false);
@@ -222,7 +229,7 @@ const AdminPage = () => {
 
   useEffect(() => {
     if (isAdmin) {
-      fetchAdmins();
+      fetchUsers();
       fetchAllIncidents();
       fetchAllResponders();
       fetchAllTeams();
@@ -238,7 +245,7 @@ const AdminPage = () => {
     try {
       // Use the secure RPC function instead of a direct table query
       const { data, error: queryError } = await supabase
-        .rpc('verify_admin_login', { 
+        .rpc('verify_user_login', { 
           p_email: loginEmail.trim(), 
           p_password: loginPassword 
         })
@@ -272,20 +279,29 @@ const AdminPage = () => {
     try {
       // Use secure RPC to bypass RLS and handle server-side hashing
       const { error: insertError } = await supabase
-        .rpc('admin_add_user', { 
+        .rpc('user_add', { 
           p_email: emailVal, 
           p_username: emailVal,
-          p_password: newPassword.trim()
+          p_password: newPassword.trim(),
+          p_access_level: newAccessLevel,
+          p_name: newName.trim() || null,
+          p_agency: newAgency.trim() || null,
+          p_identifier: newIdentifier.trim() || null,
+          p_phone: newPhone.trim() || null,
+          p_type: newResponderType,
+          p_skills: newSpecialSkills.trim() || null
         });
 
       if (insertError) throw insertError;
 
-      setSuccess(`Added ${newEmail} to administrators.`);
-      setNewEmail('');
-      setNewPassword('');
-      fetchAdmins();
+      setSuccess(`Added ${newEmail} to system users.`);
+      // Reset form
+      setNewEmail(''); setNewPassword(''); setNewName(''); setNewAgency('');
+      setNewIdentifier(''); setNewPhone(''); setNewAccessLevel('responder');
+      setNewSpecialSkills('');
+      fetchUsers();
     } catch (err) {
-      setError(err.code === '23505' ? 'This email is already an admin.' : (err.message || 'Failed to add administrator'));
+      setError(err.code === '23505' ? 'This email is already registered.' : (err.message || 'Failed to add user'));
       console.error('Admin management error:', err);
     } finally {
       setLoading(false);
@@ -327,20 +343,8 @@ const AdminPage = () => {
 
     try {
       setLoading(true);
-      // 1. Get members
-      const { data: members } = await supabase.from('team_responders').select('responder_id').eq('team_id', id);
-      const rIds = members?.map(m => m.responder_id) || [];
-      
-      // 2. Release responders
-      if (rIds.length > 0) {
-        await supabase.from('responders').update({ status: 'Staged' }).in('responder_id', rIds);
-        await supabase.from('responder_team_history')
-          .update({ detached_datetime: new Date().toISOString() })
-          .eq('team_id', id)
-          .is('detached_datetime', null);
-      }
-
-      // 3. Update team status
+      // Update team status - DB triggers 'sync_team_members_on_status_change' 
+      // automatically handle releasing members to 'Staged' and closing history logs.
       const { error: updateError } = await supabase
         .from('teams')
         .update({ 
@@ -632,7 +636,7 @@ const AdminPage = () => {
     setSuccess(null);
 
     try {
-      const { error: updateError } = await supabase.rpc('admin_update_password', {
+      const { error: updateError } = await supabase.rpc('user_update_password', {
         p_email: email,
         p_password: newPwd.trim()
       });
@@ -650,20 +654,20 @@ const AdminPage = () => {
     setError(null);
     setSuccess(null);
 
-    if (admins.length <= 1) {
+    if (users.length <= 1) {
       setError('Cannot remove the last administrator. At least one system administrator is required to maintain access.');
       return;
     }
 
-    if (!window.confirm(`Remove ${email} from administrators?`)) return;
+    if (!window.confirm(`Remove ${email} from system users?`)) return;
 
     try {
-      const { error: deleteError } = await supabase.rpc('admin_remove_user', { p_email: email });
+      const { error: deleteError } = await supabase.rpc('user_remove', { p_email: email });
       
       if (deleteError) throw deleteError;
-      fetchAdmins();
+      fetchUsers();
     } catch (err) {
-      setError('Failed to remove administrator');
+      setError('Failed to remove user');
     }
   };
 
@@ -713,8 +717,8 @@ const AdminPage = () => {
     <div className="incident-edit-page">
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
-          <h1>System Administration</h1>
-          <p className="subtitle">Manage users with administrative access to SAROps.</p>
+          <h1>System Management</h1>
+          <p className="subtitle">Manage user access and global system configurations.</p>
         </div>
         <button onClick={handleLogout} className="btn btn-secondary">
           Sign Out Admin
@@ -827,8 +831,8 @@ const AdminPage = () => {
       </div>
 
       <div className="section-card" style={{ marginBottom: '24px' }}>
-        <h2>Add New Administrator</h2>
-        <form onSubmit={handleAddAdmin} style={{ display: 'grid', gap: '12px', gridTemplateColumns: '1fr 1fr auto', alignItems: 'flex-end' }}>
+        <h2>Add New User</h2>
+        <form onSubmit={handleAddAdmin} style={{ display: 'grid', gap: '12px', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', alignItems: 'flex-end' }}>
           <label style={{ flex: 1, marginBottom: 0 }}>
             Email Address
             <input
@@ -849,8 +853,46 @@ const AdminPage = () => {
               required
             />
           </label>
+          <label style={{ flex: 1, marginBottom: 0 }}>
+            Full Name
+            <input type="text" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Jane Doe" />
+          </label>
+          <label style={{ flex: 1, marginBottom: 0 }}>
+            Agency
+            <input type="text" value={newAgency} onChange={(e) => setNewAgency(e.target.value)} placeholder="Sheriff's Office" />
+          </label>
+          <label style={{ flex: 1, marginBottom: 0 }}>
+            Identifier
+            <input type="text" value={newIdentifier} onChange={(e) => setNewIdentifier(e.target.value)} placeholder="Badge # or Call Sign" />
+          </label>
+          <label style={{ flex: 1, marginBottom: 0 }}>
+            Phone Number
+            <input type="tel" value={newPhone} onChange={(e) => setNewPhone(e.target.value)} placeholder="555-555-5555" />
+          </label>
+          <label style={{ flex: 1, marginBottom: 0 }}>
+            Access Level
+            <select value={newAccessLevel} onChange={(e) => setNewAccessLevel(e.target.value)}>
+              <option value="responder">Responder</option>
+              <option value="staff">Staff</option>
+              <option value="admin">Admin</option>
+            </select>
+          </label>
+          <label style={{ flex: 1, marginBottom: 0 }}>
+            Responder Type
+            <select value={newResponderType} onChange={(e) => setNewResponderType(e.target.value)}>
+              <option value="SAR">SAR</option>
+              <option value="Fire">Fire</option>
+              <option value="Law">Law</option>
+              <option value="Medical">Medical</option>
+            </select>
+          </label>
+          <label style={{ flex: '1 1 100%', marginBottom: 0 }}>
+            Special Skills
+            <input type="text" value={newSpecialSkills} onChange={(e) => setNewSpecialSkills(e.target.value)} placeholder="e.g., EMT, K9 Handler, UAS Pilot" />
+          </label>
+
           <button type="submit" className="btn btn-primary" disabled={loading || !isAdmin}>
-            {loading ? 'Adding...' : 'Add Admin'}
+            {loading ? 'Adding...' : 'Add User'}
           </button>
         </form>
         {error && <p className="alert alert-error" style={{ marginTop: '12px' }}>{error}</p>}
@@ -859,31 +901,37 @@ const AdminPage = () => {
 
       <div className="section-card">
         <div 
-          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', marginBottom: isAdminsExpanded ? '16px' : 0 }}
-          onClick={() => setIsAdminsExpanded(!isAdminsExpanded)}
+          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', marginBottom: isUsersExpanded ? '16px' : 0 }}
+          onClick={() => setIsUsersExpanded(!isUsersExpanded)}
         >
-          <h2 style={{ margin: 0 }}>Current Administrators ({admins.length})</h2>
+          <h2 style={{ margin: 0 }}>System Users ({users.length})</h2>
           <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 700 }}>
-            {isAdminsExpanded ? 'COLLAPSE ▲' : 'EXPAND ▼'}
+            {isUsersExpanded ? 'COLLAPSE ▲' : 'EXPAND ▼'}
           </span>
         </div>
 
-        {isAdminsExpanded && (
+        {isUsersExpanded && (
           <div className="admin-list">
             {fetching ? (
-              <p>Loading administrators...</p>
-            ) : admins.length === 0 ? (
-              <p>No administrators configured.</p>
+              <p>Loading system users...</p>
+            ) : users.length === 0 ? (
+              <p>No system users configured.</p>
             ) : (
-              admins.map(admin => (
-                <div key={admin.email} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 0', borderBottom: '1px solid #eee' }}>
+              users.map(user => (
+                <div key={user.email} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 0', borderBottom: '1px solid #eee' }}>
                   <div>
-                    <strong>{admin.username || 'No Username'}</strong>
-                    <span style={{ marginLeft: '12px', color: '#64748b', fontSize: '0.9em' }}>({admin.email})</span>
+                    <strong>{user.name || user.username || 'No Name'}</strong>
+                    <span className={`status-indicator ${user.access_level}`} style={{ marginLeft: '8px', fontSize: '10px' }}>{user.access_level}</span>
+                    <div style={{ color: '#64748b', fontSize: '0.85em', marginTop: '4px' }}>
+                      {user.email} {user.agency && `• ${user.agency}`} {user.identifier && `• ID: ${user.identifier}`}
+                    </div>
+                    {user.special_skills && (
+                      <div style={{ fontSize: '11px', color: '#1e293b', fontStyle: 'italic', marginTop: '2px' }}>Skills: {user.special_skills}</div>
+                    )}
                   </div>
                   <div style={{ display: 'flex', gap: '8px' }}>
-                    <button onClick={() => handleChangePassword(admin.email)} className="btn btn-secondary btn-sm">Change Password</button>
-                    <button onClick={() => handleRemoveAdmin(admin.email)} className="btn btn-secondary btn-sm" style={{ color: '#dc2626' }}>Remove</button>
+                    <button onClick={() => handleChangePassword(user.email)} className="btn btn-secondary btn-sm">Change Password</button>
+                    <button onClick={() => handleRemoveAdmin(user.email)} className="btn btn-secondary btn-sm" style={{ color: '#dc2626' }}>Remove</button>
                   </div>
                 </div>
               ))

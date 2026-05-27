@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { Incident, Responder, Team, ResponderStatus } from '../types/sarops-types';
@@ -51,6 +51,7 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
 
   // Ensure an anonymous session exists before fetching data or allowing navigation
   const [isAuthenticating, setIsAuthenticating] = useState(true);
+  const [sessionError, setSessionError] = useState<string | null>(null);
 
   useEffect(() => {
     const initSession = async () => {
@@ -63,6 +64,7 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
         }
       } catch (err) {
         console.error('Initial authentication failed:', err);
+        setSessionError('Failed to establish a secure session. Please check your connection and refresh.');
       } finally {
         setIsAuthenticating(false);
       }
@@ -71,8 +73,8 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
     initSession();
     
     // Listen for auth state changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {});
-    return () => subscription.unsubscribe();
+    const authRes = supabase.auth.onAuthStateChange(() => {});
+    return () => authRes?.data?.subscription?.unsubscribe();
   }, []);
 
   const [showTeamSelection, setShowTeamSelection] = useState(false);
@@ -82,23 +84,23 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
   const [checkInInProgress, setCheckInInProgress] = useState(false);
   const [icsRole, setIcsRole] = useState<string | null>(null);
 
+  // Centralized definition of staff-level access
+  const isStaff = useMemo(() => 
+    accessLevel === 'staff' || accessLevel === 'admin', 
+    [accessLevel]
+  );
+
   // Guard: If the user navigates here but is already checked in, send them back
   useEffect(() => {
-    const isStaff = accessLevel === 'command staff' || accessLevel === 'admin';
     const shouldRedirect = location.pathname === '/checkin' && isActive && responderName && responderStatus !== 'CheckedOut';
 
-    if (isActive) {
-      console.debug('Guard Check:', { pathname: location.pathname, isActive, isStaff, responderName, shouldRedirect });
-    }
-
     if (shouldRedirect && !checkInInProgress && !showTeamSelection && !loading) {
-      const isStaff = accessLevel === 'command staff' || (incidentData && incidentData.name && accessLevel === 'admin');
       const target = isStaff ? '/operations' : '/responder';
       
       console.info(`Active session detected, redirecting to ${target}`);
       navigate(target);
     }
-   }, [isActive, responderName, responderStatus, checkInInProgress, showTeamSelection, loading, navigate, incidentData, accessLevel, location.pathname]);
+   }, [isActive, responderName, responderStatus, checkInInProgress, showTeamSelection, loading, navigate, incidentData, isStaff, location.pathname]);
 
   // Incident selection state (moved from LoginPage)
   const [incidents, setIncidents] = useState<Incident[]>([]);
@@ -106,23 +108,17 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
   const [loadingIncidents, setLoadingIncidents] = useState(false);
   const [incidentError, setIncidentError] = useState<string | null>(null);
 
-  const effectiveIncidentId = incidentId || contextIncidentId;
-  // Incident IDs are now TEXT (incident numbers), not UUIDs
-  // This regex is still needed for op_period_id which is UUID
+  // op_period_id is a UUID. Incident IDs are now TEXT (incident numbers).
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-  // const isValidOpId = (id: string | undefined) => {
-  //   return id && id.length > 0; // Simple check for non-empty string
-  // };
-  // const effectiveOpId = (operationalPeriodId && uuidRegex.test(operationalPeriodId)) 
   const effectiveOpId = (operationalPeriodId && uuidRegex.test(operationalPeriodId)) 
     ? operationalPeriodId 
     : incidentData?.opPeriodId;
 
-  // Fetch active incidents for the dropdown (moved from LoginPage)
+  // Fetch active incidents for the dropdown and synchronize with real-time updates
   useEffect(() => {
-    const fetchActiveIncidents = async () => {
-      if (isAuthenticating) return; // Wait for initial auth session
+    if (isAuthenticating) return;
 
+    const fetchActiveIncidents = async () => {
       setLoadingIncidents(true);
       try {
         const { data, error: fetchError } = await supabase
@@ -137,34 +133,44 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
               start_datetime
             )
           `)
-          .is('end_datetime', null) // Only show incidents that have not ended
+          .is('end_datetime', null) // Filter for active incidents
           .order('start_datetime', { ascending: false });
 
         if (fetchError) throw fetchError;
         setIncidents(data || []);
+        
         if (data && data.length > 0) {
-          // Prioritize incident from navigation state, then context, then first active
           const incidentFromState = location.state?.newIncidentId;
           if (incidentFromState && data.some(inc => inc.incident_id === incidentFromState)) {
             setSelectedIncidentId(incidentFromState);
           } else if (contextIncidentId && data.some(inc => inc.incident_id === contextIncidentId)) {
             setSelectedIncidentId(contextIncidentId);
           } else {
-            setSelectedIncidentId(data[0].incident_id); // Auto-select first incident
+            setSelectedIncidentId(data[0].incident_id);
           }
-        } else if (data && data.length === 0) {
-          // Log that we are in initial setup mode, but don't force redirect
-          console.info('No active incidents found. System is in initial setup mode.');
         }
       } catch (err) {
         console.error('Failed to load active incidents:', err);
+        setIncidentError('Failed to load active incidents. Please check your connection.');
       } finally {
         setLoadingIncidents(false);
       }
     };
 
     fetchActiveIncidents();
-  }, [isActive, navigate, location.state?.newIncidentId, contextIncidentId, isAuthenticating]);
+
+    // Set up real-time listener to ensure incidents that end are removed from the list immediately
+    const channel = supabase
+      .channel('public:incidents-checkin')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'incidents' }, () => {
+        fetchActiveIncidents();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [isAuthenticating, contextIncidentId, location.state?.newIncidentId]);
 
   /**
    * Handles navigation after check-in or team assignment is complete
@@ -185,7 +191,7 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
     if (onResponderCheckedIn) {
       onResponderCheckedIn(responder);
     } else {
-      if (role === 'command staff' || role === 'admin') {
+      if (role === 'staff' || role === 'admin') {
         console.log('Navigating to Operations Dashboard');
         navigate('/operations');
       } else {
@@ -309,7 +315,7 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
       }
 
       // If operational period provided, show team assignment or staff confirmation
-      const isStaff = finalResponder.access_level === 'command staff' || finalResponder.access_level === 'admin';
+      const isStaff = finalResponder.access_level === 'staff' || finalResponder.access_level === 'admin';
 
       if (isStaff && targetIncidentId) {
         const { data: roleData } = await supabase
@@ -426,14 +432,13 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
 
   // Show team assignment screen
   if (isCheckedIn && showTeamSelection && checkedInResponder) {
-    const isStaff = checkedInResponder.access_level === 'command staff' || checkedInResponder.access_level === 'admin';
+    const isStaff = checkedInResponder.access_level === 'staff' || checkedInResponder.access_level === 'admin';
 
     return (
       <div className="responder-team-assignment">
         <div className="assignment-container">
           <div className="assignment-header">
             <h1>{isStaff ? 'Command Staff Check-In' : 'Assign to Team'}</h1>
-            <p>Welcome {checkedInResponder.name}! {isStaff ? 'You are successfully checked in.' : 'Would you like to join a team?'}</p>
           </div>
 
           {isStaff ? (
@@ -511,7 +516,7 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
   if (isCheckedIn && !showTeamSelection) {
     return (
       <div className="responder-checkin">
-        <div className="checkin-container" style={{ textAlign: 'center', padding: '60px 24px' }}>
+        <div className="checkin-container" style={{ textAlign: 'center', padding: '30px 24px' }}>
           <div className="loading-spinner" style={{ fontSize: '40px', marginBottom: '20px' }}>⏳</div>
           <h2 style={{ fontSize: '24px', fontWeight: 700, marginBottom: '8px' }}>Finalizing check-in...</h2>
           <p style={{ color: '#64748b' }}>Establishing your incident session and redirecting to your dashboard.</p>
@@ -522,7 +527,7 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
 
   // Show check-in form
   return (
-    <div className="responder-checkin" style={{ display: 'flex', justifyContent: 'center', padding: '48px 24px' }}>
+    <div className="responder-checkin" style={{ display: 'flex', justifyContent: 'center', padding: '24px 24px' }}>
       <div className="checkin-container" style={{ width: '100%', maxWidth: '480px', textAlign: 'center' }}>
         {isAuthenticating ? (
           <div className="checkin-transition">
@@ -534,7 +539,7 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
         <ResponderCheckin
           onCheckIn={handleCheckIn}
           isLoading={loading}
-          error={error}
+          error={sessionError || error}
           incidents={incidents} // Pass active incidents
           loadingIncidents={loadingIncidents}
           incidentError={incidentError}

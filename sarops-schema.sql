@@ -54,8 +54,7 @@ CREATE TYPE responder_status AS ENUM (
   'Attached',
   'Assigned',
   'Deployed',
-  'CheckedOut',
-  'Cleared'
+  'CheckedOut'
 );
 
 DROP TYPE IF EXISTS responder_type CASCADE;
@@ -69,7 +68,7 @@ CREATE TYPE responder_type AS ENUM (
 DROP TYPE IF EXISTS access_level CASCADE;
 CREATE TYPE access_level AS ENUM (
   'responder',
-  'command staff',
+  'staff',
   'admin'
 );
 
@@ -87,7 +86,7 @@ DROP TABLE IF EXISTS clues CASCADE;
 DROP TABLE IF EXISTS team_responders CASCADE;
 DROP TABLE IF EXISTS action_logs CASCADE;
 DROP TABLE IF EXISTS team_messages CASCADE;
-DROP TABLE IF EXISTS admin_users CASCADE;
+DROP TABLE IF EXISTS users CASCADE;
 DROP VIEW IF EXISTS team_current_responders CASCADE;
 DROP VIEW IF EXISTS incident_summary CASCADE;
 
@@ -99,6 +98,7 @@ CREATE TABLE incidents (
   number TEXT NOT NULL,
   sartopo_id TEXT,
   notes TEXT,
+  show_map BOOLEAN DEFAULT FALSE,
   start_datetime TIMESTAMP WITH TIME ZONE NOT NULL,
   end_datetime TIMESTAMP WITH TIME ZONE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -264,12 +264,19 @@ CREATE TABLE team_messages (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- Table: admin_users
--- Simple table-based auth for system administrators (managed via Admin page)
-CREATE TABLE admin_users (
+-- Table: users
+-- Simple table-based auth for system users (managed via Admin page)
+CREATE TABLE users (
   email TEXT PRIMARY KEY,
   username TEXT NOT NULL,
   password TEXT NOT NULL, -- Store as crypt(password, gen_salt('bf'))
+  access_level access_level NOT NULL DEFAULT 'responder',
+  name TEXT,
+  agency TEXT,
+  identifier TEXT,
+  cell_phone TEXT,
+  responder_type responder_type,
+  special_skills TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 -- ============================================================================
@@ -417,7 +424,7 @@ BEGIN
 
     -- Determine the target access level
     IF is_command_staff_team_member THEN
-        target_access_level := 'command staff';
+        target_access_level := 'staff';
     ELSE
         target_access_level := 'responder';
     END IF;
@@ -687,7 +694,7 @@ BEGIN
     OR EXISTS (
       SELECT 1 FROM responders 
       WHERE auth_uid = auth.uid() 
-      AND access_level IN ('command staff', 'admin')
+      AND access_level IN ('staff', 'admin')
     )
   );
 END;
@@ -730,12 +737,12 @@ BEGIN
 END;
 $func$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
 
--- RPC for Admin Login
-CREATE OR REPLACE FUNCTION verify_admin_login(p_email TEXT, p_password TEXT)
-RETURNS SETOF admin_users AS $func$
+-- RPC for User Login
+CREATE OR REPLACE FUNCTION verify_user_login(p_email TEXT, p_password TEXT)
+RETURNS SETOF users AS $func$
 BEGIN
   RETURN QUERY
-  SELECT * FROM admin_users
+  SELECT * FROM users
   WHERE email = LOWER(p_email) 
     AND (password = p_password OR password = crypt(p_password, password));
 END;
@@ -886,33 +893,50 @@ CREATE POLICY "Allow authenticated to insert messages for their team or Staff te
 CREATE POLICY "Admins/Staff can manage all team messages" ON team_messages
   FOR ALL TO authenticated USING (check_is_operational_staff()) WITH CHECK (check_is_operational_staff());
 
--- Policies for admin_users
--- Allow staff/admins to view the list of system administrators
-CREATE POLICY "Allow staff to view admin list" ON admin_users
+-- Policies for users
+-- Allow staff/admins to view the list of system users
+CREATE POLICY "Allow staff to view user list" ON users
   FOR SELECT TO authenticated USING (check_is_operational_staff());
 
--- Secure RPCs for managing administrators
+-- Secure RPCs for managing users
 -- These functions use SECURITY DEFINER to bypass RLS and ensure 
 -- passwords are encrypted correctly using pgcrypto.
-CREATE OR REPLACE FUNCTION admin_add_user(p_email TEXT, p_username TEXT, p_password TEXT)
+CREATE OR REPLACE FUNCTION user_add(
+  p_email TEXT, 
+  p_username TEXT, 
+  p_password TEXT, 
+  p_access_level TEXT,
+  p_name TEXT DEFAULT NULL,
+  p_agency TEXT DEFAULT NULL,
+  p_identifier TEXT DEFAULT NULL,
+  p_phone TEXT DEFAULT NULL,
+  p_type TEXT DEFAULT NULL,
+  p_skills TEXT DEFAULT NULL
+)
 RETURNS VOID AS $func$
 BEGIN
-  INSERT INTO admin_users (email, username, password)
-  VALUES (LOWER(p_email), p_username, crypt(p_password, gen_salt('bf')));
+  INSERT INTO users (
+    email, username, password, access_level, 
+    name, agency, identifier, cell_phone, responder_type, special_skills
+  )
+  VALUES (
+    LOWER(p_email), p_username, crypt(p_password, gen_salt('bf')), p_access_level::access_level,
+    p_name, p_agency, p_identifier, p_phone, p_type::responder_type, p_skills
+  );
 END;
 $func$ LANGUAGE plpgsql SECURITY DEFINER;
 
-CREATE OR REPLACE FUNCTION admin_remove_user(p_email TEXT)
+CREATE OR REPLACE FUNCTION user_remove(p_email TEXT)
 RETURNS VOID AS $func$
 BEGIN
-  DELETE FROM admin_users WHERE email = LOWER(p_email);
+  DELETE FROM users WHERE email = LOWER(p_email);
 END;
 $func$ LANGUAGE plpgsql SECURITY DEFINER;
 
-CREATE OR REPLACE FUNCTION admin_update_password(p_email TEXT, p_password TEXT)
+CREATE OR REPLACE FUNCTION user_update_password(p_email TEXT, p_password TEXT)
 RETURNS VOID AS $func$
 BEGIN
-  UPDATE admin_users 
+  UPDATE users 
   SET password = crypt(p_password, gen_salt('bf'))
   WHERE email = LOWER(p_email);
 END;
@@ -926,9 +950,9 @@ $func$ LANGUAGE plpgsql SECURITY DEFINER;
 CREATE OR REPLACE FUNCTION reinitialize_database()
 RETURNS VOID AS $$
 BEGIN
-    -- Backup admin users if the table exists to retain entries during re-initialization
-    IF EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'admin_users') THEN
-        EXECUTE 'CREATE TEMP TABLE admin_users_temp_backup AS SELECT * FROM admin_users';
+    -- Backup users if the table exists to retain entries during re-initialization
+    IF EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'users') THEN
+        EXECUTE 'CREATE TEMP TABLE users_temp_backup AS SELECT * FROM users';
     END IF;
 
     -- ENUM TYPES
@@ -951,7 +975,7 @@ BEGIN
     EXECUTE 'CREATE TYPE responder_type AS ENUM (''SAR'', ''Fire'', ''Law'', ''Medical'');';
 
     EXECUTE 'DROP TYPE IF EXISTS access_level CASCADE;';
-    EXECUTE 'CREATE TYPE access_level AS ENUM (''responder'', ''command staff'', ''admin'');';
+    EXECUTE 'CREATE TYPE access_level AS ENUM (''responder'', ''staff'', ''admin'');';
 
     -- TABLES
     EXECUTE 'DROP TABLE IF EXISTS incidents CASCADE;';
@@ -964,7 +988,7 @@ BEGIN
     EXECUTE 'DROP TABLE IF EXISTS team_responders CASCADE;';
     EXECUTE 'DROP TABLE IF EXISTS action_logs CASCADE;';
     EXECUTE 'DROP TABLE IF EXISTS team_messages CASCADE;';
-    EXECUTE 'DROP TABLE IF EXISTS admin_users CASCADE;';
+    EXECUTE 'DROP TABLE IF EXISTS users CASCADE;';
     EXECUTE 'DROP VIEW IF EXISTS team_current_responders CASCADE;';
     EXECUTE 'DROP VIEW IF EXISTS incident_summary CASCADE;';
 
@@ -974,6 +998,7 @@ BEGIN
       number TEXT NOT NULL,
       sartopo_id TEXT,
       notes TEXT,
+      show_map BOOLEAN DEFAULT FALSE,
       start_datetime TIMESTAMP WITH TIME ZONE NOT NULL,
       end_datetime TIMESTAMP WITH TIME ZONE,
       created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -1114,10 +1139,17 @@ BEGIN
       created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
     );';
 
-    EXECUTE 'CREATE TABLE admin_users (
+    EXECUTE 'CREATE TABLE users (
       email TEXT PRIMARY KEY,
       username TEXT NOT NULL,
       password TEXT NOT NULL,
+      access_level access_level NOT NULL DEFAULT ''responder'',
+      name TEXT,
+      agency TEXT,
+      identifier TEXT,
+      cell_phone TEXT,
+      responder_type responder_type,
+      special_skills TEXT,
       created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
     );';
 
@@ -1243,7 +1275,7 @@ BEGIN
         is_command_staff_team_member := (staff_team_status IS NOT NULL);
 
         IF is_command_staff_team_member THEN
-            target_access_level := ''command staff'';
+            target_access_level := ''staff'';
         ELSE
             target_access_level := ''responder'';
         END IF;
@@ -1476,7 +1508,7 @@ BEGIN
         OR EXISTS (
           SELECT 1 FROM responders
           WHERE auth_uid = auth.uid()
-          AND access_level IN (''command staff'', ''admin'')
+          AND access_level IN (''staff'', ''admin'')
         )
       );
     END;
@@ -1516,11 +1548,11 @@ BEGIN
     END;
     $func$ LANGUAGE plpgsql STABLE SECURITY DEFINER;';
 
-    EXECUTE 'CREATE OR REPLACE FUNCTION verify_admin_login(p_email TEXT, p_password TEXT)
-    RETURNS SETOF admin_users AS $func$
+    EXECUTE 'CREATE OR REPLACE FUNCTION verify_user_login(p_email TEXT, p_password TEXT)
+    RETURNS SETOF users AS $func$
     BEGIN
       RETURN QUERY
-      SELECT * FROM admin_users
+      SELECT * FROM users
       WHERE email = LOWER(p_email)
         AND (password = p_password OR password = crypt(p_password, password));
     END;
@@ -1651,43 +1683,69 @@ BEGIN
     EXECUTE 'CREATE POLICY "Admins/Staff can manage all team messages" ON team_messages
       FOR ALL TO authenticated USING (check_is_operational_staff()) WITH CHECK (check_is_operational_staff());';
 
-    EXECUTE 'CREATE POLICY "Allow staff to view admin list" ON admin_users
+    EXECUTE 'CREATE POLICY "Allow staff to view user list" ON users
       FOR SELECT TO authenticated USING (check_is_operational_staff());';
 
-    EXECUTE 'CREATE OR REPLACE FUNCTION admin_add_user(p_email TEXT, p_username TEXT, p_password TEXT)
+    EXECUTE 'CREATE OR REPLACE FUNCTION user_add(
+      p_email TEXT, 
+      p_username TEXT, 
+      p_password TEXT, 
+      p_access_level TEXT,
+      p_name TEXT DEFAULT NULL,
+      p_agency TEXT DEFAULT NULL,
+      p_identifier TEXT DEFAULT NULL,
+      p_phone TEXT DEFAULT NULL,
+      p_type TEXT DEFAULT NULL,
+      p_skills TEXT DEFAULT NULL
+    )
     RETURNS VOID AS $func$
     BEGIN
-      INSERT INTO admin_users (email, username, password)
-      VALUES (LOWER(p_email), p_username, crypt(p_password, gen_salt(''bf'')));
+      INSERT INTO users (
+        email, username, password, access_level, 
+        name, agency, identifier, cell_phone, responder_type, special_skills
+      )
+      VALUES (
+        LOWER(p_email), p_username, crypt(p_password, gen_salt(''bf'')), p_access_level::access_level,
+        p_name, p_agency, p_identifier, p_phone, p_type::responder_type, p_skills
+      );
     END;
     $func$ LANGUAGE plpgsql SECURITY DEFINER;';
 
-    EXECUTE 'CREATE OR REPLACE FUNCTION admin_remove_user(p_email TEXT)
+    EXECUTE 'CREATE OR REPLACE FUNCTION user_remove(p_email TEXT)
     RETURNS VOID AS $func$
     BEGIN
-      DELETE FROM admin_users WHERE email = LOWER(p_email);
+      DELETE FROM users WHERE email = LOWER(p_email);
     END;
     $func$ LANGUAGE plpgsql SECURITY DEFINER;';
 
-    EXECUTE 'CREATE OR REPLACE FUNCTION admin_update_password(p_email TEXT, p_password TEXT)
+    EXECUTE 'CREATE OR REPLACE FUNCTION user_update_password(p_email TEXT, p_password TEXT)
     RETURNS VOID AS $func$
     BEGIN
-      UPDATE admin_users
+      UPDATE users
       SET password = crypt(p_password, gen_salt(''bf''))
       WHERE email = LOWER(p_email);
     END;
     $func$ LANGUAGE plpgsql SECURITY DEFINER;';
 
-    -- Restore admin users from backup
-    IF EXISTS (SELECT FROM pg_class WHERE relname = 'admin_users_temp_backup') THEN
-        EXECUTE 'INSERT INTO admin_users (email, username, password, created_at) SELECT email, username, password, created_at FROM admin_users_temp_backup ON CONFLICT (email) DO NOTHING';
-        EXECUTE 'DROP TABLE admin_users_temp_backup';
+    -- Restore users from backup
+    IF EXISTS (SELECT FROM pg_class WHERE relname = 'users_temp_backup') THEN
+        EXECUTE 'INSERT INTO users (email, username, password, access_level, name, agency, identifier, cell_phone, responder_type, special_skills, created_at) 
+        SELECT email, username, password, access_level, name, agency, identifier, cell_phone, responder_type, special_skills, created_at 
+        FROM users_temp_backup ON CONFLICT (email) DO NOTHING';
+        EXECUTE 'DROP TABLE users_temp_backup';
     END IF;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Grant execute permissions to ensure functions are visible to the API
+GRANT EXECUTE ON FUNCTION user_add(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION user_remove(TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION user_update_password(TEXT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION verify_user_login(TEXT, TEXT) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION reinitialize_database() TO authenticated;
 
 -- ============================================================================
 -- INITIAL DATA SEEDING (FOR DEVELOPMENT/FIRST-TIME SETUP)
 -- ============================================================================
 -- Add a default admin user for initial access
-INSERT INTO admin_users (email, username, password) VALUES ('slanaghen@gmail.com', 'slanaghen@gmail.com', 'grigware') ON CONFLICT (email) DO NOTHING;
+INSERT INTO users (email, username, password) VALUES ('slanaghen@gmail.com', 'slanaghen@gmail.com', crypt('grigware', gen_salt('bf'))) ON CONFLICT (email) DO NOTHING;

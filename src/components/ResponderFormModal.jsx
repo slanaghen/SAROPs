@@ -10,7 +10,8 @@ const skillsList = [
   "Swiftwater", "Dive", "Avalanche", "Boat", "Helicopter", "Rope Rescue", 
   "Litter", "Medical", "Other"
 ];
-const ACCESS_LEVELS = ["responder", "command staff", "admin"];
+const RESPONDER_TYPES = ["SAR", "Fire", "Law", "Medical"];
+const ACCESS_LEVELS = ["responder", "staff", "admin"];
 const STATUS_LIST = ["Staged", "Attached", "Assigned", "Deployed", "CheckedOut"];
 
 
@@ -87,53 +88,68 @@ const ResponderFormModal = ({
       {error && <div className="alert alert-error" style={{ marginBottom: '16px' }}>{error}</div>}
 
       <div className="modal-scroll-wrapper" style={{ maxHeight: '65vh', overflowY: 'auto', paddingRight: '8px' }}>
-        <div className="form-row">
-          <label htmlFor="res_name">Full Name</label>
-          <input id="res_name" name="name" value={formData.name || ''} onChange={handleInputChange} required />
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0 12px' }}>
+          <div className="form-row" style={{ gridColumn: '1 / -1' }}>
+            <label htmlFor="res_name">Full Name</label>
+            <input id="res_name" name="name" value={formData.name || ''} onChange={handleInputChange} required />
+          </div>
+
+          <div className="form-row">
+            <label htmlFor="res_agency">Agency</label>
+            <input id="res_agency" name="agency" value={formData.agency || ''} onChange={handleInputChange} />
+          </div>
+
+          <div className="form-row">
+            <label htmlFor="res_id">Identifier</label>
+            <input id="res_id" name="identifier" value={formData.identifier || ''} onChange={handleInputChange} />
+          </div>
+
+          <div className="form-row">
+            <label htmlFor="res_phone">Cell Phone</label>
+            <input id="res_phone" name="cell_phone" value={formData.cell_phone || ''} onChange={handleInputChange} />
+          </div>
+
+          <div className="form-row">
+            <label htmlFor="res_type">Responder Type</label>
+            <select
+              id="res_type"
+              name="responder_type"
+              value={formData.responder_type || ''}
+              onChange={handleInputChange}
+            >
+              <option value="">— Select Type —</option>
+              {RESPONDER_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+
+          <div className="form-row">
+            <label htmlFor="res_level">Access Level</label>
+            <select
+              id="res_level"
+              name="access_level"
+              value={formData.access_level || 'responder'}
+              onChange={handleInputChange}
+              disabled={loading}
+            >
+              {ACCESS_LEVELS.map(level => (
+                <option key={level} value={level}>{level.charAt(0).toUpperCase() + level.slice(1)}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="form-row">
+            <label htmlFor="res_status">Status</label>
+            <select id="res_status" name="status" value={formData.status || 'Staged'} onChange={handleInputChange}>
+              {STATUS_LIST.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
         </div>
 
-        <div className="form-row">
-          <label htmlFor="res_agency">Agency</label>
-          <input id="res_agency" name="agency" value={formData.agency || ''} onChange={handleInputChange} />
-        </div>
-
-        <div className="form-row">
-          <label htmlFor="res_id">Identifier</label>
-          <input id="res_id" name="identifier" value={formData.identifier || ''} onChange={handleInputChange} />
-        </div>
-
-        <div className="form-row">
-          <label htmlFor="res_phone">Cell Phone</label>
-          <input id="res_phone" name="cell_phone" value={formData.cell_phone || ''} onChange={handleInputChange} />
-        </div>
-
-        <div className="form-row">
-          <label htmlFor="res_level">Access Level</label>
-          <select
-            id="res_level"
-            name="access_level"
-            value={formData.access_level || 'responder'}
-            onChange={handleInputChange}
-            disabled={loading}
-          >
-            {ACCESS_LEVELS.map(level => (
-              <option key={level} value={level}>{level.charAt(0).toUpperCase() + level.slice(1)}</option>
-            ))}
-          </select>
-        </div>
-
-        <div className="form-row">
-          <label htmlFor="res_status">Status</label>
-          <select id="res_status" name="status" value={formData.status || 'Staged'} onChange={handleInputChange}>
-            {STATUS_LIST.map(s => <option key={s} value={s}>{s}</option>)}
-          </select>
-        </div>
-
-        <div className="form-row">
+        <div className="form-row" style={{ marginTop: '8px' }}>
           <label htmlFor="res_skills">Special Skills (Hold Ctrl/Cmd to multi-select)</label>
           <select
             id="res_skills"
-            name="special_skills"
+            name="special_skills" // Ensure name attribute matches formData key
             multiple
             value={formData.special_skills ? formData.special_skills.split(', ') : []}
             onChange={handleInputChange}

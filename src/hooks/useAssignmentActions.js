@@ -9,14 +9,10 @@ export const useAssignmentActions = ({
   operationalPeriodId,
   assignments,
   teams,
-  responderId,
   recordAction,
   fetchDashboardData,
-  setAssignments,
-  setTeams,
   setLoading,
   setError,
-  setResponderStatus,
   normalizeAssignment
 }) => {
   
@@ -39,15 +35,6 @@ export const useAssignmentActions = ({
 
       if (asnError) throw asnError;
 
-      // Manual sync for 'Assigned' and 'Planned' status changes
-      if (teamId) {
-        if (newStatus === 'Assigned') {
-          await supabaseClient.from('teams').update({ status: 'Assigned', last_par_check: new Date().toISOString() }).eq('team_id', teamId);
-        } else if (unlinkRequired) {
-          await supabaseClient.from('teams').update({ status: 'Staged', last_par_check: null }).eq('team_id', teamId);
-        }
-      }
-
       const assignment = assignments.find(a => a.assignment_id === assignmentId);
       await recordAction(`Resource status update: Assignment "${assignment?.title || 'Unknown'}" set to ${newStatus}. Automated trigger applied to associated team/responders.`);
       await fetchDashboardData();
@@ -58,7 +45,7 @@ export const useAssignmentActions = ({
     } finally {
       setLoading(false);
     }
-  }, [supabaseClient, fetchDashboardData, recordAction, responderId, setResponderStatus, assignments, teams]);
+  }, [supabaseClient, fetchDashboardData, recordAction, assignments]);
 
   const assignTeamToAssignment = useCallback(async (teamId, assignmentId) => {
     try {
@@ -70,7 +57,6 @@ export const useAssignmentActions = ({
       const assignment = assignments.find(a => a.assignment_id === assignmentId);
       await recordAction(`Assigned team "${team?.team_name_number || 'Unknown'}" to assignment "${assignment?.title || 'Unknown'}". Statuses set to "Assigned".`);
 
-      await supabaseClient.from('teams').update({ status: 'Assigned', last_par_check: new Date().toISOString() }).eq('team_id', teamId);
       await fetchDashboardData();
       return { success: true };
     } catch (err) {
@@ -89,9 +75,6 @@ export const useAssignmentActions = ({
       await supabaseClient.from('assignments').update({ is_orphaned: false, team_id: null, status: 'Planned' }).eq('assignment_id', assignmentId);
       await recordAction(`Unassigned team from assignment "${assignmentToUnassign.title}". Assignment status set to "Planned" and team status set to "Staged".`);
 
-      if (assignmentToUnassign.team_id) {
-        await supabaseClient.from('teams').update({ status: 'Staged', last_par_check: null }).eq('team_id', assignmentToUnassign.team_id);
-      }
       await fetchDashboardData();
       return { success: true };
     } catch (err) {
@@ -112,7 +95,7 @@ export const useAssignmentActions = ({
         title: payload.title || '',
         segment: payload.segment || null,
         resource_type: payload.resource_type || '',
-        team_size: payload.team_size ?? 0,
+        team_size: payload.team_size ?? null,
         frequency_primary: payload.frequency_primary || '',
         description: payload.description || '',
         probability_of_detection: payload.probability_of_detection ?? null,
@@ -149,14 +132,11 @@ export const useAssignmentActions = ({
         title: updates.title || '',
         segment: updates.segment || null,
         resource_type: updates.resource_type || '',
-        team_size: updates.team_size ?? 0,
+        team_size: updates.team_size ?? null,
         frequency_primary: updates.frequency_primary || '',
         description: updates.description || '',
         probability_of_detection: updates.probability_of_detection ?? null
       };
-
-      // Remove legacy keys before sending to DB
-      ['name', 'division', 'assignment_type', 'assignment_size', 'tac_channel', 'description_narrative', 'pod'].forEach(k => delete dbUpdates[k]);
 
       const { data, error } = await supabaseClient.from('assignments').update(dbUpdates).eq('assignment_id', assignmentId).select().maybeSingle();
       if (error) throw error;

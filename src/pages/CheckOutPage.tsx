@@ -16,11 +16,11 @@ const CheckOutPage: React.FC = () => {
       return;
     }
 
-    const isCommandStaff = accessLevel === 'command staff';
-    const canCheckOut = responderStatus === 'Staged' || (isCommandStaff && responderStatus === 'Assigned');
+    const isStaffOrAdmin = accessLevel === 'staff' || accessLevel === 'admin';
+    const canCheckOut = responderStatus === 'Staged' || (isStaffOrAdmin && responderStatus === 'Assigned');
 
     if (!canCheckOut) {
-      setError(`Check-out unsuccessful: Your current status is "${responderStatus}". ${isCommandStaff ? 'Staff must be in "Assigned" or "Staged" status' : 'Responders must be in "Staged" status'} to check out. Please ensure you have been released from your team or assignment before clearing.`);
+      setError(`Check-out unsuccessful: Your current status is "${responderStatus}". ${isStaffOrAdmin ? 'Staff/Admins must be in "Assigned" or "Staged" status' : 'Responders must be in "Staged" status'} to check out. Please ensure you have been released from your team or assignment before clearing.`);
       return;
     }
 
@@ -36,11 +36,10 @@ const CheckOutPage: React.FC = () => {
 
       if (leaderError) throw leaderError;
 
-      // Mark responder as 'Cleared' for the active incident session.
-      // This preserves historical records while removing them from active staging lists.
-      const { error: dbError } = await supabase //
+      // Mark responder as 'CheckedOut' for the active incident session.
+      const { error: dbError } = await supabase
         .from('responders')
-        .update({ status: 'Cleared', checkout_datetime: new Date().toISOString() })
+        .update({ status: 'CheckedOut', checkout_datetime: new Date().toISOString() })
         .eq('responder_id', responderId);
 
       if (dbError) throw dbError;

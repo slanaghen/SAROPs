@@ -78,12 +78,7 @@ describe('useAssignmentActions Hook', () => {
       expect.objectContaining({ team_id: 't1', status: 'Assigned' })
     );
 
-    // 2. Team record updated to Assigned and timer reset
-    expect(mockTableChains.teams.update).toHaveBeenCalledWith(
-      expect.objectContaining({ status: 'Assigned', last_par_check: expect.any(String) })
-    );
-
-    // Note: Responder status update is now handled by DB triggers.
+    // Note: Team and Responder status updates are now handled by DB triggers.
   });
 
   it('reverts team to Staged and unlinks when assignment status is set to Planned', async () => {
@@ -98,9 +93,6 @@ describe('useAssignmentActions Hook', () => {
       expect.objectContaining({ status: 'Planned', team_id: null })
     );
 
-    // Team status reverted to Staged and timer cleared
-    expect(mockTableChains.teams.update).toHaveBeenCalledWith(
-      expect.objectContaining({ status: 'Staged', last_par_check: null })
-    );
+    // Note: Team status update is now handled by DB triggers.
   });
 });

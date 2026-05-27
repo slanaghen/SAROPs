@@ -125,7 +125,7 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
             assignments={assignments}
             responders={responders}
             defaultNewTeamName=""
-            defaultNewTeamType="Ground Search"
+            defaultNewTeamType="Ground"
             defaultNewAssignmentDivision="A"
             defaultNewAssignmentName={getNextAssignmentName("A")}
             defaultNewAssignmentType="Ground"

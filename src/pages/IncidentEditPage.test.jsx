@@ -213,12 +213,12 @@ describe('IncidentEditPage', () => {
 
     await waitFor(() => {
       expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('2 active assignments and 1 responders'));
-      expect(mockFrom).toHaveBeenCalledWith('teams'); // Disband teams step
-      expect(mockTableChains.teams.update).toHaveBeenCalledWith(expect.objectContaining({ status: 'Disbanded' }));
-      expect(mockTableChains.assignments.update).toHaveBeenCalledTimes(2); // Two updates for assignments (Deployed -> Incomplete, Assigned -> Planned)
-      expect(mockTableChains.responders.update).toHaveBeenCalledWith(expect.objectContaining({ status: 'CheckedOut' }));
-      expect(mockTableChains.operational_periods.update).toHaveBeenCalledWith(expect.objectContaining({ end_datetime: expect.any(String) }));
-      expect(mockTableChains.incidents.update).toHaveBeenCalledWith(expect.objectContaining({ end_datetime: expect.any(String) }));
+      
+      // Implementation simplified to update only the incident end_datetime.
+      // Database triggers handle the cascading cleanup of OPs, teams, and assignments.
+      expect(mockTableChains.incidents.update).toHaveBeenCalledWith(expect.objectContaining({ 
+        end_datetime: expect.any(String) 
+      }));
     });
   });
 

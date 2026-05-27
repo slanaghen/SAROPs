@@ -179,7 +179,7 @@ function App() {
               <>
                 {responderName}
                 <span style={{ fontSize: '0.9em', opacity: 0.8, marginLeft: '4px' }}>
-                  ({(accessLevel === 'command staff' || isAdmin) ? 'Staff' : 'Responder'})
+                  ({(accessLevel === 'staff' || isAdmin) ? 'Staff' : 'Responder'})
                 </span>
               </>
             ) : (user?.email || 'Guest')}

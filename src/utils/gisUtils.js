@@ -82,20 +82,45 @@ export const mapSartopoToAssignment = (feature, opPeriodId, existing = null, ori
  * Useful for future implementation of bidirectional sync or map exports.
  * 
  * @param {Object} assignment - SAROps Assignment record
+ * @param {Object} baseProperties - Existing SARTopo feature properties to use as template
  * @returns {Object} GeoJSON properties for SARTopo
  */
-export const mapAssignmentToSartopo = (assignment) => {
-  return {
-    title: assignment.title,
-    name: assignment.title,
-    class: 'Assignment',
-    status: assignment.status,
-    segment: assignment.segment || '',
-    resource_type: assignment.resource_type || '',
-    teamSize: assignment.team_size,
-    primary_frequency: assignment.frequency_primary || '',
-    description: assignment.description || '',
-    unresponsive_pod: assignment.probability_of_detection || 0,
-    priority: assignment.priority || 'Normal'
+export const mapAssignmentToSartopo = (assignment, baseProperties = {}) => {
+  // Start with existing properties to ensure no data loss (styling, folders, color, pattern, etc)
+  const p = { ...baseProperties };
+  
+  // Intelligent key update helper: Finds the key SARTopo was using and updates it.
+  const updateProperty = (keys, value) => {
+    // Requirement: Every field present in the download MUST be present in the upload.
+    // If the value is null/undefined in SAROps, we do not overwrite the existing SARTopo value.
+    if (value === undefined || value === null) return;
+
+    const existingKey = keys.find(k => Object.prototype.hasOwnProperty.call(p, k));
+    if (existingKey) {
+      p[existingKey] = value;
+    } else if (keys.length > 0) {
+      p[keys[0]] = value; // Default to first key in list if none exist
+    }
   };
+
+  p.class = 'Assignment';
+  
+  p.status = assignment.status;
+
+  // Field-by-field substitution using resilient key matching aligned with download patterns.
+  // This ensures that variations like 'cluePOD' or 'personnel' are correctly updated.
+  updateProperty(['title', 'name'], assignment.title);
+  updateProperty(['segment', 'division', 'sector'], assignment.segment);
+  updateProperty(['resource_type', 'resourceType', 'type'], assignment.resource_type);
+  updateProperty(['teamSize', 'team_size', 'personnel', 'size', 'personnel_count'], assignment.team_size);
+  updateProperty(['primary_frequency', 'primaryFrequency', 'frequency', 'tac', 'tac_channel', 'comms'], assignment.frequency_primary);
+  updateProperty(['description', 'comments', 'notes'], assignment.description);
+  updateProperty(['unresponsive_pod', 'unresponsivePOD', 'pod', 'probabilityOfDetection', 'POD', 'cluePOD', 'clue_pod'], assignment.probability_of_detection);
+  updateProperty(['priority', 'Priority', 'importance', 'priority_level'], assignment.priority);
+  updateProperty(['hazards', 'safety'], assignment.hazards);
+  updateProperty(['transportation', 'travel_method'], assignment.transportation);
+  updateProperty(['time_allocated', 'timeAllocated', 'duration'], assignment.time_allocated);
+  updateProperty(['prepared_by', 'preparedBy', 'author'], assignment.prepared_by);
+
+  return p;
 };

@@ -51,6 +51,7 @@ const IncidentEditPage = () => {
   const location = useLocation();
   const [isSaving, setIsSaving] = useState(false);
   const [isSyncingSartopo, setIsSyncingSartopo] = useState(false);
+  const [isCreatingMap, setIsCreatingMap] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false); // Flag specifically to bypass navigation blocker
   const [sartopoIdValidationMessage, setSartopoIdValidationMessage] = useState(null);
   const [sartopoSyncErrorMessage, setSartopoSyncErrorMessage] = useState(null);
@@ -264,6 +265,63 @@ const IncidentEditPage = () => {
       setSartopoSyncErrorMessage(err.message || 'SARTopo sync failed.');
     } finally {
       setIsSyncingSartopo(false);
+    }
+  };
+
+  /**
+   * Dynamically creates a new SARTopo Collaborative Map using the account API key.
+   * Adheres to the Get-Modify-Push pattern for map initialization.
+   */
+  const handleCreateMap = async () => {
+    const apiKey = import.meta.env.VITE_SARTOPO_API_KEY?.trim();
+    if (!apiKey) {
+      setSartopoSyncErrorMessage("API Key not configured. Map creation requires VITE_SARTOPO_API_KEY.");
+      return;
+    }
+
+    if (!incident.number) {
+      alert("Please enter an Incident Number before creating a map.");
+      return;
+    }
+
+    setIsCreatingMap(true);
+    setSartopoSyncErrorMessage(null);
+
+    try {
+      const url = `/sartopo-api/api/v1/acct/${apiKey}/CollaborativeMap`;
+      const payload = {
+        title: `Mission ${incident.start_datetime.replace('T', ' ')}`,
+        mode: "sar",
+        state: {
+          zoom: "13",
+          center: [-105.2705, 40.0150],
+          layers: ["mbt"]
+        },
+        sharing: "URL"
+      };
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) throw new Error(`SARTopo returned HTTP ${response.status}`);
+
+      const data = await response.json();
+      if (data?.id) {
+        handleIncidentChange('sartopo_id', data.id);
+      } else {
+        throw new Error("SARTopo API responded successfully but did not return a Map ID.");
+      }
+    } catch (err) {
+      console.error('Map creation failed:', err);
+      setSartopoSyncErrorMessage(err.message || 'Failed to create map.');
+    } finally {
+      setIsCreatingMap(false);
     }
   };
 
@@ -486,7 +544,7 @@ const IncidentEditPage = () => {
           if (setResponderId) setResponderId(responderId);
           setResponderName(responderData.name);
           setResponderStatus('Deployed');
-          if (setAccessLevel) setAccessLevel('command staff');
+          if (setAccessLevel) setAccessLevel('staff');
         } catch (err) {
           console.error('[IncidentEdit] Auto check-in failed:', err);
           alert('Incident created, but auto check-in failed: ' + err.message);
@@ -539,44 +597,13 @@ const IncidentEditPage = () => {
           setIsSaving(false);
           return;
         }
-
-        const now = new Date().toISOString();
-        
-        // Automated Assignment Cleanup
-        if (deployedCount > 0) {
-          await supabase.from('assignments')
-            .update({ status: 'Incomplete', team_id: null })
-            .eq('op_period_id', incidentData.opPeriodId)
-            .eq('status', 'Deployed');
-        }
-
-        if (assignedCount > 0) {
-          await supabase.from('assignments')
-            .update({ status: 'Planned', team_id: null })
-            .eq('op_period_id', incidentData.opPeriodId)
-            .eq('status', 'Assigned');
-        }
-
-        // Disband all teams in this OP as they are released
-        await supabase.from('teams')
-          .update({ status: 'Disbanded', last_par_check: null })
-          .eq('op_period_id', incidentData.opPeriodId);
-
-        // Check out all remaining responders
-        if (activeResponders.length > 0) {
-          await supabase.from('responders')
-            .update({ status: 'CheckedOut', checkout_datetime: now })
-            .eq('incident_id', contextIncidentId)
-            .is('checkout_datetime', null);
-        }
       }
 
-      // 3. Final closure of the operational period and incident records
+      // 3. Update the incident end_datetime.
+      // This triggers the 'cleanup_resources_on_incident_end' DB function which 
+      // automatically closes the OP and cleans up all active assignments, teams, and responders.
       const endTimestamp = new Date().toISOString();
-      await Promise.all([
-        supabase.from('operational_periods').update({ end_datetime: endTimestamp }).eq('op_period_id', incidentData.opPeriodId),
-        supabase.from('incidents').update({ end_datetime: endTimestamp }).eq('incident_id', contextIncidentId)
-      ]);
+      await supabase.from('incidents').update({ end_datetime: endTimestamp }).eq('incident_id', contextIncidentId);
 
       endIncident(); // Reset global context state
       navigate('/checkin');
@@ -614,18 +641,17 @@ const IncidentEditPage = () => {
           <div className="section-card">
             <h2>Incident Information</h2>
 
-            <label>
-              Incident Name
-              <input
-                type="text"
-                value={incident.name}
-                onChange={(e) => handleIncidentChange('name', e.target.value)}
-                placeholder="Search and Rescue Incident Name"
-              />
-            </label>
-
             <div className="timing-row">
-              <label>
+              <label style={{ flex: 2 }}>
+                Incident Name
+                <input
+                  type="text"
+                  value={incident.name}
+                  onChange={(e) => handleIncidentChange('name', e.target.value)}
+                  placeholder="Search and Rescue Incident Name"
+                />
+              </label>
+              <label style={{ flex: 1 }}>
                 Incident Number
                 <input
                   type="text"
@@ -634,8 +660,10 @@ const IncidentEditPage = () => {
                   placeholder="Incident Number"
                 />
               </label>
+            </div>
 
-              <label>
+            <div className="timing-row" style={{ alignItems: 'flex-end', marginBottom: '16px' }}>
+              <label style={{ flex: 1, marginBottom: 0 }}>
                 SARTopo Map ID
                 {(isSyncingSartopo || sartopoIdValidationMessage || sartopoSyncErrorMessage) && (
                   <span style={{ marginLeft: '8px', fontSize: '11px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
@@ -652,6 +680,15 @@ const IncidentEditPage = () => {
                   style={{ borderColor: (sartopoIdValidationMessage || sartopoSyncErrorMessage) ? '#dc2626' : undefined }}
                 />
               </label>
+              <button 
+                type="button" 
+                className="btn btn-secondary" 
+                style={{ height: '42px' }}
+                onClick={handleCreateMap}
+                disabled={isCreatingMap || isSaving}
+              >
+                {isCreatingMap ? 'Creating...' : 'Create Map'}
+              </button>
             </div>
 
             <div className="timing-row">
