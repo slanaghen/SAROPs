@@ -544,7 +544,16 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
 
   return (
     <div className="responder-dashboard-page">
-      <h1 style={{ marginBottom: '16px' }}>Responder Dashboard</h1>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+        <h1 style={{ margin: 0 }}>Responder Dashboard</h1>
+        <button 
+          className={`btn ${isExpanded.map ? 'btn-secondary' : 'btn-primary'}`}
+          onClick={() => setIsExpanded(prev => ({ ...prev, map: !prev.map }))}
+          style={{ padding: '8px 20px' }}
+        >
+          {isExpanded.map ? 'Hide Map' : 'Show Map'}
+        </button>
+      </div>
 
       <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
         {/* Left Content Panel */}
@@ -871,11 +880,11 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
         </div>
 
         {/* Right Map Panel */}
-        <div style={{ flex: 1, minWidth: '400px' }}>
+        {isExpanded.map && (
+          <div style={{ flex: 1, minWidth: '400px' }}>
           <div className="dashboard-section" style={{ padding: '12px 16px' }}>
-            <SectionHeader title="Operational Map" sectionKey="map" />
-            {isExpanded.map && (
-              <div style={{ 
+            <h2 style={{ margin: 0, fontSize: '18px', marginBottom: '12px' }}>Operational Map</h2>
+            <div style={{ 
                 borderRadius: '12px', 
                 overflow: 'hidden', 
                 border: '1px solid #cbd5e1', 
@@ -891,10 +900,10 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
                   teams={team ? [team] : []} 
                   sartopoId={sartopoId} 
                 />
-              </div>
-            )}
+            </div>
           </div>
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );

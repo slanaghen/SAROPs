@@ -680,6 +680,14 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
           </select>
 
           <button 
+            className={`btn ${isMapExpanded ? 'btn-secondary' : 'btn-primary'}`}
+            style={{ height: '32px', fontSize: '13px', padding: '0 12px' }}
+            onClick={() => setIsMapExpanded(!isMapExpanded)}
+          >
+            {isMapExpanded ? 'Hide Map' : 'Show Map'}
+          </button>
+
+          <button 
             className="btn btn-secondary" 
             style={{ 
               height: '32px', 
@@ -713,7 +721,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
         <div ref={contentWrapperRef} className={`operations-content-wrapper layout-${layoutMode}`} style={loading ? { opacity: 0.8 } : {}}>
           {(layoutMode === 'table' || layoutMode === 'split') && (
             <div className="table-panel" style={{
-              ...(layoutMode === 'split' ? { width: `${splitWidth}%`, flexShrink: 0 } : {}),
+              ...(layoutMode === 'split' ? { width: isMapExpanded ? `${splitWidth}%` : '100%', flexShrink: 0 } : {}),
               overflowY: 'auto',
               maxHeight: 'calc(100vh - 200px)',
               border: '1px solid #e2e8f0',
@@ -746,26 +754,15 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
             </div>
           )}
 
-          {(layoutMode === 'map' || layoutMode === 'split') && (
+          {(layoutMode === 'map' || layoutMode === 'split') && isMapExpanded && (
             <div className="map-panel section-card" style={layoutMode === 'split' ? { 
               flex: 1, 
               minWidth: 0,
               padding: '12px'
             } : { margin: '0 auto 24px' }}>
-              <div 
-                onClick={() => setIsMapExpanded(!isMapExpanded)}
-                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', marginBottom: isMapExpanded ? '16px' : 0 }}
-              >
-                <h2 style={{ margin: 0 }}>Operational Map</h2>
-                <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 700 }}>
-                  {isMapExpanded ? 'COLLAPSE ▲' : 'EXPAND ▼'}
-                </span>
+              <div style={{ aspectRatio: '1 / 1', position: 'relative' }}>
+                <OperationsMap loading={loading} assignments={assignments} teams={teams} sartopoId={sartopoId} layoutMode={layoutMode} />
               </div>
-              {isMapExpanded && (
-                <div style={{ aspectRatio: '1 / 1', position: 'relative' }}>
-                  <OperationsMap loading={loading} assignments={assignments} teams={teams} sartopoId={sartopoId} layoutMode={layoutMode} />
-                </div>
-              )}
             </div>
           )}
         </div>
