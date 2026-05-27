@@ -14,7 +14,8 @@ import ICSAssignmentPage from './pages/ICSAssignmentPage';
 import SARTopoDataPage from './pages/SARTopoDataPage';
 import QRCodesPage from './pages/QRCodesPage';
 import PDFsPage from './pages/PDFsPage';
-import { IncidentProvider } from './context/IncidentContext';
+import GoogleICSFormsPage from './pages/GoogleICSFormsPage';
+import { IncidentProvider, useIncident } from './context/IncidentContext';
 
 const OperationsDashboardPage = lazy(() => import('./pages/OperationsDashboardPage'));
 
@@ -54,6 +55,7 @@ const router = createBrowserRouter([
       { path: "sartopo", element: <SARTopoDataPage /> },
       { path: "pdfs", element: <PDFsPage /> },
       { path: "ics", element: <ICSAssignmentPage /> },
+      { path: "google-ics", element: <GoogleICSFormsPage /> },
     ],
   },
 ]);

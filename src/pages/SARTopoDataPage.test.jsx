@@ -55,7 +55,7 @@ describe('SARTopoDataPage', () => {
     
     expect(await screen.findByText('MAP123')).toBeInTheDocument();
     // Use findByText to wait for the automated initial fetch to complete and the button to revert to idle
-    expect(await screen.findByText('Download')).toBeInTheDocument();
+    expect(await screen.findByText('Download from SARTopo')).toBeInTheDocument();
   });
 
   it('handles API errors when fetching features', async () => {
@@ -70,7 +70,7 @@ describe('SARTopoDataPage', () => {
 
     render(<SARTopoDataPage />);
     
-    const fetchBtn = await screen.findByText('Download');
+    const fetchBtn = await screen.findByText('Download from SARTopo');
     fireEvent.click(fetchBtn);
 
     expect(await screen.findByText(/SARTopo returned an error page/i)).toBeInTheDocument();
@@ -89,10 +89,10 @@ describe('SARTopoDataPage', () => {
 
     render(<SARTopoDataPage />);
     
-    const fetchBtn = await screen.findByText('Download');
+    const fetchBtn = await screen.findByText('Download from SARTopo');
     fireEvent.click(fetchBtn);
 
-    const mapFeaturesHeading = await screen.findByRole('heading', { name: /Map Download \(1\)/i });
+    const mapFeaturesHeading = await screen.findByRole('heading', { name: /Map Download from SARTopo \(1\)/i });
     const mapFeaturesSection = mapFeaturesHeading.closest('.section-card');
     expect(mapFeaturesSection).toBeInTheDocument();
     expect(within(mapFeaturesSection).getByText(/"Clue 1"/)).toBeInTheDocument();
@@ -122,10 +122,10 @@ describe('SARTopoDataPage', () => {
 
     render(<SARTopoDataPage />);
     
-    const fetchBtn = await screen.findByText('Download');
+    const fetchBtn = await screen.findByText('Download from SARTopo');
     fireEvent.click(fetchBtn);
 
-    expect(await screen.findByText(/Map Download \(1\)/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Map Download from SARTopo \(1\)/i)).toBeInTheDocument();
     
     // Requirement: Verify synchronization triggers and sends correct data
     await waitFor(() => expect(fromMock.upsert).toHaveBeenCalled());
@@ -163,7 +163,7 @@ describe('SARTopoDataPage', () => {
     render(<SARTopoDataPage />);
     
     // Trigger fetch manually as it no longer auto-syncs on load by default
-    const fetchBtn = await screen.findByText('Download');
+    const fetchBtn = await screen.findByText('Download from SARTopo');
     fireEvent.click(fetchBtn);
 
     await waitFor(() => expect(fromMock.upsert).toHaveBeenCalled());
@@ -187,7 +187,7 @@ describe('SARTopoDataPage', () => {
     render(<SARTopoDataPage />);
     
     // Trigger fetch manually as it no longer auto-syncs on load by default
-    fireEvent.click(await screen.findByText('Download'));
+    fireEvent.click(await screen.findByText('Download from SARTopo'));
 
     await waitFor(() => {
       const url = screen.getByText(/\/since\/\d+/);
@@ -212,10 +212,10 @@ describe('SARTopoDataPage', () => {
 
     render(<SARTopoDataPage />);
     
-    const uploadBtn = await screen.findByText('Upload');
+    const uploadBtn = await screen.findByText('Upload to SARTopo');
     fireEvent.click(uploadBtn);
 
-    expect(await screen.findByText(/Map Upload \(1\)/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Map Upload to SARTopo \(1\)/i)).toBeInTheDocument();
     expect(screen.getByText(/"Task 1"/i)).toBeInTheDocument();
   });
 
@@ -249,7 +249,7 @@ describe('SARTopoDataPage', () => {
     render(<SARTopoDataPage />);
     
     // Trigger fetch manually as it no longer auto-syncs on load by default
-    fireEvent.click(await screen.findByText('Download'));
+    fireEvent.click(await screen.findByText('Download from SARTopo'));
 
     await waitFor(() => {
       const url = screen.getByText(/\/since\/\d+/);
@@ -281,12 +281,12 @@ describe('SARTopoDataPage', () => {
 
     render(<SARTopoDataPage />);
     
-    const fetchBtn = await screen.findByText('Download');
+    const fetchBtn = await screen.findByText('Download from SARTopo');
     fireEvent.click(fetchBtn);
 
     // Initially, only assignments should be shown (2 features)
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: /Map Download \(2\)/i })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: /Map Download from SARTopo \(2\)/i })).toBeInTheDocument();
       expect(screen.getByText(/"Clue 1"/)).toBeInTheDocument();
       expect(screen.queryByText(/"POI 1"/)).not.toBeInTheDocument();
     });
@@ -295,7 +295,7 @@ describe('SARTopoDataPage', () => {
     fireEvent.click(screen.getByTitle('Show All Objects'));
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: /Map Download \(3\)/i })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: /Map Download from SARTopo \(3\)/i })).toBeInTheDocument();
       expect(screen.getByText(/"POI 1"/)).toBeInTheDocument();
     });
   });
@@ -326,7 +326,7 @@ describe('SARTopoDataPage', () => {
 
     render(<SARTopoDataPage />);
     
-    const uploadBtn = await screen.findByRole('button', { name: /Upload/i });
+    const uploadBtn = await screen.findByRole('button', { name: /Upload to SARTopo/i });
     fireEvent.click(uploadBtn);
 
     // Expect fetch to be called for each assignment

@@ -505,14 +505,14 @@ const SARTopoDataPage = () => {
               onClick={handleFetchFeatures}
               disabled={loading || !sartopoId}
             >
-              {loading ? 'Downloading...' : 'Download'}
+              {loading ? 'Downloading...' : 'Download from SARTopo'}
             </button>
             <button 
               className="btn btn-primary"
               onClick={handleUploadToSARTopo}
               disabled={isUploading || !incidentData?.opPeriodId || !sartopoId}
             >
-              {isUploading ? 'Uploading...' : 'Upload'}
+              {isUploading ? 'Uploading...' : 'Upload to SARTopo'}
             </button>
         </div>
         </div>
@@ -547,7 +547,7 @@ const SARTopoDataPage = () => {
             onClick={() => setIsMapUploadExpanded(prev => !prev)}
             style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', marginBottom: '16px' }}
           >
-            <h2 style={{ margin: 0 }}>Map Upload ({uploadGeoJSON?.features?.length || 0})</h2>
+            <h2 style={{ margin: 0 }}>Map Upload to SARTopo ({uploadGeoJSON?.features?.length || 0})</h2>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               {lastUploadTime > 0 && (
                 <span style={{ fontSize: '11px', color: '#64748b', fontStyle: 'italic' }}>
@@ -589,7 +589,7 @@ const SARTopoDataPage = () => {
                 borderRadius: '8px',
                 margin: 0
               }}>
-                {uploadGeoJSON ? JSON.stringify(uploadGeoJSON, null, 2) : '// No upload data generated yet. Click "Upload" above.'}
+                {uploadGeoJSON ? JSON.stringify(uploadGeoJSON, null, 2) : '// No upload data generated yet. Click "Upload to SARTopo" above.'}
               </pre>
             </div>
           )}
@@ -601,7 +601,7 @@ const SARTopoDataPage = () => {
             onClick={() => setIsMapDownloadExpanded(prev => !prev)}
             style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', marginBottom: '16px' }}
           >
-            <h2 style={{ margin: 0 }}>Map Download ({filteredDownloadFeatures.length || 0})</h2>
+            <h2 style={{ margin: 0 }}>Map Download from SARTopo ({filteredDownloadFeatures.length || 0})</h2>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <button 
                 className="btn btn-secondary btn-sm" 
@@ -644,7 +644,7 @@ const SARTopoDataPage = () => {
                 }, (key, value) => {
                   if (!showDownloadGeometry && key === 'geometry') return undefined;
                   return value;
-                }, 2) : '// No download data available yet. Click "Download" above.'}
+                }, 2) : '// No download data available yet. Click "Download from SARTopo" above.'}
               </pre>
             </div>
           )}
