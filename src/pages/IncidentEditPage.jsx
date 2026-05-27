@@ -3,6 +3,7 @@ import { useNavigate, useBlocker, useLocation } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { supabase } from '../lib/supabase';
 import { useIncident } from '../context/IncidentContext';
+import { mapSartopoToAssignment } from '../utils/gisUtils';
 import '../styles/IncidentEditPage.css';
 
 const getCurrentLocalDatetime = () => {
@@ -49,6 +50,7 @@ const IncidentEditPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [isSaving, setIsSaving] = useState(false);
+  const [isSyncingSartopo, setIsSyncingSartopo] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false); // Flag specifically to bypass navigation blocker
   const [incident, setIncident] = useState(defaultIncident);
   const [initialIncident, setInitialIncident] = useState(defaultIncident);
@@ -160,6 +162,55 @@ const IncidentEditPage = () => {
     loadExistingData();
   }, [isActive, contextIncidentId, incidentData?.opPeriodId]);
 
+  // Helper to sync SARTopo data (logic mirrored from SARTopoDataPage)
+  const syncSartopoData = async (mapId, opId) => {
+    if (!mapId || !opId) return;
+    setIsSyncingSartopo(true);
+    
+    try {
+      let cleanMapId = mapId.trim();
+      // Extract ID from URL if provided (e.g. sartopo.com/m/XXXX)
+      if (cleanMapId.includes('/')) {
+        cleanMapId = cleanMapId.split('/').pop() || cleanMapId.split('/').slice(-2, -1)[0];
+      }
+
+      const fetchUrl = `/sartopo-api/api/v1/map/${cleanMapId}/features`;
+      const response = await fetch(fetchUrl, { credentials: 'include' });
+      
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      
+      const data = await response.json();
+      const fetchedFeatures = data?.result?.state?.features || data?.features || [];
+      
+      if (fetchedFeatures.length > 0) {
+        const payloads = fetchedFeatures
+          .filter(f => f.properties?.class === 'Assignment')
+          .map(f => mapSartopoToAssignment(f, opId))
+          .filter(Boolean);
+
+        if (payloads.length > 0) {
+          await supabase.from('assignments').upsert(payloads, { onConflict: 'assignment_id' });
+        }
+      }
+      console.log('[IncidentEdit] SARTopo auto-sync complete.');
+    } catch (err) {
+      console.error('Background SARTopo sync failed:', err);
+    } finally {
+      setIsSyncingSartopo(false);
+    }
+  };
+
+  // Trigger SARTopo sync immediately when a map ID is entered or updated in Edit mode
+  useEffect(() => {
+    const mapId = incident.sartopo_id?.trim();
+    const opId = incidentData?.opPeriodId;
+    
+    if (isActive && mapId && opId && mapId !== initialIncident.sartopo_id) {
+      const timer = setTimeout(() => syncSartopoData(mapId, opId), 1200);
+      return () => clearTimeout(timer);
+    }
+  }, [incident.sartopo_id, isActive, incidentData?.opPeriodId, initialIncident.sartopo_id]);
+
   // Detect if any changes have been made to the form
   const isDirty = useMemo(() => {
     return JSON.stringify(incident) !== JSON.stringify(initialIncident) ||
@@ -191,7 +242,7 @@ const IncidentEditPage = () => {
 
     try {
       console.log('[IncidentEdit] Beginning database save operations...');
-      const opPeriodId = uuidv4();
+      let opPeriodId = uuidv4();
       const parsedPar = parseInt(operationalPeriod.par_check_interval, 10);
       const finalParInterval = isNaN(parsedPar) ? 60 : parsedPar;
 
@@ -226,6 +277,7 @@ const IncidentEditPage = () => {
         console.debug('[IncidentEdit] Update op_period response:', { error: opError });
 
         if (opError) throw opError;
+        opPeriodId = incidentData?.opPeriodId;
 
         startIncident(newIncidentId, incident.name, operationalPeriod.op_number, incidentData?.opPeriodId);
       } else {
@@ -270,12 +322,12 @@ const IncidentEditPage = () => {
       }
       setIsLocalSaved(true);
       console.log('[IncidentEdit] Save successful!');
-      return true;
+      return opPeriodId;
     } catch (err) {
       console.error('Failed to save incident:', err);
       const message = err.message || 'Unknown database error';
       alert(`Error starting incident tracking: ${message}`);
-      return false;
+      return null;
     } finally {
       if (autoResetSaving) setIsSaving(false);
     }
@@ -285,8 +337,14 @@ const IncidentEditPage = () => {
     if (event) event.preventDefault();
     const wasActive = isActive;
     setIsSubmitting(true);
-    const success = await saveData(false, true); // Keep isSaving true until navigation handles it, clean state
-    if (success) {
+    const savedOpId = await saveData(false, true); // Keep isSaving true until navigation handles it, clean state
+    if (savedOpId) {
+      // Trigger background sync if a Map ID was provided during initial creation
+      const mapId = incident.sartopo_id?.trim();
+      if (!wasActive && mapId) {
+        syncSartopoData(mapId, savedOpId);
+      }
+
       // Auto check-in the creator if they provided details on the previous check-in page
       setIsSubmitting(false); // Reset after successful navigation
       const responderData = location.state?.responderData;
@@ -499,6 +557,9 @@ const IncidentEditPage = () => {
 
               <label>
                 SARTopo Map ID
+                {isSyncingSartopo && (
+                  <span style={{ marginLeft: '8px', fontSize: '11px', color: '#0369a1', fontWeight: 600 }}>🔄 Syncing...</span>
+                )}
                 <input
                   type="text"
                   value={incident.sartopo_id}
