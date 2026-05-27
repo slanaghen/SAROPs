@@ -368,7 +368,7 @@ const IncidentEditPage = () => {
             auth_uid: session?.user?.id,
             device_id: `device_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 11)}`,
             checkin_datetime: new Date().toISOString(),
-            status: 'Assigned'
+            status: 'Deployed'
           });
 
           if (respError) throw respError;
@@ -405,7 +405,7 @@ const IncidentEditPage = () => {
           // Update global context
           if (setResponderId) setResponderId(responderId);
           setResponderName(responderData.name);
-          setResponderStatus('Assigned');
+          setResponderStatus('Deployed');
           if (setAccessLevel) setAccessLevel('command staff');
         } catch (err) {
           console.error('[IncidentEdit] Auto check-in failed:', err);
