@@ -12,7 +12,7 @@ import OperationsTable from '../components/OperationsTable';
 import OperationsMap from '../components/OperationsMap';
 import { checkIsParOverdue, formatTimeSince } from '../utils/operationalUtils';
 const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
-  const { incidentData, incidentId, responderName, user, operationsRefreshInterval } = useIncident();
+  const { incidentData, incidentId, responderName, user, operationsRefreshInterval, showGlobalMap } = useIncident();
   const operationalPeriodId = propOpId || incidentData?.opPeriodId;
 
   const {
@@ -44,7 +44,6 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   const [broadcastMessage, setBroadcastMessage] = useState('');
   const [currentTime, setCurrentTime] = useState(Date.now());
 
-  const [isMapExpanded, setIsMapExpanded] = useState(false);
   const contentWrapperRef = useRef(null);
   const [layoutMode, setLayoutMode] = useState(() => localStorage.getItem('sarops_layout_mode') || 'split');
 
@@ -681,7 +680,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
         <div ref={contentWrapperRef} className={`operations-content-wrapper layout-${layoutMode}`} style={loading ? { opacity: 0.8 } : {}}>
           {(layoutMode === 'table' || layoutMode === 'split') && (
             <div className="table-panel" style={{
-              ...(layoutMode === 'split' ? { width: isMapExpanded ? `${splitWidth}%` : '100%', flexShrink: 0 } : {}),
+              ...(layoutMode === 'split' ? { width: showGlobalMap ? `${splitWidth}%` : '100%', flexShrink: 0 } : {}),
               overflowY: 'auto',
               maxHeight: 'calc(100vh - 200px)',
               border: '1px solid #e2e8f0',
@@ -708,13 +707,13 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
             />
           </div>
         )}
-          {layoutMode === 'split' && (
+          {layoutMode === 'split' && showGlobalMap && (
             <div className="resizer-handle" onMouseDown={startResizing} style={{ width: '10px', cursor: 'col-resize', backgroundColor: '#f1f5f9', borderLeft: '1px solid #e2e8f0', borderRight: '1px solid #e2e8f0', zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <div style={{ width: '2px', height: '24px', backgroundColor: '#cbd5e1', borderRadius: '1px' }} />
             </div>
           )}
 
-          {(layoutMode === 'map' || layoutMode === 'split') && isMapExpanded && (
+          {(layoutMode === 'map' || layoutMode === 'split') && showGlobalMap && (
             <div className="map-panel section-card" style={layoutMode === 'split' ? { 
               flex: 1, 
               minWidth: 0,

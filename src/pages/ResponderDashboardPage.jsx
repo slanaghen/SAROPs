@@ -61,23 +61,35 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     messages: true
   });
 
-  // Resolve the Staff team ID to enable directed messaging to Incident Command
+  // Fetch all active teams to enable directed messaging for Staff
   useEffect(() => {
-    const fetchStaffTeamId = async () => {
+    const fetchTeams = async () => {
       if (!incidentData?.opPeriodId) return;
-      const { data } = await supabase
+      const { data: teamsData, error: teamsError } = await supabase
         .from('teams')
-        .select('team_id')
+        .select('team_id, team_name_number, type, status')
         .eq('op_period_id', incidentData.opPeriodId)
-        .eq('type', 'Staff')
-        .neq('status', 'Disbanded')
-        .maybeSingle();
-      if (data) setStaffTeamId(data.team_id);
-    };
-    fetchStaffTeamId();
-  }, [incidentData?.opPeriodId]);
+        .neq('status', 'Disbanded');
 
-  const messagingChannelId = team?.team_id;
+      if (teamsError) {
+        console.error('Error fetching teams for messaging:', teamsError);
+        return;
+      }
+
+      const staff = teamsData.find(t => t.type === 'Staff');
+      if (staff) {
+        setStaffTeamId(staff.team_id);
+        // Default selection for staff is their own broadcast channel
+        if (isStaffOrAdmin && !selectedTeamForMessaging) {
+          setSelectedTeamForMessaging(staff.team_id);
+        }
+      }
+      setAllTeams(teamsData.filter(t => t.type !== 'Staff'));
+    };
+    fetchTeams();
+  }, [incidentData?.opPeriodId, isStaffOrAdmin, selectedTeamForMessaging]);
+
+  const messagingChannelId = isStaffOrAdmin ? selectedTeamForMessaging : team?.team_id;
 
   // Keep a live clock for timer displays and overdue calculations
   useEffect(() => { const timer = setInterval(() => setCurrentTime(Date.now()), 15000); return () => clearInterval(timer); }, []);
@@ -815,24 +827,6 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
 
       {team && team.status !== 'Disbanded' && (
         <div className="dashboard-section messaging-info">
-          {isStaffOrAdmin && (
-            <div style={{ marginBottom: '12px' }}>
-              <label htmlFor="message-recipient" style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>
-                Message Recipient
-              </label>
-              <select
-                id="message-recipient"
-                value={selectedTeamForMessaging}
-                onChange={(e) => setSelectedTeamForMessaging(e.target.value)}
-                style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
-              >
-                <option value={staffTeamId}>Staff (Broadcast)</option> {/* Default to own staff channel */}
-                {allTeams.map(t => (
-                  <option key={t.team_id} value={t.team_id}>{t.team_name_number} ({t.type})</option>
-                ))}
-              </select>
-            </div>
-          )}
           <SectionHeader 
             title="Team Communications" 
             sectionKey="messages" 
@@ -840,12 +834,12 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
           />
           {isExpanded.messages && (
             <div style={{ marginTop: '10px' }}>
-          <div className="messages-container" style={{ maxHeight: '200px', overflowY: 'auto', marginBottom: '12px', background: '#f1f5f9', padding: '12px', borderRadius: '6px' }}>
+          <div className="messages-log" style={{ maxHeight: '150px', overflowY: 'auto', marginBottom: '10px', background: '#f8fafc', padding: '10px', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
             {messages.length === 0 ? <p style={{ color: '#64748b', fontSize: '13px' }}>No messages yet.</p> : (
               messages.map((m, i) => (
                 <div key={m.id || i} style={{ marginBottom: '10px', paddingBottom: '6px', borderBottom: '1px solid #e2e8f0', fontSize: '13px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
-                    <span style={{ fontWeight: 700, color: (m.sender_name?.startsWith && responderName && typeof m.sender_name === 'string' && m.sender_name.startsWith(responderName)) ? '#2563eb' : '#475569' }}>{m.sender_name || 'Unknown'}</span>
+                    <strong style={{ color: m.sender_name === responderName ? '#0066cc' : '#475569' }}>{m.sender_name || 'Unknown'}</strong>
                     <span style={{ fontSize: '10px', color: '#94a3b8' }}>{m.created_at ? new Date(m.created_at).toLocaleTimeString() : '...'}</span>
                   </div>
                   <span>{m.message_text}</span>
@@ -853,15 +847,28 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
               ))
             )}
           </div>
-          <form onSubmit={handleSendMessage} style={{ display: 'flex', gap: '8px' }}>
+          <form onSubmit={handleSendMessage} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             <input 
               type="text" 
               value={messageText} 
               onChange={(e) => setMessageText(e.target.value)} 
-              placeholder="Send message to Command..."
+              placeholder="Send message..."
               style={{ flex: 1, padding: '8px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
             />
-            <button type="submit" className="btn btn-primary" style={{ fontSize: '18px' }}>Send</button>
+            <button type="submit" className="btn btn-secondary btn-sm">Send</button>
+            {isStaffOrAdmin && (
+              <select
+                className="status-update-select"
+                style={{ width: 'auto', height: '32px', fontSize: '12px', padding: '0 8px', border: '1px solid #cbd5e1' }}
+                value={selectedTeamForMessaging}
+                onChange={(e) => setSelectedTeamForMessaging(e.target.value)}
+              >
+                <option value={staffTeamId}>Staff (Broadcast)</option>
+                {allTeams.map(t => (
+                  <option key={t.team_id} value={t.team_id}>{t.team_name_number} ({t.type})</option>
+                ))}
+              </select>
+            )}
           </form>
             </div>
           )}
