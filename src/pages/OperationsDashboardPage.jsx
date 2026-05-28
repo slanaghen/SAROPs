@@ -7,14 +7,14 @@ import { usePlanningDashboard } from '../hooks/usePlanningDashboard';
 import TeamFormModal from '../components/TeamFormModal';
 import AssignmentFormModal from '../components/AssignmentFormModal';
 import BaseModal from '../components/BaseModal';
-import OperationsToolbar from '../components/OperationsToolbar';
+// import OperationsToolbar from '../components/OperationsToolbar'; // Not used
 import OperationsTable from '../components/OperationsTable';
 import OperationsMap from '../components/OperationsMap';
 import { checkIsParOverdue, formatTimeSince } from '../utils/operationalUtils';
 const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   const { 
     incidentData, incidentId, responderName, user, operationsRefreshInterval, showGlobalMap, setShowGlobalMap 
-  } = useIncident();
+  } = useIncident(); // showGlobalMap and setShowGlobalMap are no longer in context
   const operationalPeriodId = propOpId || incidentData?.opPeriodId;
 
   const {
@@ -50,17 +50,6 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
 
   const [splitWidth, setSplitWidth] = useState(50); // percentage for table width in split view
   const isResizing = useRef(false);
-
-  useEffect(() => {
-    console.debug('[OperationsDashboard] showGlobalMap value:', showGlobalMap);
-  }, [showGlobalMap]);
-
-  // Sync context state with Database setting found in the joined incident record
-  useEffect(() => {
-    if (opPeriod?.incidents?.show_map !== undefined && opPeriod.incidents.show_map !== showGlobalMap) {
-      setShowGlobalMap(opPeriod.incidents.show_map);
-    }
-  }, [opPeriod, setShowGlobalMap, showGlobalMap]);
 
   // Persist layout choices when they change
   useEffect(() => {
@@ -256,7 +245,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
 
     const interval = setInterval(() => {
       fetchDashboardData();
-    }, operationsRefreshInterval || 60000);
+    }, operationsRefreshInterval || 30000);
 
     return () => clearInterval(interval);
   }, [operationalPeriodId, fetchDashboardData, operationsRefreshInterval]);

@@ -20,7 +20,7 @@ export const mapSartopoToAssignment = (feature, opPeriodId, existing = null, ori
   console.debug('[mapSartopoToAssignment] Incoming SARTopo properties:', p);
   console.debug('[mapSartopoToAssignment] Existing SAROps assignment:', existing);
   
-  // Extract values with fallbacks matching SARTopo's standard JSON structure
+  // Extract values with fallbacks matching SARTopo's standard JSON structure (fixed p variable not defined)
   const title = p.title || p.name || 'Untitled SARTopo Object';
   
   // Map SARTopo priority integers or variations to SAROps labels

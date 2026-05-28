@@ -98,7 +98,6 @@ CREATE TABLE incidents (
   number TEXT NOT NULL,
   sartopo_id TEXT,
   notes TEXT,
-  show_map BOOLEAN DEFAULT FALSE,
   start_datetime TIMESTAMP WITH TIME ZONE NOT NULL,
   end_datetime TIMESTAMP WITH TIME ZONE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -895,12 +894,17 @@ CREATE POLICY "Admins/Staff can manage all team messages" ON team_messages
 
 -- Policies for users
 -- Allow staff/admins to view the list of system users
-CREATE POLICY "Allow staff to view user list" ON users
-  FOR SELECT TO authenticated USING (check_is_operational_staff());
+CREATE POLICY "Allow all authenticated to view user list" ON users
+  FOR SELECT TO authenticated USING (TRUE);
 
 -- Secure RPCs for managing users
 -- These functions use SECURITY DEFINER to bypass RLS and ensure 
 -- passwords are encrypted correctly using pgcrypto.
+
+-- Ensure clean replacement for function overloading
+DROP FUNCTION IF EXISTS user_add(TEXT, TEXT, TEXT);
+DROP FUNCTION IF EXISTS user_add(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT);
+
 CREATE OR REPLACE FUNCTION user_add(
   p_email TEXT, 
   p_username TEXT, 
@@ -922,9 +926,24 @@ BEGIN
   VALUES (
     LOWER(p_email), p_username, crypt(p_password, gen_salt('bf')), p_access_level::access_level,
     p_name, p_agency, p_identifier, p_phone, p_type::responder_type, p_skills
-  );
+  )
+  ON CONFLICT (email) DO UPDATE SET
+    username = EXCLUDED.username,
+    password = CASE 
+      WHEN p_password IS NOT NULL AND p_password <> '' THEN EXCLUDED.password 
+      ELSE users.password 
+    END,
+    access_level = EXCLUDED.access_level,
+    name = EXCLUDED.name,
+    agency = EXCLUDED.agency,
+    identifier = EXCLUDED.identifier,
+    cell_phone = EXCLUDED.cell_phone,
+    responder_type = EXCLUDED.responder_type,
+    special_skills = EXCLUDED.special_skills;
 END;
 $func$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP FUNCTION IF EXISTS user_remove(TEXT);
 
 CREATE OR REPLACE FUNCTION user_remove(p_email TEXT)
 RETURNS VOID AS $func$
@@ -932,6 +951,8 @@ BEGIN
   DELETE FROM users WHERE email = LOWER(p_email);
 END;
 $func$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP FUNCTION IF EXISTS user_update_password(TEXT, TEXT);
 
 CREATE OR REPLACE FUNCTION user_update_password(p_email TEXT, p_password TEXT)
 RETURNS VOID AS $func$
@@ -969,7 +990,7 @@ BEGIN
     EXECUTE 'CREATE TYPE team_type AS ENUM (''Hasty'', ''Ground'', ''Vehicle'', ''UAS'', ''Water'', ''Tracking'', ''Dog'', ''Avalanche'', ''Transport'', ''Helicopter'', ''Medical'', ''Staff'', ''Other'');';
 
     EXECUTE 'DROP TYPE IF EXISTS responder_status CASCADE;';
-    EXECUTE 'CREATE TYPE responder_status AS ENUM (''Staged'', ''Attached'', ''Assigned'', ''Deployed'', ''CheckedOut'', ''Cleared'');';
+    EXECUTE 'CREATE TYPE responder_status AS ENUM (''Staged'', ''Attached'', ''Assigned'', ''Deployed'', ''CheckedOut'');';
 
     EXECUTE 'DROP TYPE IF EXISTS responder_type CASCADE;';
     EXECUTE 'CREATE TYPE responder_type AS ENUM (''SAR'', ''Fire'', ''Law'', ''Medical'');';
@@ -998,7 +1019,6 @@ BEGIN
       number TEXT NOT NULL,
       sartopo_id TEXT,
       notes TEXT,
-      show_map BOOLEAN DEFAULT FALSE,
       start_datetime TIMESTAMP WITH TIME ZONE NOT NULL,
       end_datetime TIMESTAMP WITH TIME ZONE,
       created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -1548,6 +1568,8 @@ BEGIN
     END;
     $func$ LANGUAGE plpgsql STABLE SECURITY DEFINER;';
 
+    EXECUTE 'DROP FUNCTION IF EXISTS verify_user_login(TEXT, TEXT);';
+
     EXECUTE 'CREATE OR REPLACE FUNCTION verify_user_login(p_email TEXT, p_password TEXT)
     RETURNS SETOF users AS $func$
     BEGIN
@@ -1739,13 +1761,14 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Grant execute permissions to ensure functions are visible to the API
 GRANT EXECUTE ON FUNCTION user_add(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated;
-GRANT EXECUTE ON FUNCTION user_remove(TEXT) TO authenticated;
-GRANT EXECUTE ON FUNCTION user_update_password(TEXT, TEXT) TO authenticated;
-GRANT EXECUTE ON FUNCTION verify_user_login(TEXT, TEXT) TO anon, authenticated;
-GRANT EXECUTE ON FUNCTION reinitialize_database() TO authenticated;
+GRANT EXECUTE ON FUNCTION user_remove TO authenticated;
+GRANT EXECUTE ON FUNCTION user_update_password TO authenticated;
+GRANT EXECUTE ON FUNCTION verify_user_login TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION reinitialize_database TO authenticated;
 
 -- ============================================================================
 -- INITIAL DATA SEEDING (FOR DEVELOPMENT/FIRST-TIME SETUP)
 -- ============================================================================
 -- Add a default admin user for initial access
-INSERT INTO users (email, username, password) VALUES ('slanaghen@gmail.com', 'slanaghen@gmail.com', crypt('grigware', gen_salt('bf'))) ON CONFLICT (email) DO NOTHING;
+INSERT INTO admin_users (email, username, password) VALUES ('slanaghen@gmail.com', 'slanaghen@gmail.com', crypt('grigware', gen_salt('bf'))) ON CONFLICT (email) DO NOTHING;
+INSERT INTO users (email, username, password, access_level, name, agency, identifier, cell_phone, responder_type, special_skills) VALUES ('slanaghen@gmail.com', 'slanaghen@gmail.com', crypt('grigware', gen_salt('bf') ), 'admin', 'Steve Lanaghen', 'SAROps', 'SL-001', '303-555-1234', 'SAR', 'Leadership, Communication') ON CONFLICT (email) DO NOTHING;

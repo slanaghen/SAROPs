@@ -25,6 +25,8 @@ vi.mock('../lib/supabase', () => ({
     }),
     rpc: vi.fn(() => globalThis.createSupabaseQueryMock(null)),
     auth: {
+      getSession: vi.fn().mockResolvedValue({ data: { session: null } }),
+      signInAnonymously: vi.fn().mockResolvedValue({ data: { user: { id: 'test-anon-user' } }, error: null }),
       signOut: vi.fn().mockResolvedValue({ error: null }),
     },
     channel: vi.fn().mockReturnThis(),
@@ -40,14 +42,22 @@ afterEach(() => {
 
 describe('AdminPage Authentication Gate', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     vi.useRealTimers();
     // Set default mock for useIncident for tests that don't override it
     vi.mocked(useIncident).mockReturnValue({
       isAdmin: false,
       setIsAdmin: vi.fn(),
       logout: vi.fn(),
-      responderId: null, // Default for responder management tests
+      responderId: null,
+      incidentId: null,
+      incidentData: { name: '', opNumber: '', opPeriodId: '' },
+      operationsRefreshInterval: 30000,
+      setOperationsRefreshInterval: vi.fn(),
+      responderRefreshInterval: 30000,
+      setResponderRefreshInterval: vi.fn(),
+      sartopoRefreshInterval: 30000,
+      setSartopoRefreshInterval: vi.fn(),
     });
     vi.mocked(usePlanningDashboard).mockReturnValue({
       recordAction: vi.fn(),
@@ -73,6 +83,14 @@ describe('AdminPage Authentication Gate', () => {
       setIsAdmin: mockSetIsAdmin,
       logout: vi.fn(),
       responderId: null,
+      incidentId: null,
+      incidentData: { name: '', opNumber: '', opPeriodId: '' },
+      operationsRefreshInterval: 30000,
+      setOperationsRefreshInterval: vi.fn(),
+      responderRefreshInterval: 30000,
+      setResponderRefreshInterval: vi.fn(),
+      sartopoRefreshInterval: 30000,
+      setSartopoRefreshInterval: vi.fn(),
     });
 
     // Mock RPC result for successful login
@@ -88,7 +106,7 @@ describe('AdminPage Authentication Gate', () => {
     fireEvent.click(screen.getByRole('button', { name: /Login/i }));
 
     await waitFor(() => {
-      expect(supabase.rpc).toHaveBeenCalledWith('verify_user_login', {
+      expect(supabase.rpc).toHaveBeenCalledWith('verify_admin_login', {
         p_email: 'admin@test.com',
         p_password: 'password123'
       });
@@ -102,6 +120,15 @@ describe('AdminPage Authentication Gate', () => {
       setIsAdmin: vi.fn(),
       logout: vi.fn(),
       endIncident: vi.fn(),
+      incidentId: 'i1',
+      responderId: 'r1',
+      incidentData: { name: 'Lost Hiker', opNumber: '1', opPeriodId: 'op1' },
+      operationsRefreshInterval: 30000,
+      setOperationsRefreshInterval: vi.fn(),
+      responderRefreshInterval: 30000,
+      setResponderRefreshInterval: vi.fn(),
+      sartopoRefreshInterval: 30000,
+      setSartopoRefreshInterval: vi.fn(),
     });
 
     // Mock data for incidents and responders
@@ -121,74 +148,127 @@ describe('AdminPage Authentication Gate', () => {
 
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
 
-    // Expand sections to see the data
-    fireEvent.click(screen.getByText(/Incident Management/i));
-    fireEvent.click(screen.getByText(/System Users/i));
-
     expect(await screen.findByText('Lost Hiker')).toBeInTheDocument();
     expect(await screen.findByText('Test User')).toBeInTheDocument(); // Check for system user by name
     expect(screen.getByText(/user@example.com/)).toBeInTheDocument(); // Verify email is also present
     expect(screen.getByText(/Responder Management/i)).toBeInTheDocument();
   });
-
+  
   it('should toggle visibility of management sections and show correct counts', async () => {
-    vi.mocked(useIncident).mockReturnValue({
+    vi.mocked(useIncident).mockReturnValue({ // Updated mock to include endIncident
       isAdmin: true,
       setIsAdmin: vi.fn(),
       logout: vi.fn(),
       endIncident: vi.fn(),
+      incidentId: 'inc-1',
+      incidentData: { opPeriodId: 'op-1' },
+      operationsRefreshInterval: 30000,
+      setOperationsRefreshInterval: vi.fn(),
+      responderRefreshInterval: 30000,
+      setResponderRefreshInterval: vi.fn(),
+      sartopoRefreshInterval: 30000,
+      setSartopoRefreshInterval: vi.fn(),
     });
-    supabase.from.mockImplementation(() => {
-      const query = {
-        select: vi.fn().mockReturnThis(),
-        order: vi.fn().mockReturnThis(),
-        then: (onFulfilled, onRejected) =>
-          Promise.resolve({ data: [{ responder_id: 'r1', name: 'Res 1', status: 'Staged' }], error: null })
-            .then(onFulfilled, onRejected),
-      };
-      return query;
+    supabase.from.mockImplementation((table) => {
+      if (table === 'responders') return globalThis.createSupabaseQueryMock([{ responder_id: 'r1', name: 'Res 1', status: 'Staged' }]);
+      return globalThis.createSupabaseQueryMock([]);
     });
 
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
-
+    
     const header = await screen.findByText(/Responder Management \(1\)/i);
-    expect(screen.queryByText('Res 1')).not.toBeInTheDocument(); // Collapsed by default
-
+    const responderSection = header.closest('.section-card'); // Find the parent section containing the responders table
+    expect(within(responderSection).getByText('Res 1')).toBeInTheDocument();
+    
     fireEvent.click(header);
-    expect(await screen.findByText('Res 1')).toBeInTheDocument(); // Expanded
-
-    fireEvent.click(header);
-    expect(screen.queryByText('Res 1')).not.toBeInTheDocument(); // Collapsed again
+    expect(within(responderSection).queryByText('Res 1')).not.toBeInTheDocument(); // Now Collapsed
   });
 
-  it('should disband a team and release responders', async () => {
+  it('should open the user edit modal and populate the form with user data when "Edit" is clicked', async () => {
+    const mockUserToEdit = { 
+      email: 'edit@user.com', 
+      username: 'EditUser', 
+      access_level: 'staff', 
+      name: 'Edit Test User',
+      agency: 'Test Agency',
+      identifier: 'E123',
+      cell_phone: '555-123-4567',
+      responder_type: 'Fire',
+      special_skills: 'EMT, UAS'
+    };
+
+    vi.mocked(useIncident).mockReturnValue({ 
+      isAdmin: true, 
+      setIsAdmin: vi.fn(), 
+      logout: vi.fn(),
+      incidentId: 'inc-123',
+      incidentData: { opPeriodId: 'op-123' },
+      operationsRefreshInterval: 30000,
+      setOperationsRefreshInterval: vi.fn(),
+      responderRefreshInterval: 30000,
+      setResponderRefreshInterval: vi.fn(),
+      sartopoRefreshInterval: 30000,
+      setSartopoRefreshInterval: vi.fn(),
+    });
+
+    supabase.from.mockImplementation((table) => {
+      if (table === 'users') return globalThis.createSupabaseQueryMock([mockUserToEdit]);
+      return globalThis.createSupabaseQueryMock([]);
+    });
+
+    render(<BrowserRouter><AdminPage /></BrowserRouter>);
+    // System Users is expanded by default now
+
+    const editButton = await screen.findByRole('button', { name: /Edit/i, exact: true });
+    fireEvent.click(editButton);
+
+    expect(screen.getByRole('heading', { name: /Edit User:/i })).toBeInTheDocument(); 
+    expect(screen.getByLabelText('Email Address')).toHaveValue(mockUserToEdit.email);
+    expect(screen.getByLabelText('Full Name')).toHaveValue(mockUserToEdit.name);
+    expect(screen.getByLabelText('Agency')).toHaveValue(mockUserToEdit.agency);
+    expect(screen.getByLabelText('Identifier')).toHaveValue(mockUserToEdit.identifier);
+    expect(screen.getByLabelText('Phone Number')).toHaveValue(mockUserToEdit.cell_phone);
+    expect(screen.getByLabelText('Access Level')).toHaveValue(mockUserToEdit.access_level);
+    expect(screen.getByLabelText('Responder Type')).toHaveValue(mockUserToEdit.responder_type);
+  });
+
+  it('should disband a team and release responders (via DB trigger)', async () => { // Updated description
     vi.mocked(useIncident).mockReturnValue({
       isAdmin: true,
       setIsAdmin: vi.fn(),
       logout: vi.fn(),
       endIncident: vi.fn(),
+      incidentId: 'inc-1',
+      incidentData: { opPeriodId: 'op-1' },
+      operationsRefreshInterval: 30000,
+      setOperationsRefreshInterval: vi.fn(),
+      responderRefreshInterval: 30000,
+      setResponderRefreshInterval: vi.fn(),
+      sartopoRefreshInterval: 30000,
+      setSartopoRefreshInterval: vi.fn(),
     });
     window.confirm = vi.fn().mockReturnValue(true);
-    const mockTeam = { team_id: 't1', team_name_number: 'Team Alpha', status: 'Staged', type: 'Staff' };
+    const mockTeam = {
+      team_id: 't1',
+      team_name_number: 'Team Alpha',
+      status: 'Staged',
+      type: 'Staff',
+      operational_periods: {
+        op_number: '1',
+        incidents: {
+          name: 'Incident Name',
+          number: 'INC-001'
+        }
+      }
+    };
     const mockMember = { responder_id: 'r1' };
     const mockRecordAction = vi.fn();
     
     supabase.from.mockImplementation((table) => {
-      const query = {
-        select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        order: vi.fn().mockReturnThis(),
-        in: vi.fn().mockReturnThis(),
-        is: vi.fn().mockReturnThis(),
-        update: vi.fn().mockReturnThis(),
-        then: (onFulfilled, onRejected) => {
-          let data = [];
-          if (table === 'teams') data = [mockTeam];
-          if (table === 'team_responders') data = [mockMember];
-          return Promise.resolve({ data, error: null }).then(onFulfilled, onRejected);
-        },
-      };
-      return query;
+      if (table === 'teams') return globalThis.createSupabaseQueryMock([mockTeam]);
+      if (table === 'team_responders') return globalThis.createSupabaseQueryMock([mockMember]);
+      // For other tables, return a generic mock that resolves to empty data
+      return globalThis.createSupabaseQueryMock([]);
     });
 
     // Override recordAction mock specifically for this test
@@ -198,25 +278,35 @@ describe('AdminPage Authentication Gate', () => {
     });
 
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
-    fireEvent.click(screen.getByText(/Team Management/i));
 
-    const disbandBtn = await screen.findByRole('button', { name: /Disband/i });
+    // Team Management is expanded by default. Wait for the mocked data to render.
+    await screen.findByText('Team Alpha');
+
+    const disbandBtn = await screen.findByRole('button', { name: /Disband/i }); // Use findByRole for robustness
     fireEvent.click(disbandBtn);
 
     expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('Disband team "Team Alpha"'));
     expect(supabase.from).toHaveBeenCalledWith('teams'); // Verify primary status update
     
     await waitFor(() => expect(mockRecordAction).toHaveBeenCalledWith(
-      `Admin disbanded team "${mockTeam.team_name_number}" (ID: ${mockTeam.team_id}, Type: ${mockTeam.type}). Fields modified: status="Disbanded", last_par_check=null. Automated trigger: All members released to "Staged"`
+      `Admin disbanded team "${mockTeam.team_name_number}" (ID: ${mockTeam.team_id}, Type: ${mockTeam.type}). Fields modified: status="Disbanded", last_par_check=null. Automated trigger: All members released to "Staged".`
     ));
   });
 
-  it('prompts for confirmation before deleting an incident', async () => {
+  it('prompts for confirmation before deleting an incident and performs deletion', async () => {
     vi.mocked(useIncident).mockReturnValue({
       isAdmin: true,
       setIsAdmin: vi.fn(),
       logout: vi.fn(),
       endIncident: vi.fn(),
+      incidentId: 'i1',
+      incidentData: { opPeriodId: 'op1' },
+      operationsRefreshInterval: 30000,
+      setOperationsRefreshInterval: vi.fn(),
+      responderRefreshInterval: 30000,
+      setResponderRefreshInterval: vi.fn(),
+      sartopoRefreshInterval: 30000,
+      setSartopoRefreshInterval: vi.fn(),
     });
     window.confirm = vi.fn().mockReturnValue(true);
     
@@ -244,9 +334,6 @@ describe('AdminPage Authentication Gate', () => {
 
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
 
-    // Expand section to access the delete button
-    fireEvent.click(screen.getByText(/Incident Management/i));
-
     const row = (await screen.findByText('Ended Incident')).closest('tr');
     const deleteBtn = within(row).getByRole('button', { name: /Delete/i });
     fireEvent.click(deleteBtn);
@@ -256,63 +343,130 @@ describe('AdminPage Authentication Gate', () => {
     expect(mockDelete).toHaveBeenCalled();
   });
 
-  it('should add a new administrator', async () => {
-    vi.mocked(useIncident).mockReturnValue({ isAdmin: true, setIsAdmin: vi.fn(), logout: vi.fn() });
+  it('should open the add new user modal and add a new user', async () => {
+    vi.mocked(useIncident).mockReturnValue({ 
+      isAdmin: true, 
+      setIsAdmin: vi.fn(), 
+      logout: vi.fn(),
+      incidentId: 'inc-123',
+      incidentData: { opPeriodId: 'op-123' },
+      operationsRefreshInterval: 30000,
+      setOperationsRefreshInterval: vi.fn(),
+      responderRefreshInterval: 30000,
+      setResponderRefreshInterval: vi.fn(),
+      sartopoRefreshInterval: 30000,
+      setSartopoRefreshInterval: vi.fn(),
+    });
     
     supabase.rpc.mockResolvedValue({ error: null });
-    // Ensure admin list fetch still works for the UI render
-    supabase.from.mockReturnValue({
+    supabase.from.mockImplementation((table) => ({
       select: vi.fn().mockReturnThis(),
       order: vi.fn().mockResolvedValue({ data: [], error: null })
-    });
+    }));
 
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
-    // Expand section to see the add form results in the list later
-    fireEvent.click(screen.getByText(/System Users/i));
+    
+    const userSection = screen.getByRole('heading', { name: /System Users/i, level: 2 }).closest('.section-card');
+    fireEvent.click(within(userSection).getByRole('button', { name: /\+ New/i }));
+    expect(screen.getByRole('heading', { name: /Add New User/i, level: 3 })).toBeInTheDocument();
 
-    fireEvent.change(screen.getByPlaceholderText('admin@agency.gov'), { target: { value: 'new@admin.com' } });
-    fireEvent.change(screen.getByPlaceholderText('••••••••'), { target: { value: 'password123' } });
-    const addButton = await screen.findByRole('button', { name: /Add User/i });
-    fireEvent.click(addButton);
+    fireEvent.change(screen.getByLabelText(/Email Address/i), { target: { value: 'new@user.com' } });
+    fireEvent.change(screen.getByLabelText(/Password/i), { target: { value: 'password123' } });
+    fireEvent.click(screen.getByRole('button', { name: /Save User/i }));
 
     await waitFor(() => {
-      expect(supabase.rpc).toHaveBeenCalledWith('user_add', expect.objectContaining({
-        p_email: 'new@admin.com',
-        p_username: 'new@admin.com',
+      expect(supabase.rpc).toHaveBeenCalledWith('admin_add_user', expect.objectContaining({
+        p_email: 'new@user.com',
+        p_username: 'new@user.com', 
         p_password: 'password123',
         p_access_level: 'responder',
-        p_name: null,
-        p_agency: null,
-        p_identifier: null,
-        p_phone: null,
+        p_name: '',
+        p_agency: '',
+        p_identifier: '',
+        p_phone: '',
         p_type: 'SAR',
-        p_skills: null
+        p_skills: '',
       }));
     });
   });
 
+  it('should open the user edit modal and update an existing user', async () => {
+    const mockUserToEdit = { 
+      email: 'edit@user.com', 
+      username: 'EditUser', 
+      access_level: 'staff', 
+      name: 'Edit Test User',
+      agency: 'Test Agency',
+      identifier: 'E123',
+      cell_phone: '555-123-4567',
+      responder_type: 'Fire',
+      special_skills: 'EMT, UAS'
+    };
+
+    vi.mocked(useIncident).mockReturnValue({ 
+      isAdmin: true, 
+      setIsAdmin: vi.fn(), 
+      logout: vi.fn(),
+      incidentId: 'inc-123',
+      incidentData: { opPeriodId: 'op-123' },
+      operationsRefreshInterval: 30000,
+      setOperationsRefreshInterval: vi.fn(),
+      responderRefreshInterval: 30000,
+      setResponderRefreshInterval: vi.fn(),
+      sartopoRefreshInterval: 30000,
+      setSartopoRefreshInterval: vi.fn(),
+    });
+    supabase.rpc.mockResolvedValue({ error: null });
+    supabase.from.mockImplementation((table) => {
+      if (table === 'users') return globalThis.createSupabaseQueryMock([mockUserToEdit]); // Initial fetch
+      return globalThis.createSupabaseQueryMock([]);
+    });
+
+    render(<BrowserRouter><AdminPage /></BrowserRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: /Edit/i, exact: true }));
+    expect(screen.getByRole('heading', { name: /Edit User:/i })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Agency'), { target: { value: 'Updated Agency' } });
+    fireEvent.click(screen.getByRole('button', { name: /Save User/i }));
+
+    await waitFor(() => {
+      expect(supabase.rpc).toHaveBeenCalledWith('admin_add_user', expect.objectContaining({ p_email: 'edit@user.com', p_agency: 'Updated Agency' }));
+    });
+  });
+
   it('should change an administrator\'s password', async () => {
-    vi.mocked(useIncident).mockReturnValue({ isAdmin: true, setIsAdmin: vi.fn(), logout: vi.fn() });
+    vi.mocked(useIncident).mockReturnValue({ 
+      isAdmin: true, 
+      setIsAdmin: vi.fn(), 
+      logout: vi.fn(),
+      incidentId: 'inc-123',
+      incidentData: { opPeriodId: 'op-123' },
+      operationsRefreshInterval: 30000,
+      setOperationsRefreshInterval: vi.fn(),
+      responderRefreshInterval: 30000,
+      setResponderRefreshInterval: vi.fn(),
+      sartopoRefreshInterval: 30000,
+      setSartopoRefreshInterval: vi.fn(),
+    });
     window.prompt = vi.fn().mockReturnValue('newpassword');
 
     supabase.rpc.mockResolvedValue({ error: null });
-    supabase.from.mockReturnValue({
+    supabase.from.mockImplementation((table) => ({
       select: vi.fn().mockReturnThis(),
-      order: vi.fn().mockImplementation(() => ({
-        then: (cb) => cb({ data: [{ email: 'existing@user.com', username: 'ExistingUser' }], error: null })
-      }))
-    });
+      order: vi.fn().mockReturnThis(), // Ensure order is chained before then
+      then: (cb) => Promise.resolve({ data: table === 'users' ? [{ email: 'existing@user.com', username: 'ExistingUser' }] : [], error: null }).then(cb)
+    }));
 
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
 
     // Expand section to access the admin list and buttons
-    fireEvent.click(screen.getByText(/System Users/i));
+    // System Users section is expanded by default
 
     await screen.findByText('ExistingUser');
-    fireEvent.click(screen.getByRole('button', { name: /Change Password/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Password/i }));
 
     await waitFor(() => {
-      expect(supabase.rpc).toHaveBeenCalledWith('user_update_password', {
+      expect(supabase.rpc).toHaveBeenCalledWith('admin_update_password', {
         p_email: 'existing@user.com',
         p_password: 'newpassword'
       });
@@ -325,7 +479,15 @@ describe('AdminPage Authentication Gate', () => {
       setIsAdmin: vi.fn(),
       logout: vi.fn(),
       endIncident: vi.fn(),
-      responderId: 'res-123'
+      responderId: 'res-123',
+      incidentId: 'inc-123',
+      incidentData: { opPeriodId: 'op-123' },
+      operationsRefreshInterval: 30000,
+      setOperationsRefreshInterval: vi.fn(),
+      responderRefreshInterval: 30000,
+      setResponderRefreshInterval: vi.fn(),
+      sartopoRefreshInterval: 30000,
+      setSartopoRefreshInterval: vi.fn(),
     });
     window.confirm = vi.fn().mockReturnValue(true);
 
@@ -351,9 +513,6 @@ describe('AdminPage Authentication Gate', () => {
 
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
 
-    // Expand section to see the responder list
-    fireEvent.click(screen.getByText(/Responder Management/i));
-
     await screen.findByText('Test Responder');
     fireEvent.click(screen.getByRole('button', { name: /Check Out/i }));
 
@@ -374,6 +533,13 @@ describe('AdminPage Authentication Gate', () => {
       logout: vi.fn(),
       incidentId: 'inc-123',
       endIncident: vi.fn(),
+      incidentData: { opPeriodId: 'op-1' },
+      operationsRefreshInterval: 30000,
+      setOperationsRefreshInterval: vi.fn(),
+      responderRefreshInterval: 30000,
+      setResponderRefreshInterval: vi.fn(),
+      sartopoRefreshInterval: 30000,
+      setSartopoRefreshInterval: vi.fn(),
     });
     window.confirm = vi.fn().mockReturnValue(true);
 
@@ -390,7 +556,7 @@ describe('AdminPage Authentication Gate', () => {
       }
       if (table === 'operational_periods') data = { op_period_id: 'op-1' };
       if (table === 'assignments') data = [{ assignment_id: 'a1', status: 'Deployed' }];
-      if (table === 'responders') data = [{ responder_id: 'r1' }];
+      if (table === 'responders') data = [{ responder_id: 'r1', status: 'Staged' }];
       
       return {
         select: vi.fn().mockReturnThis(),
@@ -405,7 +571,7 @@ describe('AdminPage Authentication Gate', () => {
     });
 
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
-    fireEvent.click(screen.getByText(/Incident Management/i));
+    // Incident Management is expanded by default
 
     const endBtn = await screen.findByRole('button', { name: /End Incident/i });
     fireEvent.click(endBtn);
@@ -415,85 +581,22 @@ describe('AdminPage Authentication Gate', () => {
     expect(supabase.from).toHaveBeenCalledWith('incidents');
   });
 
-  it('should clean incident resources when "Clean Incident" button is clicked', async () => {
-    vi.mocked(useIncident).mockReturnValue({
-      isAdmin: true,
-      setIsAdmin: vi.fn(),
-      logout: vi.fn(),
-      endIncident: vi.fn(),
-    });
-    window.confirm = vi.fn().mockReturnValue(true);
-
-    const mockIncident = {
-      incident_id: 'inc-clean',
-      name: 'Incident to Clean',
-      number: '123',
-      start_datetime: new Date().toISOString(),
-      end_datetime: null, // Active incident
-      operational_periods: [{ op_period_id: 'op-clean', op_number: 1, start_datetime: new Date().toISOString() }]
-    };
-    const mockAssignment = { assignment_id: 'a1', status: 'Deployed', op_period_id: 'op-clean' };
-    const mockTeam = { team_id: 't1', status: 'Assigned', op_period_id: 'op-clean' };
-    const mockResponder = { responder_id: 'r1', incident_id: 'inc-clean', status: 'Attached' };
-
-    const mockUpdate = vi.fn().mockReturnThis();
-    const mockEq = vi.fn().mockReturnThis();
-    const mockIs = vi.fn().mockReturnThis();
-    const mockSelect = vi.fn().mockReturnThis();
-
-    supabase.from.mockImplementation((table) => {
-      let data = [];
-      if (table === 'incidents') data = [mockIncident];
-      else if (table === 'operational_periods') data = { op_period_id: 'op-clean' };
-      else if (table === 'assignments') data = [mockAssignment];
-      else if (table === 'teams') data = [mockTeam];
-      else if (table === 'responders') data = [mockResponder];
-
-      return {
-        select: mockSelect,
-        update: mockUpdate,
-        eq: mockEq,
-        is: mockIs,
-        neq: vi.fn().mockReturnThis(),
-        order: vi.fn().mockReturnThis(),
-        maybeSingle: vi.fn().mockResolvedValue({ data: Array.isArray(data) ? data[0] : data, error: null }),
-        then: (onFulfilled) => Promise.resolve({ data, error: null }).then(onFulfilled)
-      };
-    });
-
-    render(<BrowserRouter><AdminPage /></BrowserRouter>);
-
-    // Expand Incident Management to select the incident
-    fireEvent.click(screen.getByText(/Incident Management/i));
-
-    const selectIncident = await screen.findByLabelText(/Select Incident/i);
-    fireEvent.change(selectIncident, { target: { value: 'inc-clean' } });
-
-    const cleanBtn = await screen.findByRole('button', { name: /Clean Incident/i });
-    fireEvent.click(cleanBtn);
-
-    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('Clean resources for incident "Incident to Clean"'));
-
-    await waitFor(() => {
-      // Verify assignments are updated
-      expect(supabase.from).toHaveBeenCalledWith('assignments');
-      expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ status: 'Incomplete', team_id: null }));
-      expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ status: 'Planned', team_id: null }));
-      // Verify teams are disbanded
-      expect(supabase.from).toHaveBeenCalledWith('teams');
-      expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ status: 'Disbanded', last_par_check: null }));
-      // Verify responders are checked out
-      expect(supabase.from).toHaveBeenCalledWith('responders');
-      expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ status: 'CheckedOut' }));
-    });
-  });
-
   it('successfully signs out the administrator and redirects to check-in', async () => {
     const mockLogout = vi.fn();
-    vi.mocked(useIncident).mockReturnValue({ isAdmin: true, logout: mockLogout });
+    vi.mocked(useIncident).mockReturnValue({ 
+      isAdmin: true, 
+      logout: mockLogout,
+      incidentId: 'inc-123',
+      incidentData: { opPeriodId: 'op-123' },
+      operationsRefreshInterval: 30000,
+      setOperationsRefreshInterval: vi.fn(),
+      responderRefreshInterval: 30000,
+      setResponderRefreshInterval: vi.fn(),
+      sartopoRefreshInterval: 30000,
+      setSartopoRefreshInterval: vi.fn(),
+    });
     
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
-
     const logoutBtn = screen.getByRole('button', { name: /Sign Out Admin/i });
     fireEvent.click(logoutBtn);
 
@@ -509,6 +612,14 @@ describe('AdminPage Authentication Gate', () => {
       setIsAdmin: vi.fn(),
       logout: vi.fn(),
       endIncident: vi.fn(),
+      incidentId: 'inc-123',
+      incidentData: { opPeriodId: 'op-123' },
+      operationsRefreshInterval: 30000,
+      setOperationsRefreshInterval: vi.fn(),
+      responderRefreshInterval: 30000,
+      setResponderRefreshInterval: vi.fn(),
+      sartopoRefreshInterval: 30000,
+      setSartopoRefreshInterval: vi.fn(),
     });
     window.confirm = vi.fn().mockReturnValue(true);
     const mockAsn = { assignment_id: 'a1', title: 'Task to Delete', status: 'Planned' };
@@ -522,7 +633,7 @@ describe('AdminPage Authentication Gate', () => {
     }));
 
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
-    fireEvent.click(screen.getByText(/Assignment Management/i));
+    // Assignment Management is expanded by default
     const row = (await screen.findByText('Task to Delete')).closest('tr');
     fireEvent.click(within(row).getByRole('button', { name: /Delete/i }));
 
@@ -535,6 +646,14 @@ describe('AdminPage Authentication Gate', () => {
       setIsAdmin: vi.fn(),
       logout: vi.fn(),
       endIncident: vi.fn(),
+      incidentId: 'inc-123',
+      incidentData: { opPeriodId: 'op-123' },
+      operationsRefreshInterval: 30000,
+      setOperationsRefreshInterval: vi.fn(),
+      responderRefreshInterval: 30000,
+      setResponderRefreshInterval: vi.fn(),
+      sartopoRefreshInterval: 30000,
+      setSartopoRefreshInterval: vi.fn(),
     });
     window.confirm = vi.fn().mockReturnValue(true);
     const mockRes = { responder_id: 'r1', name: 'Delete Me', status: 'Staged', checkin_datetime: new Date().toISOString(), agency: 'SAR', identifier: 'K9-1' };
@@ -548,7 +667,7 @@ describe('AdminPage Authentication Gate', () => {
     }));
 
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
-    fireEvent.click(screen.getByText(/Responder Management/i));
+    // Responder Management is expanded by default
     const row = (await screen.findByText('Delete Me')).closest('tr');
     fireEvent.click(within(row).getByRole('button', { name: /Delete/i }));
 
@@ -561,6 +680,14 @@ describe('AdminPage Authentication Gate', () => {
       setIsAdmin: vi.fn(),
       logout: vi.fn(),
       endIncident: vi.fn(),
+      incidentId: 'inc-123',
+      incidentData: { opPeriodId: 'op-123' },
+      operationsRefreshInterval: 30000,
+      setOperationsRefreshInterval: vi.fn(),
+      responderRefreshInterval: 30000,
+      setResponderRefreshInterval: vi.fn(),
+      sartopoRefreshInterval: 30000,
+      setSartopoRefreshInterval: vi.fn(),
     });
     window.confirm = vi.fn().mockReturnValue(true);
     
@@ -570,15 +697,14 @@ describe('AdminPage Authentication Gate', () => {
     ];
 
     supabase.rpc.mockResolvedValue({ error: null });
-    supabase.from.mockReturnValue({
+    supabase.from.mockImplementation((table) => ({
       select: vi.fn().mockReturnThis(),
-      order: vi.fn().mockImplementation(() => ({
-        then: (cb) => cb({ data: mockUsers, error: null })
-      }))
-    });
+      order: vi.fn().mockReturnThis(), // Ensure order is chained before then
+      then: (cb) => Promise.resolve({ data: table === 'users' ? mockUsers : [], error: null }).then(cb)
+    }));
 
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
-    fireEvent.click(screen.getByText(/System Users/i));
+    // System Users is expanded by default
     
     const removeButtons = await screen.findAllByRole('button', { name: /Remove/i });
     fireEvent.click(removeButtons[0]);
@@ -594,6 +720,14 @@ describe('AdminPage Authentication Gate', () => {
       setIsAdmin: vi.fn(),
       logout: vi.fn(),
       endIncident: vi.fn(),
+      incidentId: 'inc-123',
+      incidentData: { opPeriodId: 'op-123' },
+      operationsRefreshInterval: 30000,
+      setOperationsRefreshInterval: vi.fn(),
+      responderRefreshInterval: 30000,
+      setResponderRefreshInterval: vi.fn(),
+      sartopoRefreshInterval: 30000,
+      setSartopoRefreshInterval: vi.fn(),
     });
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     supabase.rpc.mockResolvedValue({ error: null });
@@ -616,8 +750,18 @@ describe('AdminPage Authentication Gate', () => {
       setIsAdmin: vi.fn(),
       logout: mockLogout,
       endIncident: vi.fn(),
+      incidentId: 'inc-123',
+      incidentData: { opPeriodId: 'op-123' },
+      operationsRefreshInterval: 30000,
+      setOperationsRefreshInterval: vi.fn(),
+      responderRefreshInterval: 30000,
+      setResponderRefreshInterval: vi.fn(),
+      sartopoRefreshInterval: 30000,
+      setSartopoRefreshInterval: vi.fn(),
     });
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    
+    const confirmSpy = vi.fn().mockReturnValue(true);
+    vi.stubGlobal('confirm', confirmSpy);
     
     supabase.rpc.mockResolvedValue({ error: null });
 
@@ -631,8 +775,6 @@ describe('AdminPage Authentication Gate', () => {
       expect(supabase.rpc).toHaveBeenCalledWith('reinitialize_database');
       expect(mockLogout).toHaveBeenCalled();
     });
-    
-    confirmSpy.mockRestore();
   });
 
   it('disables the Re-initialize Database button while a reset operation is in progress', async () => {
@@ -641,8 +783,16 @@ describe('AdminPage Authentication Gate', () => {
       setIsAdmin: vi.fn(),
       logout: vi.fn(),
       endIncident: vi.fn(),
+      incidentId: 'inc-123',
+      incidentData: { opPeriodId: 'op-123' },
+      operationsRefreshInterval: 30000,
+      setOperationsRefreshInterval: vi.fn(),
+      responderRefreshInterval: 30000,
+      setResponderRefreshInterval: vi.fn(),
+      sartopoRefreshInterval: 30000,
+      setSartopoRefreshInterval: vi.fn(),
     });
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.stubGlobal('confirm', vi.fn().mockReturnValue(true));
     
     // Use a controlled promise that we can resolve later to avoid hanging the test runner
     let resolveReset;
@@ -654,8 +804,13 @@ describe('AdminPage Authentication Gate', () => {
     const resetBtn = await screen.findByRole('button', { name: /Re-initialize Database/i });
     fireEvent.click(resetBtn);
 
-    expect(resetBtn).toBeDisabled();
-    expect(resetBtn).toHaveTextContent(/Resetting/i);
+    // Re-query the button inside waitFor to handle React potentially 
+    // replacing the element during the state-change re-render.
+    await waitFor(() => {
+      const updatedBtn = screen.getByRole('button', { name: /Resetting/i });
+      expect(updatedBtn).toBeInTheDocument();
+      expect(updatedBtn).toBeDisabled();
+    });
     
     resolveReset({ error: null }); // Resolve to allow clean termination
   });

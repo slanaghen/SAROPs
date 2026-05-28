@@ -215,6 +215,21 @@ article {
   color: white;
 }
 
+.status-indicator.responder {
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.status-indicator.staff {
+  background: #16a34a;
+  color: #ffffff;
+}
+
+.status-indicator.admin {
+  background: #000000;
+  color: #ffffff;
+}
+
 .status-indicator.deployed {
   background: #166534; /* Dark Green */
   color: white;
@@ -256,6 +271,11 @@ article {
   border-color: #16a34a !important;
 }
 
+.status-indicator.assigned {
+  background: #d97706; /* Dark Amber */
+  color: white;
+}
+
 /* Highlighting for drag and drop targets to indicate valid linkage */
 .chip.drop-target {
   background-color: #fef3c7 !important; /* Amber-100 */
@@ -271,11 +291,6 @@ article {
   0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
   70% { box-shadow: 0 0 0 10px rgba(245, 158, 11, 0); }
   100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
-}
-
-.status-indicator.assigned {
-  background: #d97706; /* Dark Amber */
-  color: white;
 }
 
 /* High-Density Compact Overrides */

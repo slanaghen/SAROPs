@@ -361,7 +361,7 @@ const SARTopoDataPage = () => {
     const interval = setInterval(() => {
       console.log('🔄 Automated SARTopo refresh triggered...');
       fetcherRef.current();
-    }, SARTOPO_REFRESH_INTERVAL || 60000);
+    }, SARTOPO_REFRESH_INTERVAL || 30000);
 
     return () => clearInterval(interval);
   }, [sartopoId, !!fetchUrl, SARTOPO_REFRESH_INTERVAL, lastFetchTime === 0, isAutoRefreshEnabled]);
@@ -381,7 +381,7 @@ const SARTopoDataPage = () => {
     let successCount = 0;
     let failCount = 0;
     const failedAssignments = [];
-
+    
     try {
       const { id: mapId } = sartopoConfig;
       const apiKey = import.meta.env.VITE_SARTOPO_API_KEY?.trim() || '';

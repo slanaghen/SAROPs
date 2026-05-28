@@ -547,7 +547,7 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
 
               <div className="detail-item">
                 <span className="detail-label">Access Level:</span>
-                <span className="detail-value" style={{ textTransform: 'capitalize' }}>{displayResponder.access_level || 'Responder'}</span>
+                <span className="detail-value" style={{ textTransform: 'capitalize' }}>{displayResponder.access_level || 'responder'}</span>
               </div>
 
               {displayResponder.special_skills ? (

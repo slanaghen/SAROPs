@@ -105,7 +105,6 @@ const IncidentEditPage = () => {
     setAccessLevel,
     setResponderStatus
   } = useIncident();
-
   const [isLocalSaved, setIsLocalSaved] = useState(false);
 
   // Load existing data if an incident is already active

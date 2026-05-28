@@ -54,8 +54,8 @@ function App() {
     accessLevel, 
     setAccessLevel,
     currentTeamStatus,
-    currentAssignmentStatus,
     setCurrentTeamStatus,
+    currentAssignmentStatus,
     setCurrentAssignmentStatus,
     logout
   } = useIncident();
@@ -134,7 +134,7 @@ function App() {
     prevStatusRef.current = responderStatus;
     prevTeamStatusRef.current = currentTeamStatus;
     prevAssignmentStatusRef.current = currentAssignmentStatus;
-  }, [responderStatus, isActive]);
+  }, [responderStatus, currentTeamStatus, currentAssignmentStatus, isActive]);
 
   // Navigation Guard: Redirect to check-in if trying to access operational pages without a session
   useEffect(() => {

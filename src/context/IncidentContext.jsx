@@ -29,15 +29,14 @@ export const IncidentProvider = ({ children }) => {
   const [accessLevel, setAccessLevel] = useState(() => getSavedState('accessLevel', ''));
   const [currentTeamStatus, setCurrentTeamStatus] = useState(() => getSavedState('currentTeamStatus', null));
   const [currentAssignmentStatus, setCurrentAssignmentStatus] = useState(() => getSavedState('currentAssignmentStatus', null));
-  const [isAdmin, setIsAdmin] = useState(() => getSavedState('isAdmin', false));
-  const [showGlobalMap, setShowGlobalMap] = useState(false); // Transient UI state, synced with DB
   
-  const [operationsRefreshInterval, setOperationsRefreshInterval] = useState(() => getSavedState('operationsRefreshInterval', 60000));
-  const [responderRefreshInterval, setResponderRefreshInterval] = useState(() => getSavedState('responderRefreshInterval', 60000));
-  const [sartopoRefreshInterval, setSartopoRefreshInterval] = useState(() => getSavedState('sartopoRefreshInterval', 60000));
+  const [operationsRefreshInterval, setOperationsRefreshInterval] = useState(() => getSavedState('operationsRefreshInterval', 30000));
+  const [responderRefreshInterval, setResponderRefreshInterval] = useState(() => getSavedState('responderRefreshInterval', 30000));
+  const [sartopoRefreshInterval, setSartopoRefreshInterval] = useState(() => getSavedState('sartopoRefreshInterval', 30000));
   
   const [responderId, setResponderId] = useState(() => {
     const rid = getSavedState('responderId', null);
+    // Ensure responderId is a valid UUID, otherwise reset to null
     return (rid && uuidRegex.test(rid)) ? rid : null;
   });
 
@@ -47,11 +46,13 @@ export const IncidentProvider = ({ children }) => {
     return data;
   });
 
+  const [isAdmin, setIsAdmin] = useState(() => getSavedState('isAdmin', false)); // Moved here to ensure it's always available
+
   // Persist state to localStorage whenever any value changes
   useEffect(() => {
     // If we are in a logged-out state, ensure storage is kept clear
     if (!isActive && !responderName && !isAdmin) return;
-
+    
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       isActive,
       incidentId,
@@ -115,8 +116,6 @@ export const IncidentProvider = ({ children }) => {
       setAccessLevel,
       setResponderName,
       setResponderStatus,
-      showGlobalMap,
-      setShowGlobalMap,
       operationsRefreshInterval,
       setOperationsRefreshInterval,
       responderRefreshInterval,

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useIncident } from '../context/IncidentContext';
+import { v4 as uuidv4 } from 'uuid';
 import '../styles/IncidentEditPage.css'; // Reusing form styles for consistency
 import { usePlanningDashboard } from '../hooks/usePlanningDashboard'; // Import usePlanningDashboard
 import { 
@@ -9,36 +10,34 @@ import {
   RESPONDER_REFRESH_INTERVAL, setResponderRefreshInterval,
   SARTOPO_REFRESH_INTERVAL, setSartopoRefreshInterval
 } from '../components/operationalConstants';
+import AdminUserFormModal from '../components/admin/AdminUserFormModal';
+import AdminResponderFormModal from '../components/admin/AdminResponderFormModal';
+import AdminTeamFormModal from '../components/admin/AdminTeamFormModal';
+import AdminAssignmentFormModal from '../components/admin/AdminAssignmentFormModal';
+import AdminIncidentFormModal from '../components/admin/AdminIncidentFormModal';
+import AdminLogin from '../components/admin/AdminLogin';
+import AdminUsersTable from '../components/admin/AdminUsersTable';
+import AdminRespondersTable from '../components/admin/AdminRespondersTable';
+import AdminTeamsTable from '../components/admin/AdminTeamsTable';
+import AdminAssignmentsTable from '../components/admin/AdminAssignmentsTable';
+import AdminIncidentsTable from '../components/admin/AdminIncidentsTable';
 
 const AdminPage = () => {
-  const navigate = useNavigate(); 
+  const navigate = useNavigate();
   const { 
-    isAdmin, setIsAdmin, incidentId, responderId, endIncident, logout, showGlobalMap, setShowGlobalMap,
-    operationsRefreshInterval, setOperationsRefreshInterval,
-    responderRefreshInterval, setResponderRefreshInterval,
-    sartopoRefreshInterval, setSartopoRefreshInterval
+    isAdmin, setIsAdmin, incidentId, responderId, endIncident, logout,
+    setOperationsRefreshInterval, setResponderRefreshInterval, setSartopoRefreshInterval
   } = useIncident();
   const [users, setUsers] = useState([]);
+  const [fetching, setFetching] = useState(false);
   const [allIncidents, setAllIncidents] = useState([]);
   const [allResponders, setAllResponders] = useState([]);
   const [allTeams, setAllTeams] = useState([]);
   const [allAssignments, setAllAssignments] = useState([]);
-  const [newEmail, setNewEmail] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [newName, setNewName] = useState('');
-  const [newAgency, setNewAgency] = useState('');
-  const [newIdentifier, setNewIdentifier] = useState('');
-  const [newPhone, setNewPhone] = useState('');
-  const [newAccessLevel, setNewAccessLevel] = useState('responder');
-  const [newResponderType, setNewResponderType] = useState('SAR');
-  const [newSpecialSkills, setNewSpecialSkills] = useState('');
   const [loading, setLoading] = useState(false);
-  const [fetching, setFetching] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
-  const [loginEmail, setAdminLoginEmail] = useState('');
-  const [loginPassword, setAdminLoginPassword] = useState('');
-  const [isRespondersExpanded, setIsRespondersExpanded] = useState(false);
+  const [isRespondersExpanded, setIsRespondersExpanded] = useState(true);
   const { recordAction } = usePlanningDashboard(supabase, incidentId); // Use recordAction from hook
 
   const [opRefresh, setOpRefresh] = useState(OPERATIONS_REFRESH_INTERVAL / 1000);
@@ -53,26 +52,37 @@ const AdminPage = () => {
   const isSettingsDirty = opRefresh !== appliedSettings.op || 
                           resRefresh !== appliedSettings.res || 
                           sartopoRefresh !== appliedSettings.sartopo;
-  const [isTeamsExpanded, setIsTeamsExpanded] = useState(false);
-  const [isAssignmentsExpanded, setIsAssignmentsExpanded] = useState(false);
-  const [isIncidentsExpanded, setIsIncidentsExpanded] = useState(false);
-  const [isUsersExpanded, setIsUsersExpanded] = useState(false);
-  const [selectedDeleteIncidentId, setSelectedDeleteIncidentId] = useState('');
+  const [isTeamsExpanded, setIsTeamsExpanded] = useState(true);
+  const [isAssignmentsExpanded, setIsAssignmentsExpanded] = useState(true);
+  const [isIncidentsExpanded, setIsIncidentsExpanded] = useState(true);
+  const [isUsersExpanded, setIsUsersExpanded] = useState(true);
+
+  // State for Modals
+  const [showUserModal, setShowUserModal] = useState(false);
+  const [editingUser, setEditingUser] = useState(null);
+  const [showResponderModal, setShowResponderModal] = useState(false);
+  const [editingResponder, setEditingResponder] = useState(null);
+  const [showTeamModal, setShowTeamModal] = useState(false);
+  const [editingTeam, setEditingTeam] = useState(null);
+  const [showAssignmentModal, setShowAssignmentModal] = useState(false);
+  const [editingAssignment, setEditingAssignment] = useState(null);
+  const [showIncidentModal, setShowIncidentModal] = useState(false);
+  const [editingIncident, setEditingIncident] = useState(null);
 
   const fetchUsers = async () => {
     if (!isAdmin) return;
     setFetching(true);
     try {
-      const { data: userData, error: fetchError } = await supabase
+      const { data, error: fetchError } = await supabase
         .from('users')
         .select('*')
         .order('email');
 
       if (fetchError) throw fetchError;
-      console.log('All users info retrieved from table:', userData);
-      setUsers(userData || []);
+      console.log('All system users retrieved:', data);
+      setUsers(data || []);
     } catch (err) {
-      setError('Failed to load system user list');
+      setError('Failed to load user list');
       console.error(err);
     } finally {
       setFetching(false);
@@ -184,20 +194,29 @@ const AdminPage = () => {
   };
 
   /**
-   * Performs a destructive re-initialization of the database.
+   * DANGER: Triggers a full database schema reset.
+   * This calls the 'reinitialize_database' RPC function which should contain
+   * the content of sarops-schema.sql.
    */
   const handleReinitializeDatabase = async () => {
-    if (!window.confirm("DANGER: This will completely wipe and re-initialize the database schema! All data except admin users will be lost. Continue?")) return;
-    
+    const confirmMsg = "DANGER: This will completely wipe the database and re-initialize the schema. ALL DATA WILL BE PERMANENTLY LOST. Continue?";
+    if (!window.confirm(confirmMsg)) return;
+
     setLoading(true);
     setError(null);
+    setSuccess(null);
+
     try {
-      const { error: rpcError } = await supabase.rpc('reinitialize_database');
-      if (rpcError) throw rpcError;
-      setSuccess('Database re-initialized successfully.');
-      handleLogout();
+      const { error: resetError } = await supabase.rpc('reinitialize_database');
+      if (resetError) throw resetError;
+
+      await recordAction?.('Admin triggered full database re-initialization (Schema Reset).');
+      setSuccess('Database successfully re-initialized.');
+      // Since data is wiped, clear the current session and redirect
+      logout();
+      navigate('/checkin');
     } catch (err) {
-      setError('Failed to re-initialize: ' + err.message);
+      setError('Failed to re-initialize database: ' + err.message);
     } finally {
       setLoading(false);
     }
@@ -215,18 +234,6 @@ const AdminPage = () => {
     setSuccess('System refresh intervals updated successfully.');
   };
 
-  /**
-   * Toggles map visibility for the current incident in the database.
-   */
-  const handleToggleGlobalMap = async () => {
-    const nextValue = !showGlobalMap;
-    setShowGlobalMap(nextValue);
-    
-    if (incidentId) {
-      await supabase.from('incidents').update({ show_map: nextValue }).eq('incident_id', incidentId);
-    }
-  };
-
   useEffect(() => {
     if (isAdmin) {
       fetchUsers();
@@ -237,72 +244,137 @@ const AdminPage = () => {
     }
   }, [isAdmin]);
 
-  const handleAdminLogin = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    setError(null);
-
-    try {
-      // Use the secure RPC function instead of a direct table query
-      const { data, error: queryError } = await supabase
-        .rpc('verify_user_login', { 
-          p_email: loginEmail.trim(), 
-          p_password: loginPassword 
-        })
-        .maybeSingle();
-
-      if (queryError) throw queryError;
-      if (!data) throw new Error('Invalid email or password');
-
-      console.log('Login successful, admin record found:', data);
-      setIsAdmin(true);
-    } catch (err) {
-      setError(err.message || 'Login failed');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleAddAdmin = async (e) => {
-    e.preventDefault();
+  const handleSaveUser = async (formData) => {
     setLoading(true);
     setError(null);
     setSuccess(null);
-
-    if (!newEmail.trim() || !newPassword.trim()) {
-      setError('All fields are required to add a new administrator.');
-      return;
-    }
-
-    const emailVal = newEmail.trim().toLowerCase();
+    setShowUserModal(false); // Close modal immediately
 
     try {
-      // Use secure RPC to bypass RLS and handle server-side hashing
-      const { error: insertError } = await supabase
-        .rpc('user_add', { 
-          p_email: emailVal, 
-          p_username: emailVal,
-          p_password: newPassword.trim(),
-          p_access_level: newAccessLevel,
-          p_name: newName.trim() || null,
-          p_agency: newAgency.trim() || null,
-          p_identifier: newIdentifier.trim() || null,
-          p_phone: newPhone.trim() || null,
-          p_type: newResponderType,
-          p_skills: newSpecialSkills.trim() || null
+      if (formData.email && editingUser) { // Editing existing user
+        const { error: updateError } = await supabase.rpc('admin_add_user', {
+          p_email: formData.email,
+          p_username: formData.username,
+          p_password: formData.password || null, // Only update if provided
+          p_access_level: formData.access_level,
+          p_name: formData.name,
+          p_agency: formData.agency,
+          p_identifier: formData.identifier,
+          p_phone: formData.cell_phone,
+          p_type: formData.responder_type,
+          p_skills: formData.special_skills,
         });
-
-      if (insertError) throw insertError;
-
-      setSuccess(`Added ${newEmail} to system users.`);
-      // Reset form
-      setNewEmail(''); setNewPassword(''); setNewName(''); setNewAgency('');
-      setNewIdentifier(''); setNewPhone(''); setNewAccessLevel('responder');
-      setNewSpecialSkills('');
+        if (updateError) throw updateError;
+        setSuccess(`User ${formData.email} updated successfully.`);
+      } else { // Adding new user
+        const { error: insertError } = await supabase.rpc('admin_add_user', {
+          p_email: formData.email,
+          p_username: formData.email, // For new users, username defaults to email as there's no separate input
+          p_password: formData.password,
+          p_access_level: formData.access_level,
+          p_name: formData.name,
+          p_agency: formData.agency,
+          p_identifier: formData.identifier,
+          p_phone: formData.cell_phone,
+          p_type: formData.responder_type,
+          p_skills: formData.special_skills,
+        });
+        if (insertError) throw insertError;
+        setSuccess(`User ${formData.email} added successfully.`);
+      }
       fetchUsers();
     } catch (err) {
-      setError(err.code === '23505' ? 'This email is already registered.' : (err.message || 'Failed to add user'));
-      console.error('Admin management error:', err);
+      setError(err.message || 'Failed to save user.');
+    } finally {
+      setLoading(false);
+      setEditingUser(null);
+    }
+  };
+
+  const handleSaveResponder = async (formData) => {
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+    setShowResponderModal(false);
+
+    try {
+      const payload = {
+        name: formData.name,
+        agency: formData.agency,
+        identifier: formData.identifier,
+        cell_phone: formData.cell_phone,
+        special_skills: formData.special_skills,
+        access_level: formData.access_level,
+        responder_type: formData.responder_type,
+      };
+
+      if (formData.responder_id) {
+        const { error: updateError } = await supabase
+          .from('responders')
+          .update(payload)
+          .eq('responder_id', formData.responder_id);
+        if (updateError) throw updateError;
+        setSuccess(`Responder ${formData.name} updated successfully.`);
+      } else {
+        const { error: insertError } = await supabase
+          .from('responders')
+          .insert({
+            ...payload,
+            responder_id: uuidv4(),
+            incident_id: incidentId, // Link to current active incident if available
+            checkin_datetime: new Date().toISOString(),
+            status: 'Staged'
+          });
+        if (insertError) throw insertError;
+        setSuccess(`Responder ${formData.name} added to system.`);
+      }
+      fetchAllResponders();
+    } catch (err) {
+      setError(err.message || 'Failed to save responder.');
+    } finally {
+      setLoading(false);
+      setEditingResponder(null);
+    }
+  };
+
+  const handleSaveTeam = async (formData) => {
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+    setShowTeamModal(false);
+
+    try {
+      const payload = {
+        team_name_number: formData.team_name_number,
+        sartopo_color_hex: formData.sartopo_color_hex,
+        type: formData.type,
+        status: formData.status,
+        leader_responder_id: formData.leader_responder_id || null,
+        equipment: formData.equipment,
+      };
+
+      if (formData.team_id) {
+        const { error: updateError } = await supabase
+          .from('teams')
+          .update(payload)
+          .eq('team_id', formData.team_id);
+        if (updateError) throw updateError;
+        setSuccess(`Team ${formData.team_name_number} updated successfully.`);
+      } else {
+        // Find current OP ID from context or database
+        const { data: opData } = await supabase
+          .from('operational_periods')
+          .select('op_period_id')
+          .eq('incident_id', incidentId)
+          .order('created_at', { ascending: false }).limit(1).maybeSingle();
+          
+        const { error: insertError } = await supabase.from('teams').insert({ ...payload, team_id: uuidv4(), op_period_id: opData?.op_period_id });
+        if (insertError) throw insertError;
+        setSuccess(`Team ${formData.team_name_number} created.`);
+      }
+      fetchAllTeams();
+    } catch (err) {
+      setError(err.message || 'Failed to save team.');
     } finally {
       setLoading(false);
     }
@@ -343,8 +415,9 @@ const AdminPage = () => {
 
     try {
       setLoading(true);
-      // Update team status - DB triggers 'sync_team_members_on_status_change' 
-      // automatically handle releasing members to 'Staged' and closing history logs.
+      // Update team status - Redundant responder status updates removed.
+      // The database trigger 'sync_team_status_on_team_update' automatically 
+      // handles releasing responders to "Staged" and closing history logs.
       const { error: updateError } = await supabase
         .from('teams')
         .update({ 
@@ -355,7 +428,7 @@ const AdminPage = () => {
 
       if (updateError) throw updateError;
 
-      await recordAction?.(`Admin disbanded team "${name}" (ID: ${id}, Type: ${type}). Fields modified: status="Disbanded", last_par_check=null. Automated trigger: All members released to "Staged"`);
+      await recordAction?.(`Admin disbanded team "${name}" (ID: ${id}, Type: ${type}). Fields modified: status="Disbanded", last_par_check=null. Automated trigger: All members released to "Staged".`);
       setSuccess('Team disbanded.');
       fetchAllTeams();
       fetchAllResponders(); // Refresh responders as their status changed
@@ -440,48 +513,6 @@ const AdminPage = () => {
     }
   };
 
-  /**
-   * Performs cleanup of incident resources (assignments, teams, responders)
-   * without deleting the incident record itself.
-   */
-  const handleCleanIncident = async (id, name) => {
-    const confirmMsg = `Clean resources for incident "${name}"? This will disband all teams and check out all responders.`;
-    if (!window.confirm(confirmMsg)) return;
-
-    setLoading(true);
-    setError(null);
-    try {
-      const { data: opData } = await supabase
-        .from('operational_periods')
-        .select('op_period_id')
-        .eq('incident_id', id)
-        .is('end_datetime', null)
-        .order('start_datetime', { ascending: false })
-        .maybeSingle();
-
-      const opId = opData?.op_period_id;
-      const now = new Date().toISOString();
-
-      if (opId) {
-        await supabase.from('assignments').update({ status: 'Incomplete', team_id: null }).eq('op_period_id', opId).eq('status', 'Deployed');
-        await supabase.from('assignments').update({ status: 'Planned', team_id: null }).eq('op_period_id', opId).eq('status', 'Assigned');
-        await supabase.from('teams').update({ status: 'Disbanded', last_par_check: null }).eq('op_period_id', opId);
-      }
-
-      await supabase.from('responders').update({ status: 'CheckedOut', checkout_datetime: now }).eq('incident_id', id).is('checkout_datetime', null);
-
-      await recordAction?.(`Admin cleaned resources for incident "${name}" (ID: ${id}).`);
-      setSuccess('Incident resources cleaned up.');
-      fetchAllResponders();
-      fetchAllTeams();
-      fetchAllAssignments();
-    } catch (err) {
-      setError('Failed to clean resources: ' + err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleEndIncident = async (id) => {
     try {
       setLoading(true);
@@ -530,35 +561,15 @@ const AdminPage = () => {
 
       const now = new Date().toISOString();
 
-      // 3. Perform cleanup on the Operational Period if found
-      if (opId) {
-        if (deployedCount > 0) {
-          await supabase.from('assignments').update({ status: 'Incomplete', team_id: null }).eq('op_period_id', opId).eq('status', 'Deployed');
-        }
-        if (assignedCount > 0) {
-          await supabase.from('assignments').update({ status: 'Planned', team_id: null }).eq('op_period_id', opId).eq('status', 'Assigned');
-        }
-
-        await supabase.from('teams').update({ status: 'Disbanded', last_par_check: null }).eq('op_period_id', opId);
-        await supabase.from('operational_periods').update({ end_datetime: now }).eq('op_period_id', opId);
-      }
-
-      // 4. Check out responders
-      if (activeResponders.length > 0) {
-        await supabase.from('responders')
-            .update({ status: 'CheckedOut', checkout_datetime: now })
-          .eq('incident_id', id)
-          .is('checkout_datetime', null);
-      }
-
-      // 5. Finalize Incident closure
+      // Update the incident record. 
+      // The database trigger 'trigger_incident_cleanup_on_end' handles the cleanup of
+      // operational periods, assignments, teams, and responders automatically.
       const { error: updateError } = await supabase
         .from('incidents')
         .update({ end_datetime: now })
         .eq('incident_id', id);
       
-      const inc = allIncidents.find(inc => inc.incident_id === id);
-      await recordAction?.(`Admin ended incident "${inc?.name}" (ID: ${id}). Fields modified: end_datetime="${now}". Automated cleanup: marked ${deployedCount} assignments Incomplete, ${assignedCount} assignments Planned, disbanded all teams, and checked out ${activeResponders.length} responders.`);
+      await recordAction?.(`Admin ended incident (ID: ${id}). Triggered automated cleanup of assignments, teams, and responders.`);
 
       if (updateError) throw updateError;
 
@@ -580,6 +591,90 @@ const AdminPage = () => {
     }
   };
 
+  const handleSaveAssignment = async (formData) => {
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+    setShowAssignmentModal(false);
+
+    try {
+      const payload = {
+        title: formData.title,
+        status: formData.status,
+        segment: formData.segment,
+        resource_type: formData.resource_type,
+        team_size: formData.team_size ? parseInt(formData.team_size, 10) : null,
+        frequency_primary: formData.frequency_primary,
+        description: formData.description,
+        debrief_narrative: formData.debrief_narrative,
+        probability_of_detection: formData.probability_of_detection ? parseInt(formData.probability_of_detection, 10) : null,
+        priority: formData.priority,
+        transportation: formData.transportation,
+        time_allocated: formData.time_allocated,
+        hazards: formData.hazards,
+        prepared_by: formData.prepared_by,
+      };
+
+      if (formData.assignment_id) {
+        const { error: updateError } = await supabase
+          .from('assignments')
+          .update(payload)
+          .eq('assignment_id', formData.assignment_id);
+        if (updateError) throw updateError;
+        setSuccess(`Assignment ${formData.title} updated successfully.`);
+      } else {
+        const { data: opData } = await supabase
+          .from('operational_periods')
+          .select('op_period_id')
+          .eq('incident_id', incidentId)
+          .order('created_at', { ascending: false }).limit(1).maybeSingle();
+        const { error: insertError } = await supabase.from('assignments').insert({ ...payload, assignment_id: uuidv4(), op_period_id: opData?.op_period_id });
+        if (insertError) throw insertError;
+        setSuccess(`Assignment ${formData.title} created.`);
+      }
+      fetchAllAssignments();
+    } catch (err) {
+      setError(err.message || 'Failed to save assignment.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSaveIncident = async (formData) => {
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+    setShowIncidentModal(false);
+    try {
+      const payload = {
+        name: formData.name,
+        number: formData.number,
+        sartopo_id: formData.sartopo_id || null,
+        notes: formData.notes,
+        start_datetime: formData.start_datetime,
+      };
+
+      if (formData.incident_id) {
+        const { error: updateError } = await supabase.from('incidents').update(payload).eq('incident_id', formData.incident_id);
+        if (updateError) throw updateError;
+        setSuccess(`Incident ${formData.name} updated successfully.`);
+      } else {
+        const inc_id = formData.number || uuidv4();
+        const { error: insertError } = await supabase.from('incidents').insert({ ...payload, incident_id: inc_id });
+        if (insertError) throw insertError;
+        // Create default OP 1
+        await supabase.from('operational_periods').insert({ op_period_id: uuidv4(), incident_id: inc_id, op_number: 1, start_datetime: formData.start_datetime, situation_narrative: 'Incident started.' });
+        setSuccess(`Incident ${formData.name} created successfully.`);
+      }
+      fetchAllIncidents();
+    } catch (err) {
+      setError(err.message || 'Failed to save incident.');
+    } finally {
+      setLoading(false);
+      setEditingIncident(null);
+    }
+  };
+
   const handleDeleteIncident = async (id, name) => { // Added name
     const message = 'Permanently delete this incident? This will remove all associated operational periods, assignments, teams, responders, and logs. This action cannot be undone.';
     if (!window.confirm(message)) return;
@@ -588,16 +683,7 @@ const AdminPage = () => {
       setLoading(true);
       setError(null);
 
-      // 1. Delete responders associated with this incident
-      // Note: Responders are checked out sessions tied to this specific incident ID.
-      const { error: resError } = await supabase
-        .from('responders')
-        .delete()
-        .eq('incident_id', id);
-      
-      if (resError) throw resError;
-
-      // 2. Delete the incident record
+      // Delete the incident record.
       // This will automatically cascade through operational_periods, teams, 
       // assignments, action_logs, and clues due to PostgreSQL foreign key constraints.
       const { error: deleteError } = await supabase
@@ -636,7 +722,7 @@ const AdminPage = () => {
     setSuccess(null);
 
     try {
-      const { error: updateError } = await supabase.rpc('user_update_password', {
+      const { error: updateError } = await supabase.rpc('admin_update_password', {
         p_email: email,
         p_password: newPwd.trim()
       });
@@ -655,7 +741,7 @@ const AdminPage = () => {
     setSuccess(null);
 
     if (users.length <= 1) {
-      setError('Cannot remove the last administrator. At least one system administrator is required to maintain access.');
+      setError('Cannot remove the last user. At least one system user is required to maintain access.');
       return;
     }
 
@@ -671,68 +757,25 @@ const AdminPage = () => {
     }
   };
 
+  const handleOpenUserModal = (user = null) => {
+    setEditingUser(user);
+    setShowUserModal(true);
+  };
+
   // Show login form if not authenticated
   if (!isAdmin) {
-    return (
-      <div className="incident-edit-page">
-        <div className="page-header">
-          <h1>System Administration</h1>
-          <p className="subtitle">Please authenticate to manage system administrators.</p>
-        </div>
-
-        <div className="section-card" style={{ maxWidth: '400px', margin: '40px auto' }}>
-          <form onSubmit={handleAdminLogin}>
-            <label>
-              Admin Username (Email)
-              <input
-                type="email"
-                value={loginEmail}
-                onChange={(e) => setAdminLoginEmail(e.target.value)}
-                placeholder="admin@agency.gov"
-                required
-                autoFocus
-              />
-            </label>
-            <label style={{ marginTop: '12px' }}>
-              Password
-              <input
-                type="password"
-                value={loginPassword}
-                onChange={(e) => setAdminLoginPassword(e.target.value)}
-                placeholder="••••••••"
-                required
-              />
-            </label>
-            <button type="submit" className="btn btn-primary" disabled={loading} style={{ width: '100%', marginTop: '20px' }}>
-              {loading ? 'Logging in...' : 'Login'}
-            </button>
-            {error && <p className="alert alert-error" style={{ marginTop: '16px' }}>{error}</p>}
-          </form>
-        </div>
-      </div>
-    );
+    return <AdminLogin onLoginSuccess={() => setIsAdmin(true)} />;
   }
 
   return (
     <div className="incident-edit-page">
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
-          <h1>System Management</h1>
-          <p className="subtitle">Manage user access and global system configurations.</p>
+          <h1>System Administration</h1>
+          <p className="subtitle">Manage users with administrative access to SAROps.</p>
         </div>
         <button onClick={handleLogout} className="btn btn-secondary">
           Sign Out Admin
-        </button>
-      </div>
-
-      <div className="section-card" style={{ marginBottom: '24px' }}>
-        <h2>System Utilities</h2>
-        <p className="subtitle" style={{ fontSize: '13px', margin: '0 0 16px' }}>Initialize test environments and perform maintenance tasks.</p>
-        <button onClick={handleSeedData} className="btn btn-secondary" disabled={loading}>
-          {loading ? 'Seeding...' : 'Seed Data'}
-        </button>
-        <button onClick={handleReinitializeDatabase} className="btn btn-secondary" disabled={loading} style={{ marginLeft: '12px', color: '#dc2626' }}>
-          {loading ? 'Resetting...' : 'Re-initialize Database'}
         </button>
       </div>
 
@@ -770,484 +813,154 @@ const AdminPage = () => {
           <button className="btn btn-primary" onClick={handleApplySettings} disabled={!isSettingsDirty} style={{ height: '38px' }}>
             Apply
           </button>
-          <button
-            className={`btn ${showGlobalMap ? 'btn-secondary' : 'btn-primary'}`}
-            onClick={handleToggleGlobalMap}
-            style={{ height: '38px', marginLeft: '12px' }}
-          >
-            {showGlobalMap ? 'Hide Global Map' : 'Show Global Map'}
-          </button>
         </div>
       </div>
 
       <div className="section-card" style={{ marginBottom: '24px' }}>
         <h2>Data Management</h2>
-        <p className="subtitle" style={{ fontSize: '13px', margin: '0 0 16px' }}>Manage incident records and perform cascading deletions.</p>
+        <p className="subtitle" style={{ fontSize: '13px', margin: '0 0 16px' }}>Manage incident records, perform cascading deletions, and initialize test data.</p>
         <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end' }}>
-          <label style={{ flex: 1, marginBottom: 0 }}>
-            Select Incident to Delete
-            <select 
-              value={selectedDeleteIncidentId} 
-              onChange={(e) => setSelectedDeleteIncidentId(e.target.value)}
-              style={{ width: '100%' }}
-            >
-              <option value="">— Select an Incident —</option>
-              {allIncidents.map(inc => (
-                <option key={inc.incident_id} value={inc.incident_id}>
-                  {inc.name} (#{inc.number}) {inc.end_datetime ? '(Ended)' : '(Active)'}
-                </option>
-              ))}
-            </select>
-          </label>
           <button 
+            onClick={handleSeedData} 
             className="btn btn-secondary" 
-            style={{ color: '#f59e0b', borderColor: '#fde68a', height: '38px' }}
-            disabled={!selectedDeleteIncidentId || loading}
-            onClick={() => {
-              const inc = allIncidents.find(i => i.incident_id === selectedDeleteIncidentId);
-              if (inc) {
-                handleCleanIncident(inc.incident_id, inc.name);
-                setSelectedDeleteIncidentId('');
-              }
-            }}
+            disabled={loading} 
+            style={{ height: '38px' }}
           >
-            Clean Incident
+            {loading ? 'Seeding...' : 'Seed Data'}
           </button>
           <button 
+            onClick={handleReinitializeDatabase} 
             className="btn btn-secondary" 
-            style={{ color: '#dc2626', borderColor: '#fecaca', height: '38px' }}
-            disabled={!selectedDeleteIncidentId || loading}
-            onClick={() => {
-              const inc = allIncidents.find(i => i.incident_id === selectedDeleteIncidentId);
-              if (inc) {
-                handleDeleteIncident(inc.incident_id, inc.name);
-                setSelectedDeleteIncidentId('');
-              }
-            }}
+            disabled={loading} 
+            style={{ height: '38px', color: '#dc2626', borderColor: '#fecaca' }}
           >
-            Delete Incident
+            {loading ? 'Resetting...' : 'Re-initialize Database'}
           </button>
         </div>
       </div>
 
-      <div className="section-card" style={{ marginBottom: '24px' }}>
-        <h2>Add New User</h2>
-        <form onSubmit={handleAddAdmin} style={{ display: 'grid', gap: '12px', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', alignItems: 'flex-end' }}>
-          <label style={{ flex: 1, marginBottom: 0 }}>
-            Email Address
-            <input
-              type="email"
-              value={newEmail}
-              onChange={(e) => setNewEmail(e.target.value)}
-              placeholder="admin@agency.gov"
-              required
-            />
-          </label>
-          <label style={{ flex: 1, marginBottom: 0 }}>
-            Password
-            <input
-              type="password"
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-              placeholder="••••••••"
-              required
-            />
-          </label>
-          <label style={{ flex: 1, marginBottom: 0 }}>
-            Full Name
-            <input type="text" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Jane Doe" />
-          </label>
-          <label style={{ flex: 1, marginBottom: 0 }}>
-            Agency
-            <input type="text" value={newAgency} onChange={(e) => setNewAgency(e.target.value)} placeholder="Sheriff's Office" />
-          </label>
-          <label style={{ flex: 1, marginBottom: 0 }}>
-            Identifier
-            <input type="text" value={newIdentifier} onChange={(e) => setNewIdentifier(e.target.value)} placeholder="Badge # or Call Sign" />
-          </label>
-          <label style={{ flex: 1, marginBottom: 0 }}>
-            Phone Number
-            <input type="tel" value={newPhone} onChange={(e) => setNewPhone(e.target.value)} placeholder="555-555-5555" />
-          </label>
-          <label style={{ flex: 1, marginBottom: 0 }}>
-            Access Level
-            <select value={newAccessLevel} onChange={(e) => setNewAccessLevel(e.target.value)}>
-              <option value="responder">Responder</option>
-              <option value="staff">Staff</option>
-              <option value="admin">Admin</option>
-            </select>
-          </label>
-          <label style={{ flex: 1, marginBottom: 0 }}>
-            Responder Type
-            <select value={newResponderType} onChange={(e) => setNewResponderType(e.target.value)}>
-              <option value="SAR">SAR</option>
-              <option value="Fire">Fire</option>
-              <option value="Law">Law</option>
-              <option value="Medical">Medical</option>
-            </select>
-          </label>
-          <label style={{ flex: '1 1 100%', marginBottom: 0 }}>
-            Special Skills
-            <input type="text" value={newSpecialSkills} onChange={(e) => setNewSpecialSkills(e.target.value)} placeholder="e.g., EMT, K9 Handler, UAS Pilot" />
-          </label>
+      <AdminUsersTable
+        users={users}
+        fetching={fetching}
+        isUsersExpanded={isUsersExpanded}
+        setIsUsersExpanded={setIsUsersExpanded}
+        handleChangePassword={handleChangePassword}
+        handleRemoveAdmin={handleRemoveAdmin}
+        handleEditUser={(user) => handleOpenUserModal(user)}
+        handleNewUser={() => handleOpenUserModal(null)}
+      />
 
-          <button type="submit" className="btn btn-primary" disabled={loading || !isAdmin}>
-            {loading ? 'Adding...' : 'Add User'}
-          </button>
-        </form>
-        {error && <p className="alert alert-error" style={{ marginTop: '12px' }}>{error}</p>}
-        {success && <p className="save-message" style={{ marginTop: '12px' }}>{success}</p>}
-      </div>
+      <AdminRespondersTable
+        allResponders={allResponders}
+        isRespondersExpanded={isRespondersExpanded}
+        setIsRespondersExpanded={setIsRespondersExpanded}
+        handleCheckOutResponder={handleCheckOutResponder}
+        handleDeleteResponder={handleDeleteResponder}
+        handleEditResponder={(responder) => {
+          setEditingResponder(responder);
+          setShowResponderModal(true);
+        }}
+        handleNewResponder={() => {
+          setEditingResponder(null);
+          setShowResponderModal(true);
+        }}
+      />
 
-      <div className="section-card">
-        <div 
-          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', marginBottom: isUsersExpanded ? '16px' : 0 }}
-          onClick={() => setIsUsersExpanded(!isUsersExpanded)}
-        >
-          <h2 style={{ margin: 0 }}>System Users ({users.length})</h2>
-          <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 700 }}>
-            {isUsersExpanded ? 'COLLAPSE ▲' : 'EXPAND ▼'}
-          </span>
-        </div>
+      <AdminTeamsTable
+        allTeams={allTeams}
+        isTeamsExpanded={isTeamsExpanded}
+        setIsTeamsExpanded={setIsTeamsExpanded}
+        handleDisbandTeam={handleDisbandTeam}
+        handleDeleteTeam={handleDeleteTeam}
+        handleEditTeam={(team) => {
+          setEditingTeam(team);
+          setShowTeamModal(true);
+        }}
+        handleNewTeam={() => {
+          setEditingTeam(null);
+          setShowTeamModal(true);
+        }}
+      />
 
-        {isUsersExpanded && (
-          <div className="admin-list">
-            {fetching ? (
-              <p>Loading system users...</p>
-            ) : users.length === 0 ? (
-              <p>No system users configured.</p>
-            ) : (
-              users.map(user => (
-                <div key={user.email} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 0', borderBottom: '1px solid #eee' }}>
-                  <div>
-                    <strong>{user.name || user.username || 'No Name'}</strong>
-                    <span className={`status-indicator ${user.access_level}`} style={{ marginLeft: '8px', fontSize: '10px' }}>{user.access_level}</span>
-                    <div style={{ color: '#64748b', fontSize: '0.85em', marginTop: '4px' }}>
-                      {user.email} {user.agency && `• ${user.agency}`} {user.identifier && `• ID: ${user.identifier}`}
-                    </div>
-                    {user.special_skills && (
-                      <div style={{ fontSize: '11px', color: '#1e293b', fontStyle: 'italic', marginTop: '2px' }}>Skills: {user.special_skills}</div>
-                    )}
-                  </div>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <button onClick={() => handleChangePassword(user.email)} className="btn btn-secondary btn-sm">Change Password</button>
-                    <button onClick={() => handleRemoveAdmin(user.email)} className="btn btn-secondary btn-sm" style={{ color: '#dc2626' }}>Remove</button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        )}
-      </div>
+      <AdminAssignmentsTable
+        allAssignments={allAssignments}
+        allIncidents={allIncidents}
+        isAssignmentsExpanded={isAssignmentsExpanded}
+        setIsAssignmentsExpanded={setIsAssignmentsExpanded}
+        handleDeleteAssignment={handleDeleteAssignment}
+        handleEditAssignment={(assignment) => {
+          setEditingAssignment(assignment);
+          setShowAssignmentModal(true);
+        }}
+        handleNewAssignment={() => {
+          setEditingAssignment(null);
+          setShowAssignmentModal(true);
+        }}
+      />
 
-      <div className="section-card">
-        <div 
-          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', marginBottom: isRespondersExpanded ? '16px' : 0 }}
-          onClick={() => setIsRespondersExpanded(!isRespondersExpanded)}
-        >
-          <h2 style={{ margin: 0 }}>Responder Management ({allResponders.length})</h2>
-          <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 700 }}>
-            {isRespondersExpanded ? 'COLLAPSE ▲' : 'EXPAND ▼'}
-          </span>
-        </div>
+      <AdminIncidentsTable
+        allIncidents={allIncidents}
+        isIncidentsExpanded={isIncidentsExpanded}
+        setIsIncidentsExpanded={setIsIncidentsExpanded}
+        handleEndIncident={handleEndIncident}
+        handleDeleteIncident={handleDeleteIncident}
+        handleEditIncident={(incident) => {
+          setEditingIncident(incident);
+          setShowIncidentModal(true);
+        }}
+        handleNewIncident={() => {
+          setEditingIncident(null);
+          setShowIncidentModal(true);
+        }}
+      />
 
-        {isRespondersExpanded && (
-          <div className="operations-table-wrapper" style={{ boxShadow: 'none', border: '1px solid #eee' }}>
-          <table className="operations-table" style={{ minWidth: 'auto' }}>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Check-In Time</th>
-                <th>Status</th>
-                <th style={{ textAlign: 'right' }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {allResponders.length === 0 ? (
-                <tr>
-                  <td colSpan="4" className="empty-row">No responders found in database.</td>
-                </tr>
-              ) : (
-                allResponders.map(res => {
-                    const isCheckedOut = !!res.checkout_datetime;
-                  return (
-                    <tr key={res.responder_id}>
-                      <td>
-                        <div style={{ fontWeight: 600 }}>{res.name}</div>
-                        <div style={{ fontSize: '12px', color: '#64748b' }}>
-                          {res.agency} • {res.identifier}
-                        </div>
-                      </td>
-                      <td>{new Date(res.checkin_datetime).toLocaleString()}</td>
-                      <td>
-                        <span className={`status-indicator ${res.status.toLowerCase()}`}>
-                          {res.status}
-                        </span>
-                      </td>
-                      <td style={{ textAlign: 'right' }}>
-                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                          {!isCheckedOut && (
-                            <button 
-                              onClick={() => handleCheckOutResponder(res.responder_id)} 
-                              className="btn btn-secondary btn-sm"
-                              style={{ color: '#f59e0b' }}
-                            >
-                              Check Out
-                            </button>
-                          )}
-                          <button 
-                            onClick={() => handleDeleteResponder(res.responder_id, res.name)} 
-                            className="btn btn-secondary btn-sm"
-                            style={{ color: '#dc2626' }}
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-        )}
-      </div>
+      {/* Modals for Editing */}
+      <AdminUserFormModal
+        isOpen={showUserModal}
+        onClose={() => setShowUserModal(false)}
+        onSave={handleSaveUser}
+        initialData={editingUser}
+        loading={loading}
+        error={error}
+        success={success}
+      />
 
-      <div className="section-card">
-        <div 
-          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', marginBottom: isTeamsExpanded ? '16px' : 0 }}
-          onClick={() => setIsTeamsExpanded(!isTeamsExpanded)}
-        >
-          <h2 style={{ margin: 0 }}>Team Management ({allTeams.length})</h2>
-          <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 700 }}>
-            {isTeamsExpanded ? 'COLLAPSE ▲' : 'EXPAND ▼'}
-          </span>
-        </div>
+      <AdminResponderFormModal
+        isOpen={showResponderModal}
+        onClose={() => setShowResponderModal(false)}
+        onSave={handleSaveResponder}
+        initialData={editingResponder}
+        loading={loading}
+        error={error}
+      />
 
-        {isTeamsExpanded && (
-          <div className="operations-table-wrapper" style={{ boxShadow: 'none', border: '1px solid #eee' }}>
-            <table className="operations-table" style={{ minWidth: 'auto' }}>
-              <thead>
-                <tr>
-                  <th>Team Name</th>
-                  <th>Type</th>
-                  <th>Incident / OP</th>
-                  <th>Status</th>
-                  <th style={{ textAlign: 'right' }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {allTeams.length === 0 ? (
-                  <tr>
-                    <td colSpan="5" className="empty-row">No teams found in database.</td>
-                  </tr>
-                ) : (
-                  allTeams.map(team => {
-                    const incident = team.operational_periods?.incidents;
-                    const opNum = team.operational_periods?.op_number;
-                    const isDisbanded = team.status === 'Disbanded';
-                    
-                    return (
-                      <tr key={team.team_id}>
-                        <td>
-                          <div style={{ fontWeight: 600 }}>{team.team_name_number}</div>
-                        </td>
-                        <td>{team.type}</td>
-                        <td>
-                          {incident ? (
-                            <>
-                              <div>{incident.name}</div>
-                              <div style={{ fontSize: '11px', color: '#64748b' }}>OP #{opNum}</div>
-                            </>
-                          ) : '—'}
-                        </td>
-                        <td>
-                          <span className={`status-indicator ${team.status.toLowerCase()}`}>
-                            {team.status}
-                          </span>
-                        </td>
-                        <td style={{ textAlign: 'right' }}>
-                          <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                            {team.status !== 'Disbanded' && ( // Only show if not already disbanded
-                              <button onClick={() => handleDisbandTeam(team.team_id, team.team_name_number, team.type)} className="btn btn-secondary btn-sm" style={{ color: '#f59e0b' }}>Disband</button>
-                            )}
-                            <button onClick={() => handleDeleteTeam(team.team_id, team.team_name_number, team.type)} className="btn btn-secondary btn-sm" style={{ color: '#dc2626' }}>Delete</button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      <AdminTeamFormModal
+        isOpen={showTeamModal}
+        onClose={() => setShowTeamModal(false)}
+        onSave={handleSaveTeam}
+        initialData={editingTeam}
+        loading={loading}
+        error={error}
+        responders={allResponders} // Pass all responders for leader selection
+      />
 
-      <div className="section-card">
-        <div 
-          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', marginBottom: isAssignmentsExpanded ? '16px' : 0 }}
-          onClick={() => setIsAssignmentsExpanded(!isAssignmentsExpanded)}
-        >
-          <h2 style={{ margin: 0 }}>Assignment Management ({allAssignments.length})</h2>
-          <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 700 }}>
-            {isAssignmentsExpanded ? 'COLLAPSE ▲' : 'EXPAND ▼'}
-          </span>
-        </div>
+      <AdminAssignmentFormModal
+        isOpen={showAssignmentModal}
+        onClose={() => setShowAssignmentModal(false)}
+        onSave={handleSaveAssignment}
+        initialData={editingAssignment}
+        loading={loading}
+        error={error}
+      />
 
-        {isAssignmentsExpanded && (
-          <div className="operations-table-wrapper" style={{ boxShadow: 'none', border: '1px solid #eee' }}>
-            <table className="operations-table" style={{ minWidth: 'auto' }}>
-              <thead>
-                <tr>
-                  <th>Assignment Name</th>
-                  <th>Type</th>
-                  <th>Incident / OP</th>
-                  <th>Status</th>
-                  <th style={{ textAlign: 'right' }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {allAssignments.length === 0 ? (
-                  <tr>
-                    <td colSpan="5" className="empty-row">No assignments found in database.</td>
-                  </tr>
-                ) : (
-                  allAssignments.map(asn => {
-                    const opPeriod = asn.operational_periods;
-                    const opNum = opPeriod?.op_number;
-                    
-                    // Manually find incident details from the already fetched allIncidents list
-                    // This makes the display more robust against broken nested FKs
-                    const incident = opPeriod?.incident_id 
-                      ? allIncidents.find(inc => inc.incident_id === opPeriod.incident_id)
-                      : null;
-                    
-                    const incidentName = incident?.name;
-                    const incidentNumber = incident?.number;
-                    
-                    return (
-                      <tr key={asn.assignment_id || `asn-${index}`}>
-                        <td>
-                          <div style={{ fontWeight: 600 }}>{asn.title}</div>
-                          <div style={{ fontSize: '11px', color: '#64748b' }}>
-                            {asn.segment ? `Seg: ${asn.segment}` : 'No Segment'}
-                          </div>
-                        </td>
-                        <td>{asn.resource_type || '—'}</td>
-                        <td>
-                          {incidentName ? (
-                            <>
-                              <div>{incidentName}</div>
-                              <div style={{ fontSize: '11px', color: '#64748b' }}>OP #{opNum} ({incidentNumber})</div>
-                            </>
-                          ) : '—'}
-                        </td>
-                        <td>
-                          <span className={`status-indicator ${asn.status.toLowerCase()}`}>
-                            {asn.status}
-                          </span>
-                        </td>
-                        <td style={{ textAlign: 'right' }}>
-                          <button 
-                            onClick={() => handleDeleteAssignment(asn.assignment_id, asn.title, asn.resource_type)} 
-                            className="btn btn-secondary btn-sm" 
-                            style={{ color: '#dc2626' }}
-                          >
-                            Delete
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      <div className="section-card">
-        <div 
-          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', marginBottom: isIncidentsExpanded ? '16px' : 0 }}
-          onClick={() => setIsIncidentsExpanded(!isIncidentsExpanded)}
-        >
-          <h2 style={{ margin: 0 }}>Incident Management ({allIncidents.length})</h2>
-          <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 700 }}>
-            {isIncidentsExpanded ? 'COLLAPSE ▲' : 'EXPAND ▼'}
-          </span>
-        </div>
-        {isIncidentsExpanded && (
-          <div className="operations-table-wrapper" style={{ boxShadow: 'none', border: '1px solid #eee' }}>
-          <table className="operations-table" style={{ minWidth: 'auto' }}>
-            <thead>
-              <tr>
-                <th>Incident Name</th>
-                <th>Started</th>
-                <th>Latest OP / Start</th>
-                <th>Status</th>
-                <th style={{ textAlign: 'right' }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {allIncidents.length === 0 ? (
-                <tr>
-                  <td colSpan="5" className="empty-row">No incidents found in database.</td>
-                </tr>
-              ) : (
-                allIncidents.map(inc => {
-                  const isActive = !inc.end_datetime;
-                  const latestOpObj = inc.operational_periods?.sort((a, b) => 
-                    new Date(b.start_datetime) - new Date(a.start_datetime)
-                  )[0];
-                  const latestOpNumber = latestOpObj?.op_number || '—';
-                  const latestOpStart = latestOpObj?.start_datetime ? new Date(latestOpObj.start_datetime).toLocaleString() : '';
-
-                  return (
-                    <tr key={inc.incident_id}>
-                      <td>
-                        <div style={{ fontWeight: 600 }}>{inc.name}</div>
-                        <div style={{ fontSize: '12px', color: '#64748b' }}>#{inc.number}</div>
-                      </td>
-                      <td>{new Date(inc.start_datetime).toLocaleDateString()}</td>
-                      <td>
-                        <div>{latestOpNumber}</div>
-                        {latestOpStart && <div style={{ fontSize: '12px', color: '#64748b' }}>{latestOpStart}</div>}
-                      </td>
-                      <td>
-                        <span className={`status-indicator ${isActive ? 'active' : 'ended'}`}>
-                          {isActive ? 'Active' : 'Ended'}
-                        </span>
-                      </td>
-                      <td style={{ textAlign: 'right' }}>
-                        {isActive ? (
-                          <button 
-                            onClick={() => handleEndIncident(inc.incident_id)} 
-                            className="btn btn-secondary btn-sm"
-                            style={{ color: '#f59e0b' }}
-                          >
-                            End Incident
-                          </button>
-                        ) : (
-                          <button 
-                            onClick={() => handleDeleteIncident(inc.incident_id, inc.name)} 
-                            className="btn btn-secondary btn-sm"
-                            style={{ color: '#dc2626' }}
-                          >
-                            Delete
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-        )}
-      </div>
+      <AdminIncidentFormModal
+        isOpen={showIncidentModal}
+        onClose={() => setShowIncidentModal(false)}
+        onSave={handleSaveIncident}
+        initialData={editingIncident}
+        loading={loading}
+        error={error}
+      />
     </div>
   );
 };

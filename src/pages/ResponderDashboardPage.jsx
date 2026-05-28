@@ -25,8 +25,6 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     currentAssignmentStatus,
     setCurrentTeamStatus,
     setCurrentAssignmentStatus,
-    showGlobalMap,
-    setShowGlobalMap,
     responderRefreshInterval,
     startIncident
   } = useIncident();
@@ -170,14 +168,11 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
 
       try {
         const [incRes, opRes] = await Promise.all([
-          supabase.from('incidents').select('notes, sartopo_id, show_map').eq('incident_id', incidentId).maybeSingle(),
-          supabase.from('operational_periods').select('situation_narrative, situational_awareness_narrative, par_check_interval').eq('op_period_id', incidentData.opPeriodId).maybeSingle()
+          supabase.from('incidents').select('notes, sartopo_id').eq('incident_id', incidentId).maybeSingle(),
+          supabase.from('operational_periods').select('situation_narrative, situational_awareness_narrative, par_check_interval').eq('op_period_id', incidentData.opPeriodId).maybeSingle() // Removed show_map
         ]);
 
-        if (incRes.data || opRes.data) {
-          if (incRes.data?.show_map !== undefined && incRes.data.show_map !== showGlobalMap) {
-            setShowGlobalMap(incRes.data.show_map);
-          }
+        if (incRes.data || opRes.data) { // Removed show_map logic
           setNarratives({
             incidentNotes: incRes.data?.notes || '',
             opObjective: opRes.data?.situation_narrative || '',
@@ -349,7 +344,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     
     const interval = setInterval(() => {
       refreshAllData();
-    }, responderRefreshInterval || 60000);
+    }, responderRefreshInterval || 30000);
 
     return () => clearInterval(interval);
   }, [responderId, refreshAllData, responderRefreshInterval]);
@@ -937,32 +932,6 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       )}
         </div>
 
-        {/* Right Map Panel */}
-        {showGlobalMap && (
-          <div style={{ flex: 1, minWidth: '400px' }}>
-          <div className="dashboard-section" style={{ padding: '12px 16px' }}>
-            <h2 style={{ margin: 0, fontSize: '18px', marginBottom: '12px' }}>Operational Map</h2>
-            <div style={{ 
-                borderRadius: '12px', 
-                overflow: 'hidden', 
-                border: '1px solid #cbd5e1', 
-                boxShadow: '0 6px 22px rgba(0, 0, 0, 0.04)', 
-                background: '#fff', 
-                height: '650px', 
-                position: 'relative',
-                marginTop: '12px'
-              }}>
-                <OperationsMap 
-                  loading={loading} 
-                  assignments={assignment ? [assignment] : []} 
-                  teams={team ? [team] : []} 
-                  sartopoId={sartopoId} 
-                  layoutMode="map" // Always 'map' layout when shown here
-                />
-            </div>
-          </div>
-          </div>
-        )}
       </div>
     </div>
   );
