@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useIncident } from '../context/IncidentContext';
@@ -6,9 +6,9 @@ import { v4 as uuidv4 } from 'uuid';
 import '../styles/IncidentEditPage.css'; // Reusing form styles for consistency
 import { usePlanningDashboard } from '../hooks/usePlanningDashboard'; // Import usePlanningDashboard
 import { 
-  OPERATIONS_REFRESH_INTERVAL, setOperationsRefreshInterval,
-  RESPONDER_REFRESH_INTERVAL, setResponderRefreshInterval,
-  SARTOPO_REFRESH_INTERVAL, setSartopoRefreshInterval
+  OPERATIONS_REFRESH_INTERVAL,
+  RESPONDER_REFRESH_INTERVAL,
+  SARTOPO_REFRESH_INTERVAL
 } from '../components/operationalConstants';
 import AdminUserFormModal from '../components/admin/AdminUserFormModal';
 import AdminResponderFormModal from '../components/admin/AdminResponderFormModal';
@@ -25,8 +25,9 @@ import AdminIncidentsTable from '../components/admin/AdminIncidentsTable';
 const AdminPage = () => {
   const navigate = useNavigate();
   const { 
-    isAdmin, setIsAdmin, incidentId, responderId, endIncident, logout,
-    setOperationsRefreshInterval, setResponderRefreshInterval, setSartopoRefreshInterval
+    isAdmin, setIsAdmin, incidentId, responderId, endIncident, logout, startIncident,
+    setResponderId, setResponderName, setResponderStatus, setAccessLevel,
+    setOperationsRefreshInterval: setOpsRate, setResponderRefreshInterval: setResRate, setSartopoRefreshInterval: setTopoRate
   } = useIncident();
   const [users, setUsers] = useState([]);
   const [fetching, setFetching] = useState(false);
@@ -69,7 +70,14 @@ const AdminPage = () => {
   const [showIncidentModal, setShowIncidentModal] = useState(false);
   const [editingIncident, setEditingIncident] = useState(null);
 
-  const fetchUsers = async () => {
+  // Authentication Gate: Redirect to dedicated login page if not authenticated
+  useEffect(() => {
+    if (!isAdmin && !fetching) {
+      navigate('/login');
+    }
+  }, [isAdmin, fetching, navigate]);
+
+  const fetchUsers = useCallback(async () => {
     if (!isAdmin) return;
     setFetching(true);
     try {
@@ -87,9 +95,9 @@ const AdminPage = () => {
     } finally {
       setFetching(false);
     }
-  };
+  }, [isAdmin]);
 
-  const fetchAllIncidents = async () => {
+  const fetchAllIncidents = useCallback(async () => {
     if (!isAdmin) return;
     try {
       // Fetch incidents and join with operational periods to find the latest one
@@ -103,9 +111,9 @@ const AdminPage = () => {
     } catch (err) {
       console.error('Error fetching incident list:', err);
     }
-  };
+  }, [isAdmin]);
 
-  const fetchAllResponders = async () => {
+  const fetchAllResponders = useCallback(async () => {
     if (!isAdmin) return;
     try {
       const { data, error: fetchError } = await supabase
@@ -118,9 +126,9 @@ const AdminPage = () => {
     } catch (err) {
       console.error('Error fetching responders list:', err);
     }
-  };
+  }, [isAdmin]);
 
-  const fetchAllTeams = async () => {
+  const fetchAllTeams = useCallback(async () => {
     if (!isAdmin) return;
     try {
       const { data, error: fetchError } = await supabase
@@ -133,9 +141,9 @@ const AdminPage = () => {
     } catch (err) {
       console.error('Error fetching teams list:', err);
     }
-  };
+  }, [isAdmin]);
 
-  const fetchAllAssignments = async () => {
+  const fetchAllAssignments = useCallback(async () => {
     if (!isAdmin) return;
     try {
       const { data, error: fetchError } = await supabase
@@ -148,10 +156,11 @@ const AdminPage = () => {
     } catch (err) {
       console.error('Error fetching assignments list:', err);
     }
-  };
+  }, [isAdmin]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
+    localStorage.removeItem('sarops_user_email');
     logout(); // Use the global logout to clear everything
     navigate('/checkin');
   };
@@ -176,11 +185,15 @@ const AdminPage = () => {
       if (seedError) throw seedError;
 
       await recordAction?.('Admin triggered specific development data seeding (15 assignments, 31 responders).');
+      
+      // Await all refreshes to ensure UI parity
+      await Promise.all([
+        fetchAllIncidents(),
+        fetchAllResponders(),
+        fetchAllTeams(),
+        fetchAllAssignments()
+      ]);
       setSuccess('Database successfully seeded with test data.');
-      fetchAllIncidents();
-      fetchAllResponders();
-      fetchAllTeams();
-      fetchAllAssignments();
     } catch (err) {
       let userFriendlyMessage = err.message;
       // Specifically catch the "missing function" error to provide a setup hint
@@ -223,9 +236,9 @@ const AdminPage = () => {
   };
 
   const handleApplySettings = () => {
-    setOperationsRefreshInterval(opRefresh * 1000);
-    setResponderRefreshInterval(resRefresh * 1000);
-    setSartopoRefreshInterval(sartopoRefresh * 1000);
+    setOpsRate(opRefresh * 1000);
+    setResRate(resRefresh * 1000);
+    setTopoRate(sartopoRefresh * 1000);
     setAppliedSettings({
       op: opRefresh,
       res: resRefresh,
@@ -242,7 +255,7 @@ const AdminPage = () => {
       fetchAllTeams();
       fetchAllAssignments();
     }
-  }, [isAdmin]);
+  }, [isAdmin, fetchUsers, fetchAllIncidents, fetchAllResponders, fetchAllTeams, fetchAllAssignments]);
 
   const handleSaveUser = async (formData) => {
     setLoading(true);
@@ -282,7 +295,7 @@ const AdminPage = () => {
         if (insertError) throw insertError;
         setSuccess(`User ${formData.email} added successfully.`);
       }
-      fetchUsers();
+      await fetchUsers();
     } catch (err) {
       setError(err.message || 'Failed to save user.');
     } finally {
@@ -328,7 +341,7 @@ const AdminPage = () => {
         if (insertError) throw insertError;
         setSuccess(`Responder ${formData.name} added to system.`);
       }
-      fetchAllResponders();
+      await fetchAllResponders();
     } catch (err) {
       setError(err.message || 'Failed to save responder.');
     } finally {
@@ -372,7 +385,7 @@ const AdminPage = () => {
         if (insertError) throw insertError;
         setSuccess(`Team ${formData.team_name_number} created.`);
       }
-      fetchAllTeams();
+      await fetchAllTeams();
     } catch (err) {
       setError(err.message || 'Failed to save team.');
     } finally {
@@ -404,7 +417,7 @@ const AdminPage = () => {
       await recordAction?.(`Admin checked out responder "${responder?.name || 'Unknown'}" (ID: ${id}). Fields modified: status="CheckedOut", checkout_datetime="${now}".`);
 
       setSuccess('Responder checked out.');
-      fetchAllResponders();
+      await fetchAllResponders();
     } catch (err) {
       setError('Failed to check out responder: ' + err.message);
     }
@@ -429,9 +442,13 @@ const AdminPage = () => {
       if (updateError) throw updateError;
 
       await recordAction?.(`Admin disbanded team "${name}" (ID: ${id}, Type: ${type}). Fields modified: status="Disbanded", last_par_check=null. Automated trigger: All members released to "Staged".`);
+      
+      // Await refreshes since responder status is affected by the disband trigger
+      await Promise.all([
+        fetchAllTeams(),
+        fetchAllResponders()
+      ]);
       setSuccess('Team disbanded.');
-      fetchAllTeams();
-      fetchAllResponders(); // Refresh responders as their status changed
     } catch (err) {
       setError('Failed to disband team: ' + err.message);
     } finally {
@@ -464,7 +481,7 @@ const AdminPage = () => {
 
       await recordAction?.(`Admin deleted team "${name}" (ID: ${id}, Type: ${type}).`);
       setSuccess('Team record deleted.');
-      fetchAllTeams();
+      await fetchAllTeams();
     } catch (err) {
       setError('Failed to delete team: ' + err.message);
     }
@@ -483,7 +500,7 @@ const AdminPage = () => {
 
       await recordAction?.(`Admin deleted assignment "${name}" (ID: ${id}, Type: ${type}).`);
       setSuccess('Assignment record deleted.');
-      fetchAllAssignments();
+      await fetchAllAssignments();
     } catch (err) {
       setError('Failed to delete assignment: ' + err.message);
     }
@@ -507,7 +524,7 @@ const AdminPage = () => {
 
       await recordAction?.(`Admin deleted responder "${name}" (ID: ${id}, Agency: ${agency}).`);
       setSuccess('Responder record deleted.');
-      fetchAllResponders();
+      await fetchAllResponders();
     } catch (err) {
       setError('Failed to delete responder: ' + err.message);
     }
@@ -579,11 +596,14 @@ const AdminPage = () => {
       }
 
       setSuccess('Incident ended and resources cleaned up.');
-      // Refresh all management views
-      fetchAllIncidents();
-      fetchAllResponders();
-      fetchAllTeams();
-      fetchAllAssignments();
+      
+      // Refresh all management views simultaneously
+      await Promise.all([
+        fetchAllIncidents(),
+        fetchAllResponders(),
+        fetchAllTeams(),
+        fetchAllAssignments()
+      ]);
     } catch (err) {
       setError('Failed to end incident: ' + err.message);
     } finally {
@@ -632,7 +652,7 @@ const AdminPage = () => {
         if (insertError) throw insertError;
         setSuccess(`Assignment ${formData.title} created.`);
       }
-      fetchAllAssignments();
+      await fetchAllAssignments();
     } catch (err) {
       setError(err.message || 'Failed to save assignment.');
     } finally {
@@ -666,7 +686,7 @@ const AdminPage = () => {
         await supabase.from('operational_periods').insert({ op_period_id: uuidv4(), incident_id: inc_id, op_number: 1, start_datetime: formData.start_datetime, situation_narrative: 'Incident started.' });
         setSuccess(`Incident ${formData.name} created successfully.`);
       }
-      fetchAllIncidents();
+      await fetchAllIncidents();
     } catch (err) {
       setError(err.message || 'Failed to save incident.');
     } finally {
@@ -701,11 +721,13 @@ const AdminPage = () => {
 
       setSuccess('Incident and all associated data deleted.');
       
-      // 4. Refresh all lists to ensure UI is in sync
-      fetchAllIncidents();
-      fetchAllResponders();
-      fetchAllTeams();
-      fetchAllAssignments();
+      // 4. Await all refreshes to ensure UI is in sync
+      await Promise.all([
+        fetchAllIncidents(),
+        fetchAllResponders(),
+        fetchAllTeams(),
+        fetchAllAssignments()
+      ]);
     } catch (err) {
       setError('Failed to delete incident: ' + err.message);
     } finally {
@@ -748,10 +770,10 @@ const AdminPage = () => {
     if (!window.confirm(`Remove ${email} from system users?`)) return;
 
     try {
-      const { error: deleteError } = await supabase.rpc('user_remove', { p_email: email });
+      const { error: deleteError } = await supabase.rpc('admin_remove_user', { p_email: email });
       
       if (deleteError) throw deleteError;
-      fetchUsers();
+      await fetchUsers();
     } catch (err) {
       setError('Failed to remove user');
     }
@@ -762,10 +784,7 @@ const AdminPage = () => {
     setShowUserModal(true);
   };
 
-  // Show login form if not authenticated
-  if (!isAdmin) {
-    return <AdminLogin onLoginSuccess={() => setIsAdmin(true)} />;
-  }
+  if (!isAdmin) return null;
 
   return (
     <div className="incident-edit-page">

@@ -139,7 +139,7 @@ function App() {
   // Navigation Guard: Redirect to check-in if trying to access operational pages without a session
   useEffect(() => {
     // Added /incident and /qrcodes to public paths so anonymous users can start incidents
-    const publicPaths = ['/', '/checkin', '/admin', '/incident', '/qrcodes'];
+    const publicPaths = ['/', '/checkin', '/admin', '/incident', '/qrcodes', '/login'];
     
     if (!isActive && !isAdmin && !publicPaths.includes(location.pathname)) {
       console.warn(`[App Guard] Unauthorized access attempt to ${location.pathname}. Redirecting to /checkin.`, {
@@ -152,6 +152,7 @@ function App() {
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
+    localStorage.removeItem('sarops_user_email');
     logout();
     setMenuOpen(false);
     navigate('/checkin');
@@ -206,6 +207,7 @@ function App() {
                   <Link to="/planning" onClick={() => setMenuOpen(false)}>Planning</Link>
                   <Link to="/checkin" onClick={() => setMenuOpen(false)}>Check-in</Link>
                   <Link to="/incident" onClick={() => setMenuOpen(false)}>Incident</Link>
+                  <Link to="/settings" onClick={() => setMenuOpen(false)}>Settings</Link>
                   <Link to="/admin" onClick={() => setMenuOpen(false)}>Administration</Link>
                   <Link to="/ics" onClick={() => setMenuOpen(false)}>ICS Chart</Link>
                   <Link to="/action-log" onClick={() => setMenuOpen(false)}>Action Log</Link>

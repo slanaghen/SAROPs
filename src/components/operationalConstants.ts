@@ -15,6 +15,12 @@ export const SKILLS_LIST = [
   "Litter", "Medical", "Other"
 ];
 
+export const RESPONDER_TYPES = ["SAR", "Fire", "Law", "Medical"];
+
+export const RESPONDER_STATUS_LIST = ["Staged", "Attached", "Assigned", "Deployed", "CheckedOut"];
+
+export const ACCESS_LEVELS = ["responder", "staff", "admin"];
+
 export const STAFF_PREDEFINED_ROLES = [
   'Incident Commander', 'Operations', 'Planning', 
   'Logistics', 'PIO', 'Safety', 'Liaison', 'Admin / Finance'

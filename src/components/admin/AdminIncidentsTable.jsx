@@ -75,7 +75,7 @@ const AdminIncidentsTable = ({
                       </td>
                       <td style={{ textAlign: 'right' }}>
                         <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                          {/* Incidents are typically edited via a dedicated IncidentEditPage, not directly in a modal here */}
+                          <button onClick={() => handleEditIncident(inc)} className="btn btn-secondary btn-sm">Edit</button>
                           {isActive && (
                             <button
                               onClick={() => handleEndIncident(inc.incident_id)}

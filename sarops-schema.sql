@@ -902,10 +902,10 @@ CREATE POLICY "Allow all authenticated to view user list" ON users
 -- passwords are encrypted correctly using pgcrypto.
 
 -- Ensure clean replacement for function overloading
-DROP FUNCTION IF EXISTS user_add(TEXT, TEXT, TEXT);
-DROP FUNCTION IF EXISTS user_add(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT);
+DROP FUNCTION IF EXISTS admin_add_user(TEXT, TEXT, TEXT);
+DROP FUNCTION IF EXISTS admin_add_user(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT);
 
-CREATE OR REPLACE FUNCTION user_add(
+CREATE OR REPLACE FUNCTION admin_add_user(
   p_email TEXT, 
   p_username TEXT, 
   p_password TEXT, 
@@ -943,18 +943,18 @@ BEGIN
 END;
 $func$ LANGUAGE plpgsql SECURITY DEFINER;
 
-DROP FUNCTION IF EXISTS user_remove(TEXT);
+DROP FUNCTION IF EXISTS admin_remove_user(TEXT);
 
-CREATE OR REPLACE FUNCTION user_remove(p_email TEXT)
+CREATE OR REPLACE FUNCTION admin_remove_user(p_email TEXT)
 RETURNS VOID AS $func$
 BEGIN
   DELETE FROM users WHERE email = LOWER(p_email);
 END;
 $func$ LANGUAGE plpgsql SECURITY DEFINER;
 
-DROP FUNCTION IF EXISTS user_update_password(TEXT, TEXT);
+DROP FUNCTION IF EXISTS admin_update_password(TEXT, TEXT);
 
-CREATE OR REPLACE FUNCTION user_update_password(p_email TEXT, p_password TEXT)
+CREATE OR REPLACE FUNCTION admin_update_password(p_email TEXT, p_password TEXT)
 RETURNS VOID AS $func$
 BEGIN
   UPDATE users 
@@ -1568,14 +1568,18 @@ BEGIN
     END;
     $func$ LANGUAGE plpgsql STABLE SECURITY DEFINER;';
 
+    EXECUTE 'DROP FUNCTION IF EXISTS verify_admin_login(TEXT, TEXT);';
     EXECUTE 'DROP FUNCTION IF EXISTS verify_user_login(TEXT, TEXT);';
 
     EXECUTE 'CREATE OR REPLACE FUNCTION verify_user_login(p_email TEXT, p_password TEXT)
     RETURNS SETOF users AS $func$
+    -- This function authenticates ANY user from the ''users'' table,
+    -- regardless of their ''access_level''. Subsequent application logic
+    -- determines what they can access based on their access_level.
     BEGIN
       RETURN QUERY
       SELECT * FROM users
-      WHERE email = LOWER(p_email)
+      WHERE (LOWER(email) = LOWER(p_email) OR LOWER(username) = LOWER(p_email))
         AND (password = p_password OR password = crypt(p_password, password));
     END;
     $func$ LANGUAGE plpgsql SECURITY DEFINER;';
@@ -1708,7 +1712,7 @@ BEGIN
     EXECUTE 'CREATE POLICY "Allow staff to view user list" ON users
       FOR SELECT TO authenticated USING (check_is_operational_staff());';
 
-    EXECUTE 'CREATE OR REPLACE FUNCTION user_add(
+    EXECUTE 'CREATE OR REPLACE FUNCTION admin_add_user(
       p_email TEXT, 
       p_username TEXT, 
       p_password TEXT, 
@@ -1733,14 +1737,14 @@ BEGIN
     END;
     $func$ LANGUAGE plpgsql SECURITY DEFINER;';
 
-    EXECUTE 'CREATE OR REPLACE FUNCTION user_remove(p_email TEXT)
+    EXECUTE 'CREATE OR REPLACE FUNCTION admin_remove_user(p_email TEXT)
     RETURNS VOID AS $func$
     BEGIN
       DELETE FROM users WHERE email = LOWER(p_email);
     END;
     $func$ LANGUAGE plpgsql SECURITY DEFINER;';
 
-    EXECUTE 'CREATE OR REPLACE FUNCTION user_update_password(p_email TEXT, p_password TEXT)
+    EXECUTE 'CREATE OR REPLACE FUNCTION admin_update_password(p_email TEXT, p_password TEXT)
     RETURNS VOID AS $func$
     BEGIN
       UPDATE users
@@ -1756,19 +1760,36 @@ BEGIN
         FROM users_temp_backup ON CONFLICT (email) DO NOTHING';
         EXECUTE 'DROP TABLE users_temp_backup';
     END IF;
+
+    -- Re-apply grants inside the re-initialization block to ensure API access persists
+    EXECUTE 'GRANT EXECUTE ON FUNCTION admin_add_user(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated;';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION admin_remove_user TO authenticated;';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION admin_update_password TO authenticated;';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION verify_user_login TO anon, authenticated;';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION reinitialize_database TO authenticated;';
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Grant execute permissions to ensure functions are visible to the API
-GRANT EXECUTE ON FUNCTION user_add(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated;
-GRANT EXECUTE ON FUNCTION user_remove TO authenticated;
-GRANT EXECUTE ON FUNCTION user_update_password TO authenticated;
+GRANT EXECUTE ON FUNCTION admin_add_user(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION admin_remove_user TO authenticated;
+GRANT EXECUTE ON FUNCTION admin_update_password TO authenticated;
 GRANT EXECUTE ON FUNCTION verify_user_login TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION reinitialize_database TO authenticated;
 
 -- ============================================================================
 -- INITIAL DATA SEEDING (FOR DEVELOPMENT/FIRST-TIME SETUP)
 -- ============================================================================
--- Add a default admin user for initial access
-INSERT INTO admin_users (email, username, password) VALUES ('slanaghen@gmail.com', 'slanaghen@gmail.com', crypt('grigware', gen_salt('bf'))) ON CONFLICT (email) DO NOTHING;
-INSERT INTO users (email, username, password, access_level, name, agency, identifier, cell_phone, responder_type, special_skills) VALUES ('slanaghen@gmail.com', 'slanaghen@gmail.com', crypt('grigware', gen_salt('bf') ), 'admin', 'Steve Lanaghen', 'SAROps', 'SL-001', '303-555-1234', 'SAR', 'Leadership, Communication') ON CONFLICT (email) DO NOTHING;
+INSERT INTO users (email, username, password, access_level, name, agency, identifier, cell_phone, responder_type, special_skills) 
+VALUES (
+  'slanaghen@gmail.com', 
+  'slanaghen@gmail.com', 
+  crypt('grigware', gen_salt('bf')), 
+  'admin', 
+  'Steve Lanaghen', 
+  'SAROps', 
+  'SL-001', 
+  '303-555-1234', 
+  'SAR', 
+  'Leadership, Communication'
+) ON CONFLICT (email) DO NOTHING;

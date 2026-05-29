@@ -9,12 +9,14 @@ import CheckOutPage from './pages/CheckOutPage';
 import ResponderDashboardPage from './pages/ResponderDashboardPage';
 import AdminPage from './pages/AdminPage';
 import ActionLogPage from './pages/ActionLogPage';
+import LoginPage from './pages/LoginPage';
 import ErrorPage from './components/ErrorPage';
 import ICSAssignmentPage from './pages/ICSAssignmentPage';
 import SARTopoDataPage from './pages/SARTopoDataPage';
 import QRCodesPage from './pages/QRCodesPage';
 import PDFsPage from './pages/PDFsPage';
 import GoogleICSFormsPage from './pages/GoogleICSFormsPage';
+import SettingsPage from './pages/SettingsPage';
 import { IncidentProvider, useIncident } from './context/IncidentContext';
 
 const OperationsDashboardPage = lazy(() => import('./pages/OperationsDashboardPage'));
@@ -33,6 +35,7 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <ResponderCheckinPage /> },
       { path: "checkin", element: <ResponderCheckinPage /> },
+      { path: "login", element: <LoginPage /> },
       { path: "checkout", element: <CheckOutPage /> },
       { path: "planning", element: <PlanningDashboardPage /> },
       { 
@@ -50,6 +53,7 @@ const router = createBrowserRouter([
       { path: "responder", element: <ResponderDashboardPage /> },
       { path: "incident", element: <IncidentEditPage /> },
       { path: "admin", element: <AdminPage /> },
+      { path: "settings", element: <SettingsPage /> },
       { path: "action-log", element: <ActionLogPage /> },
       { path: "qrcodes", element: <QRCodesPage /> },
       { path: "sartopo", element: <SARTopoDataPage /> },

@@ -7,6 +7,12 @@ import { useIncident } from '../context/IncidentContext';
 import { usePlanningDashboard } from '../hooks/usePlanningDashboard';
 import { supabase } from '../lib/supabase'; // Import the actual supabase object to mock it
 
+const mockNavigate = vi.fn();
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual('react-router-dom');
+  return { ...actual, useNavigate: () => mockNavigate };
+});
+
 expect.extend(matchers);
 
 vi.mock('../context/IncidentContext', () => ({
@@ -42,7 +48,10 @@ afterEach(() => {
 
 describe('AdminPage Authentication Gate', () => {
   beforeEach(() => {
-    vi.resetAllMocks();
+    vi.clearAllMocks();
+    // Re-establish default mock implementations that are lost when implementations are overridden in individual tests.
+    supabase.from.mockImplementation(() => globalThis.createSupabaseQueryMock([]));
+    supabase.rpc.mockImplementation(() => globalThis.createSupabaseQueryMock(null));
     vi.useRealTimers();
     // Set default mock for useIncident for tests that don't override it
     vi.mocked(useIncident).mockReturnValue({
@@ -64,54 +73,18 @@ describe('AdminPage Authentication Gate', () => {
     });
   });
 
-  it('renders the login form if the user is not an admin', () => {
+  it('redirects to the login page if the user is not an admin', async () => {
     render(
       <BrowserRouter>
         <AdminPage />
       </BrowserRouter>
     );
 
-    expect(screen.getByText(/System Administration/i)).toBeInTheDocument();
-    expect(screen.getByPlaceholderText(/admin@agency.gov/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Login/i })).toBeInTheDocument();
-  });
-
-  it('should log in successfully as an administrator', async () => {
-    const mockSetIsAdmin = vi.fn();
-    vi.mocked(useIncident).mockReturnValue({
-      isAdmin: false,
-      setIsAdmin: mockSetIsAdmin,
-      logout: vi.fn(),
-      responderId: null,
-      incidentId: null,
-      incidentData: { name: '', opNumber: '', opPeriodId: '' },
-      operationsRefreshInterval: 30000,
-      setOperationsRefreshInterval: vi.fn(),
-      responderRefreshInterval: 30000,
-      setResponderRefreshInterval: vi.fn(),
-      sartopoRefreshInterval: 30000,
-      setSartopoRefreshInterval: vi.fn(),
-    });
-
-    // Mock RPC result for successful login
-    supabase.rpc.mockReturnValue(globalThis.createSupabaseQueryMock({ 
-      email: 'admin@test.com', 
-      username: 'Admin' 
-    }));
-
-    render(<BrowserRouter><AdminPage /></BrowserRouter>);
-
-    fireEvent.change(screen.getByPlaceholderText(/admin@agency.gov/i), { target: { value: 'admin@test.com' } });
-    fireEvent.change(screen.getByPlaceholderText(/••••••••/i), { target: { value: 'password123' } });
-    fireEvent.click(screen.getByRole('button', { name: /Login/i }));
-
     await waitFor(() => {
-      expect(supabase.rpc).toHaveBeenCalledWith('verify_admin_login', {
-        p_email: 'admin@test.com',
-        p_password: 'password123'
-      });
-      expect(mockSetIsAdmin).toHaveBeenCalledWith(true);
+      expect(mockNavigate).toHaveBeenCalledWith('/login');
     });
+    
+    expect(screen.queryByText(/SAROPs Login/i)).not.toBeInTheDocument();
   });
 
   it('renders management tables when the user is an admin', async () => {
@@ -136,14 +109,9 @@ describe('AdminPage Authentication Gate', () => {
     const mockUser = { email: 'user@example.com', username: 'SystemUser', access_level: 'responder', name: 'Test User' };
     
     supabase.from.mockImplementation((table) => {
-      let data = [];
-      if (table === 'incidents') data = [mockIncident];
-      if (table === 'users') data = [mockUser]; // Mock users fetch
-      return {
-        select: vi.fn().mockReturnThis(),
-        order: vi.fn().mockReturnThis(),
-        then: (onFulfilled) => Promise.resolve({ data, error: null }).then(onFulfilled)
-      };
+      if (table === 'incidents') return globalThis.createSupabaseQueryMock([mockIncident]);
+      if (table === 'users') return globalThis.createSupabaseQueryMock([mockUser]);
+      return globalThis.createSupabaseQueryMock([]);
     });
 
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
@@ -212,7 +180,9 @@ describe('AdminPage Authentication Gate', () => {
     });
 
     supabase.from.mockImplementation((table) => {
-      if (table === 'users') return globalThis.createSupabaseQueryMock([mockUserToEdit]);
+      if (table === 'users') return globalThis.createSupabaseQueryMock([mockUserToEdit]); // Initial fetch
+      // Return an empty query mock for other tables (like 'incidents' in AdminLogin) 
+      // to prevent "undefined" errors during component mounting.
       return globalThis.createSupabaseQueryMock([]);
     });
 
@@ -320,16 +290,14 @@ describe('AdminPage Authentication Gate', () => {
     };
 
     const mockDelete = vi.fn().mockReturnThis();
-    // Mock the supabase.from chain for fetching incidents and the delete operation
     supabase.from.mockImplementation((table) => {
-      const query = {
-        select: vi.fn().mockReturnThis(),
-        order: vi.fn().mockReturnThis(),
-        delete: mockDelete,
-        eq: vi.fn().mockResolvedValue({ error: null }), // Mock the delete operation
-        then: (onFulfilled) => Promise.resolve({ data: table === 'incidents' ? [mockIncident] : [], error: null }).then(onFulfilled)
-      };
-      return query;
+      if (table === 'incidents') {
+        const mock = globalThis.createSupabaseQueryMock([mockIncident]);
+        mock.delete = mockDelete;
+        mock.eq = vi.fn().mockResolvedValue({ error: null });
+        return mock;
+      }
+      return globalThis.createSupabaseQueryMock([]);
     });
 
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
@@ -418,7 +386,7 @@ describe('AdminPage Authentication Gate', () => {
     });
     supabase.rpc.mockResolvedValue({ error: null });
     supabase.from.mockImplementation((table) => {
-      if (table === 'users') return globalThis.createSupabaseQueryMock([mockUserToEdit]); // Initial fetch
+      if (table === 'users') return globalThis.createSupabaseQueryMock([mockUserToEdit]);
       return globalThis.createSupabaseQueryMock([]);
     });
 
@@ -710,7 +678,7 @@ describe('AdminPage Authentication Gate', () => {
     fireEvent.click(removeButtons[0]);
 
     await waitFor(() => {
-      expect(supabase.rpc).toHaveBeenCalledWith('user_remove', { p_email: 'user1@example.com' });
+      expect(supabase.rpc).toHaveBeenCalledWith('admin_remove_user', { p_email: 'user1@example.com' });
     });
   });
 

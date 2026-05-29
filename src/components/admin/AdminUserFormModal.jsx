@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import BaseModal from '../BaseModal';
 import { supabase } from '../../lib/supabase';
 
-const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, error, success }) => {
+const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, error, success, isProfileSettings = false }) => {
   const [formData, setFormData] = useState({
     email: '',
     username: '',
@@ -63,7 +63,7 @@ const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
     <BaseModal
       isOpen={isOpen}
       onClose={onClose}
-      title={isEditing ? `Edit User: ${initialData.email}` : 'Add New User'}
+      title={isProfileSettings ? 'Account Settings' : (isEditing ? `Edit User: ${initialData.email}` : 'Add New User')}
       actions={
         <button type="submit" form="user-form" className="btn btn-primary" disabled={loading}>
           {loading ? 'Saving...' : 'Save User'}
@@ -81,6 +81,16 @@ const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
             placeholder="admin@agency.gov"
             required
             disabled={isEditing} // Email cannot be changed for existing users
+          />
+        </label>
+        <label>
+          Username
+          <input
+            type="text"
+            name="username"
+            value={formData.username}
+            onChange={handleChange}
+            disabled={isEditing} // Requirement: users cannot edit their own username
           />
         </label>
         <label>
@@ -112,11 +122,12 @@ const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
         </label>
         <label>
           Access Level
-          <select name="access_level" value={formData.access_level} onChange={handleChange}>
+          <select name="access_level" value={formData.access_level} onChange={handleChange} disabled={isProfileSettings}>
             <option value="responder">Responder</option>
             <option value="staff">Staff</option>
             <option value="admin">Admin</option>
           </select>
+          {isProfileSettings && <span style={{ fontSize: '11px', color: '#64748b', display: 'block', marginTop: '4px' }}>Contact an administrator to change your permissions.</span>}
         </label>
         <label>
           Responder Type

@@ -1,5 +1,6 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { useIncident } from '../context/IncidentContext';
 
 /**
  * Navigation Component (Menu Ribbon)
@@ -9,6 +10,7 @@ import { Link, useLocation } from 'react-router-dom';
 const Navigation = () => {
   const location = useLocation();
   const path = location.pathname;
+  const { isAdmin } = useIncident();
 
   return (
     <nav className="menu-ribbon">
@@ -43,9 +45,11 @@ const Navigation = () => {
         <Link to="/pdfs" className={`nav-tab ${path === '/pdfs' ? 'active' : ''}`}>
           PDFs
         </Link>
-        <Link to="/admin" className={`nav-tab ${path === '/admin' ? 'active' : ''}`}>
-          Admin
-        </Link>
+        {isAdmin ? (
+          <Link to="/admin" className={`nav-tab ${path === '/admin' ? 'active' : ''}`}>Admin</Link>
+        ) : (
+          <Link to="/login" className={`nav-tab ${path === '/login' ? 'active' : ''}`}>Login</Link>
+        )}
       </div>
     </nav>
   );

@@ -1,19 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import BaseModal from './BaseModal';
 import { useIncident } from '../context/IncidentContext';
-
-/**
- * Constant lists for form options
- */
-const skillsList = [
-  "Air Scent Dog", "Trail Dog", "UAS", "Vehicle", "Snowmobile", "UTV", 
-  "Swiftwater", "Dive", "Avalanche", "Boat", "Helicopter", "Rope Rescue", 
-  "Litter", "Medical", "Other"
-];
-const RESPONDER_TYPES = ["SAR", "Fire", "Law", "Medical"];
-const ACCESS_LEVELS = ["responder", "staff", "admin"];
-const STATUS_LIST = ["Staged", "Attached", "Assigned", "Deployed", "CheckedOut"];
-
+import { 
+  RESPONDER_TYPES, 
+  RESPONDER_STATUS_LIST, 
+  ACCESS_LEVELS, 
+  SKILLS_LIST 
+} from './operationalConstants';
 
 /**
  * Shared Modal for editing Responder details.
@@ -140,7 +133,7 @@ const ResponderFormModal = ({
           <div className="form-row">
             <label htmlFor="res_status">Status</label>
             <select id="res_status" name="status" value={formData.status || 'Staged'} onChange={handleInputChange}>
-              {STATUS_LIST.map(s => <option key={s} value={s}>{s}</option>)}
+              {RESPONDER_STATUS_LIST.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
         </div>
@@ -156,7 +149,7 @@ const ResponderFormModal = ({
             className="multi-select"
             style={{ minHeight: '120px' }}
           >
-            {skillsList.map(skill => <option key={skill} value={skill}>{skill}</option>)}
+            {SKILLS_LIST.map(skill => <option key={skill} value={skill}>{skill}</option>)}
           </select>
         </div>
       </div>
