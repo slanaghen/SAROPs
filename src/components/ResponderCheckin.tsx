@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { supabase } from '../lib/supabase';
 import { Responder, ResponderStatus, AccessLevel, ResponderType } from '../types/sarops-types';
@@ -293,11 +294,13 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
   const displayResponder = confirmationData || confirmedResponder;
 
   return (
-    <div className="responder-checkin">
-      <div className="checkin-container">
-        <div className="checkin-header">
-          <h1>Responder Check-In</h1>
-        </div>
+    <div className="checkin-container">
+      <div className="checkin-header">
+        <h1>Responder Check-In</h1>
+        <p style={{ color: 'white', fontSize: '14px', margin: '4px 0 0' }}>
+          Registered user? <Link to="/login" style={{ color: '#0ea5e9', fontWeight: 600, textDecoration: 'none' }}>Login here</Link>
+        </p>
+      </div>
 
         {/* Error Alert */}
         {displayError && (
@@ -610,7 +613,6 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
           </p>
         </div>
       </div>
-    </div>
   );
 };
 

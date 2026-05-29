@@ -16,7 +16,7 @@ import AdminResponderFormModal from '../components/admin/AdminResponderFormModal
 import AdminTeamFormModal from '../components/admin/AdminTeamFormModal';
 import AdminAssignmentFormModal from '../components/admin/AdminAssignmentFormModal';
 import AdminIncidentFormModal from '../components/admin/AdminIncidentFormModal';
-import AdminLogin from '../components/admin/AdminLogin';
+import Login from '../pages/LoginPage';
 import AdminUsersTable from '../components/admin/AdminUsersTable';
 import AdminRespondersTable from '../components/admin/AdminRespondersTable';
 import AdminTeamsTable from '../components/admin/AdminTeamsTable';
@@ -51,6 +51,7 @@ const AdminPage = () => {
     res: RESPONDER_REFRESH_INTERVAL / 1000,
     sartopo: SARTOPO_REFRESH_INTERVAL / 1000
   });
+  const [selectedActivationId, setSelectedActivationId] = useState(incidentId || '');
 
   const isSettingsDirty = opRefresh !== appliedSettings.op || 
                           resRefresh !== appliedSettings.res || 
@@ -161,6 +162,80 @@ const AdminPage = () => {
     }
   };
 
+  /**
+   * Effectively checks the current admin user into the selected incident.
+   * This establishes both the database responder record and the global
+   * application context for navigation and monitoring.
+   */
+  const handleActivateSession = async () => {
+    if (!selectedActivationId) return;
+
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("No active session found. Please refresh.");
+
+      const myProfile = users.find(u => u.email === session.user.email);
+      if (!myProfile) throw new Error("Could not find your system user profile in the active users list.");
+
+      const selectedInc = allIncidents.find(i => i.incident_id === selectedActivationId);
+      if (!selectedInc) throw new Error("Selected incident not found.");
+
+      const latestOp = [...(selectedInc.operational_periods || [])].sort((a, b) =>
+        (b.op_number || 0) - (a.op_number || 0)
+      )[0];
+
+      if (!latestOp) throw new Error("Selected incident has no operational periods.");
+
+      // Perform the secure check-in to establish operational identity
+      const { data: responderRecord, error: checkinError } = await supabase
+        .rpc('checkin_responder_securely', {
+          p_incident_id: selectedActivationId,
+          p_auth_uid: session.user.id,
+          p_name: myProfile.name || myProfile.username,
+          p_agency: myProfile.agency || 'Unknown',
+          p_identifier: myProfile.identifier || myProfile.username,
+          p_cell_phone: myProfile.cell_phone,
+          p_responder_type: myProfile.responder_type || 'SAR',
+          p_special_skills: myProfile.special_skills,
+          p_access_level: myProfile.access_level,
+          p_status: 'Staged',
+          p_device_id: `admin_${myProfile.email}_${selectedActivationId}`
+        })
+        .maybeSingle();
+
+      if (checkinError) throw checkinError;
+
+      const finalResponder = Array.isArray(responderRecord) ? responderRecord[0] : responderRecord;
+      if (finalResponder) {
+        setResponderId(finalResponder.responder_id);
+        setResponderName(finalResponder.name);
+        setResponderStatus(finalResponder.status);
+        setAccessLevel(finalResponder.access_level);
+      }
+
+      startIncident(
+        selectedActivationId,
+        selectedInc.name,
+        latestOp.op_number,
+        latestOp.op_period_id,
+        selectedInc.sartopo_id,
+        latestOp.par_check_interval
+      );
+
+      setSuccess(`Session activated for "${selectedInc.name}". Your responder identity has been established.`);
+      // Immediately transition to the operations view for the activated incident context
+      navigate('/operations');
+    } catch (err) {
+      setError(err.message || "Failed to activate session.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleApplySettings = () => {
     setOpsRate(opRefresh * 1000);
     setResRate(resRefresh * 1000);
@@ -263,7 +338,7 @@ const AdminPage = () => {
         if (insertError) throw insertError;
         setSuccess(`Responder ${formData.name} added to system.`);
       }
-      await fetchTable('responders');
+      await refreshDashboardData();
     } catch (err) {
       setError(err.message || 'Failed to save responder.');
     } finally {
@@ -307,11 +382,12 @@ const AdminPage = () => {
         if (insertError) throw insertError;
         setSuccess(`Team ${formData.team_name_number} created.`);
       }
-      await fetchTable('teams');
+      await refreshDashboardData();
     } catch (err) {
       setError(err.message || 'Failed to save team.');
     } finally {
       setLoading(false);
+      setEditingTeam(null);
     }
   };
 
@@ -566,11 +642,12 @@ const AdminPage = () => {
         if (insertError) throw insertError;
         setSuccess(`Assignment ${formData.title} created.`);
       }
-      await fetchTable('assignments');
+      await refreshDashboardData();
     } catch (err) {
       setError(err.message || 'Failed to save assignment.');
     } finally {
       setLoading(false);
+      setEditingAssignment(null);
     }
   };
 
@@ -707,6 +784,37 @@ const AdminPage = () => {
       </div>
 
       <div className="section-card" style={{ marginBottom: '24px' }}>
+        <h2>Incident Activation</h2>
+        <p className="subtitle" style={{ fontSize: '13px', margin: '0 0 16px' }}>
+          Select an active incident to check in as a responder and establish session context.
+        </p>
+        <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <label style={{ flex: 1, minWidth: '250px', marginBottom: 0 }}>
+            Select Incident
+            <select 
+              value={selectedActivationId} 
+              onChange={(e) => setSelectedActivationId(e.target.value)}
+            >
+              <option value="">— Select an active incident —</option>
+              {allIncidents.filter(inc => !inc.end_datetime).map(inc => (
+                <option key={inc.incident_id} value={inc.incident_id}>
+                  {inc.name} (#{inc.number})
+                </option>
+              ))}
+            </select>
+          </label>
+          <button 
+            className="btn btn-primary" 
+            onClick={handleActivateSession} 
+            disabled={loading || !selectedActivationId}
+            style={{ height: '38px' }}
+          >
+            {loading ? 'Activating...' : 'Activate Session'}
+          </button>
+        </div>
+      </div>
+
+      <div className="section-card" style={{ marginBottom: '24px' }}>
         <h2>System Settings</h2>
         <p className="subtitle" style={{ fontSize: '13px', margin: '0 0 16px' }}>Configure global refresh and polling intervals (in seconds).</p>
         <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
@@ -839,6 +947,7 @@ const AdminPage = () => {
           setEditingIncident(null);
           setShowIncidentModal(true);
         }}
+        currentIncidentId={incidentId}
       />
 
       {/* Modals for Editing */}

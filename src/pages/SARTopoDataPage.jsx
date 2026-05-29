@@ -8,7 +8,7 @@ import { SARTOPO_REFRESH_INTERVAL } from '../components/operationalConstants';
 
 const SARTopoDataPage = () => {
   const { incidentId, isActive, incidentData } = useIncident();
-  const [sartopoId, setSartopoId] = useState(null);
+  const [sartopoId, setSartopoId] = useState('CVJP9L4');
   const [features, setFeatures] = useState(null);
   const [loading, setLoading] = useState(false);
   const [lastFetchTime, setLastFetchTime] = useState(0);

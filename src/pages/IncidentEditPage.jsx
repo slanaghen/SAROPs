@@ -31,7 +31,7 @@ const getDefaultIncidentNumber = () => {
 const defaultIncident = {
   name: 'Missing Person Search',
   number: getDefaultIncidentNumber(),
-  sartopo_id: '',
+  sartopo_id: 'CVJP9L4',
   start_datetime: getCurrentLocalDatetime(),
   end_datetime: '',
   notes: '',
@@ -509,35 +509,11 @@ const IncidentEditPage = () => {
           });
 
           if (respError) throw respError;
-
-          // 2. Fetch the Staff team for auto-assignment (created via database trigger)
-          const { data: opPeriod } = await supabase
-            .from('operational_periods')
-            .select('op_period_id')
-            .eq('incident_id', incidentId)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .single();
-
-          if (opPeriod) {
-            const { data: staffTeam } = await supabase
-              .from('teams')
-              .select('team_id')
-              .eq('op_period_id', opPeriod.op_period_id)
-              .eq('type', 'Staff')
-              .single();
-
-            if (staffTeam) {
-              // 3. Attach as Incident Commander
-              await supabase.from('team_responders').insert({
-                team_id: staffTeam.team_id,
-                responder_id: responderId,
-                role: 'Incident Commander'
-              });
-              // 4. Update team leadership
-              await supabase.from('teams').update({ leader_responder_id: responderId }).eq('team_id', staffTeam.team_id);
-            }
-          }
+          
+          // NOTE: Linking the responder to the Staff team and assigning the 
+          // 'Incident Commander' role is now handled atomically by the 
+          // 'trigger_first_responder_ic_check' database trigger.
+          // This ensures compliance with sarops-status-progression.md rules.
 
           // Update global context
           if (setResponderId) setResponderId(responderId);
@@ -684,7 +660,7 @@ const IncidentEditPage = () => {
                 className="btn btn-secondary" 
                 style={{ height: '42px' }}
                 onClick={handleCreateMap}
-                disabled={isCreatingMap || isSaving}
+                disabled={isCreatingMap || isSaving || !!incident.sartopo_id?.trim()}
               >
                 {isCreatingMap ? 'Creating...' : 'Create Map'}
               </button>

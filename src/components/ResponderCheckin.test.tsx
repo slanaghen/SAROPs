@@ -1,6 +1,7 @@
 import React from 'react';
 import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
+import { MemoryRouter } from 'react-router-dom';
 import ResponderCheckin from './ResponderCheckin';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -21,11 +22,13 @@ describe('ResponderCheckin confirmation screen', () => {
     vi.mocked(getResponderByIdentifier).mockResolvedValue(null);
     const mockIncidents = [{ incident_id: 'inc-123', name: 'Test Incident', number: '2024-001' }];
     render(
-      <ResponderCheckin 
-        onCheckIn={async () => {}} 
-        incidents={mockIncidents}
-        selectedIncidentId="inc-123"
-      />
+      <MemoryRouter>
+        <ResponderCheckin 
+          onCheckIn={async () => {}} 
+          incidents={mockIncidents}
+          selectedIncidentId="inc-123"
+        />
+      </MemoryRouter>
     );
 
     fireEvent.change(screen.getByLabelText(/Full Name/i), {
@@ -62,11 +65,13 @@ describe('ResponderCheckin confirmation screen', () => {
   it('returns to edit mode when "Back to Edit" is clicked on confirmation screen', async () => {
     vi.mocked(getResponderByIdentifier).mockResolvedValue(null);
     render(
-      <ResponderCheckin 
-        onCheckIn={async () => {}} 
-        incidents={[{ incident_id: 'i1', name: 'Inc 1', number: '1' }]}
-        selectedIncidentId="i1"
-      />
+      <MemoryRouter>
+        <ResponderCheckin 
+          onCheckIn={async () => {}} 
+          incidents={[{ incident_id: 'i1', name: 'Inc 1', number: '1' }]}
+          selectedIncidentId="i1"
+        />
+      </MemoryRouter>
     );
 
     // Fill form and continue
@@ -89,11 +94,13 @@ describe('ResponderCheckin confirmation screen', () => {
   it('captures the selected responder type via radio buttons', async () => {
     const onCheckIn = vi.fn();
     render(
-      <ResponderCheckin 
-        onCheckIn={onCheckIn} 
-        incidents={[{ incident_id: 'i1', name: 'Inc 1', number: '1' }]}
-        selectedIncidentId="i1"
-      />
+      <MemoryRouter>
+        <ResponderCheckin 
+          onCheckIn={onCheckIn} 
+          incidents={[{ incident_id: 'i1', name: 'Inc 1', number: '1' }]}
+          selectedIncidentId="i1"
+        />
+      </MemoryRouter>
     );
 
     // Fill out preceding required fields to pass validation
@@ -113,10 +120,12 @@ describe('ResponderCheckin confirmation screen', () => {
 
   it('shows an error if no responder type is selected when submitting', async () => {
     render(
-      <ResponderCheckin 
-        incidents={[{ incident_id: 'i1', name: 'Inc 1', number: '1' }]}
-        selectedIncidentId="i1"
-      />
+      <MemoryRouter>
+        <ResponderCheckin 
+          incidents={[{ incident_id: 'i1', name: 'Inc 1', number: '1' }]}
+          selectedIncidentId="i1"
+        />
+      </MemoryRouter>
     );
 
     // Fill out preceding required fields to reach responder_type validation

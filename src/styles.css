@@ -202,41 +202,72 @@ article {
 }
 
 .status-indicator {
-  padding: 2px 2px;
+  padding: 2px 8px;
   border-radius: 4px;
   font-weight: 700;
   font-size: 11px;
   text-transform: uppercase;
   background: #334155;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
 }
 
-.status-indicator.staged {
+.assignment-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 11px;
+  text-transform: uppercase;
+  background: #334155;
+  gap: 4px;
+}
+
+.status-indicator.staged,
+.assignment-status.staged,
+.status-badge.staged {
   background: #1e3a8a; /* Dark Blue */
   color: white;
 }
 
-.status-indicator.responder {
+.status-indicator.responder,
+.assignment-status.responder,
+.status-badge.responder {
   background: #2563eb;
   color: #ffffff;
 }
 
-.status-indicator.staff {
+.status-indicator.staff,
+.assignment-status.staff,
+.status-badge.staff {
   background: #16a34a;
   color: #ffffff;
 }
 
-.status-indicator.admin {
+.status-indicator.admin,
+.assignment-status.admin,
+.status-badge.admin {
   background: #000000;
   color: #ffffff;
 }
 
-.status-indicator.deployed {
+.status-indicator.deployed,
+.assignment-status.deployed,
+.status-badge.deployed {
   background: #166534; /* Dark Green */
   color: white;
 }
 
 .status-indicator.completed,
-.status-indicator.disbanded {
+.status-indicator.disbanded,
+.assignment-status.completed,
+.assignment-status.disbanded,
+.status-badge.completed,
+.status-badge.disbanded {
   background: #64748b; /* Gray */
   color: white;
 }
@@ -248,13 +279,20 @@ article {
 
 .status-indicator.checkedout,
 .status-indicator.incomplete,
-.status-indicator.ended {
+.status-indicator.ended,
+.assignment-status.incomplete,
+.status-badge.checkedout,
+.status-badge.incomplete,
+.status-badge.ended {
   background: #000000;
   color: #ffffff;
 }
 
 .status-indicator.attached,
-.status-indicator.planned {
+.status-indicator.planned,
+.assignment-status.planned,
+.status-badge.attached,
+.status-badge.planned {
   background: #e2e8f0; /* Light Gray */
   color: #111827; /* Black */
 }
@@ -271,7 +309,9 @@ article {
   border-color: #16a34a !important;
 }
 
-.status-indicator.assigned {
+.status-indicator.assigned,
+.assignment-status.assigned,
+.status-badge.assigned {
   background: #d97706; /* Dark Amber */
   color: white;
 }

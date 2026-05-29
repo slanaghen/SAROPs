@@ -86,6 +86,7 @@ DROP TABLE IF EXISTS clues CASCADE;
 DROP TABLE IF EXISTS team_responders CASCADE;
 DROP TABLE IF EXISTS action_logs CASCADE;
 DROP TABLE IF EXISTS team_messages CASCADE;
+DROP TABLE IF EXISTS admin_users CASCADE;
 DROP TABLE IF EXISTS users CASCADE;
 DROP VIEW IF EXISTS team_current_responders CASCADE;
 DROP VIEW IF EXISTS incident_summary CASCADE;
@@ -395,9 +396,11 @@ CREATE OR REPLACE FUNCTION sync_responder_access_level()
 RETURNS TRIGGER AS $func$
 DECLARE
     _responder_id UUID;
+    _team_id UUID;
+    _team_status team_status;
     is_command_staff_team_member BOOLEAN;
     target_access_level access_level;
-    staff_team_status team_status;
+    target_status responder_status;
 BEGIN
     -- Determine the responder_id relevant to the trigger event
     IF TG_OP = 'DELETE' THEN
@@ -411,15 +414,15 @@ BEGIN
         RETURN NULL;
     END IF;
 
-    -- Check if the responder is a member of any 'Command Staff' team and capture status
-    SELECT t.status INTO staff_team_status
+    -- Get current team and status info for this responder
+    SELECT tr.team_id, t.status, (t.type = 'Staff')
+    INTO _team_id, _team_status, is_command_staff_team_member
     FROM team_responders tr
     JOIN teams t ON tr.team_id = t.team_id
     WHERE tr.responder_id = _responder_id
-      AND t.type = 'Staff'
     LIMIT 1;
 
-    is_command_staff_team_member := (staff_team_status IS NOT NULL);
+    is_command_staff_team_member := COALESCE(is_command_staff_team_member, false);
 
     -- Determine the target access level
     IF is_command_staff_team_member THEN
@@ -428,22 +431,26 @@ BEGIN
         target_access_level := 'responder';
     END IF;
 
+    -- Determine the target status based on team attachment and role rules
+    -- If they have no team, they revert to 'Staged' unless they are checked out.
+    IF _team_id IS NOT NULL THEN
+        target_status := CASE 
+            WHEN is_command_staff_team_member THEN 'Deployed'::responder_status -- Rule: Staff are always Deployed
+            WHEN _team_status = 'Staged' THEN 'Attached'::responder_status
+            WHEN _team_status = 'Assigned' THEN 'Assigned'::responder_status
+            WHEN _team_status = 'Deployed' THEN 'Deployed'::responder_status
+            ELSE 'Attached'::responder_status
+        END;
+    ELSE
+        -- When removed from a team, return to Staged (unless session logic overrides via UPDATE)
+        target_status := 'Staged'::responder_status;
+    END IF;
+
     -- Update the responder's access_level and status if they are different
-    -- Ensure staff members are marked as 'Assigned' if their team is 'Assigned'.
-    -- Critical: Preserve 'admin' level if it already exists.
     UPDATE responders
     SET access_level = CASE WHEN access_level = 'admin' THEN 'admin'::access_level ELSE target_access_level END,
-        status = CASE 
-            WHEN is_command_staff_team_member AND staff_team_status = 'Assigned' THEN 'Assigned'::responder_status 
-            WHEN is_command_staff_team_member AND staff_team_status = 'Deployed' THEN 'Deployed'::responder_status
-            ELSE status 
-        END
-    WHERE responder_id = _responder_id
-      AND (
-        (access_level != 'admin' AND access_level IS DISTINCT FROM target_access_level)
-        OR (is_command_staff_team_member AND staff_team_status = 'Assigned' AND status IS DISTINCT FROM 'Assigned')
-        OR (is_command_staff_team_member AND staff_team_status = 'Deployed' AND status IS DISTINCT FROM 'Deployed')
-      );
+        status = target_status
+    WHERE responder_id = _responder_id;
 
   RETURN NULL;
 END;
@@ -528,6 +535,50 @@ CREATE TRIGGER update_assignments_updated_at BEFORE UPDATE ON assignments
 
 CREATE TRIGGER update_responders_updated_at BEFORE UPDATE ON responders
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Automated First Responder -> IC Logic
+CREATE OR REPLACE FUNCTION auto_assign_first_responder_as_ic()
+RETURNS TRIGGER AS $func$
+DECLARE
+    _staff_team_id UUID;
+BEGIN
+    -- Identify the Staff team for this incident's current OP
+    -- Rule: The first responder to check in is auto-assigned as IC
+    SELECT t.team_id INTO _staff_team_id
+    FROM teams t
+    JOIN operational_periods op ON t.op_period_id = op.op_period_id
+    WHERE op.incident_id = NEW.incident_id
+      AND t.type = 'Staff'
+      AND t.leader_responder_id IS NULL
+    ORDER BY op.op_number ASC
+    LIMIT 1;
+
+    -- If an unled staff team exists, claim leadership for this responder
+    IF _staff_team_id IS NOT NULL THEN
+        -- 1. Create the membership link
+        INSERT INTO team_responders (team_id, responder_id, role)
+        VALUES (_staff_team_id, NEW.responder_id, 'Incident Commander')
+        ON CONFLICT DO NOTHING;
+
+        -- 2. Set as formal leader
+        UPDATE teams
+        SET leader_responder_id = NEW.responder_id
+        WHERE team_id = _staff_team_id;
+    END IF;
+
+    RETURN NEW;
+END;
+$func$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Trigger to apply First Responder rules upon check-in
+CREATE TRIGGER trigger_first_responder_ic_check
+AFTER INSERT ON responders
+FOR EACH ROW EXECUTE FUNCTION auto_assign_first_responder_as_ic();
+
+-- Trigger to ensure status and access_level are synced when responder is created or linked
+CREATE TRIGGER sync_responder_status_on_responder_update
+AFTER INSERT OR UPDATE OF auth_uid, incident_id ON responders
+FOR EACH ROW EXECUTE FUNCTION sync_responder_access_level();
 
 CREATE TRIGGER update_clues_updated_at BEFORE UPDATE ON clues
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
@@ -685,11 +736,16 @@ $func$ LANGUAGE sql STABLE SECURITY DEFINER;
 
 -- NEW HELPER: Check if user is staff based on their actual Responder record
 -- SECURITY DEFINER is required to prevent recursion in RLS
-CREATE OR REPLACE FUNCTION check_is_operational_staff() 
+CREATE OR REPLACE FUNCTION check_is_operational_staff()
 RETURNS BOOLEAN AS $func$
 BEGIN
   RETURN (
-    COALESCE((auth.jwt() ->> 'is_anonymous')::boolean, false) IS FALSE -- True Admin (Email login)
+    -- Check if they are a logged-in System User with staff/admin privileges
+    EXISTS (
+      SELECT 1 FROM users 
+      WHERE email = auth.jwt() ->> 'email' 
+      AND access_level IN ('staff', 'admin')
+    )
     OR EXISTS (
       SELECT 1 FROM responders 
       WHERE auth_uid = auth.uid() 
@@ -747,21 +803,78 @@ BEGIN
 END;
 $func$ LANGUAGE plpgsql SECURITY DEFINER;
 
+-- Secure RPC to handle responder check-in during login
+CREATE OR REPLACE FUNCTION checkin_responder_securely(
+  p_incident_id TEXT,
+  p_auth_uid UUID,
+  p_name TEXT,
+  p_agency TEXT,
+  p_identifier TEXT,
+  p_cell_phone TEXT DEFAULT NULL,
+  p_responder_type TEXT DEFAULT 'SAR',
+  p_special_skills TEXT DEFAULT NULL,
+  p_access_level TEXT DEFAULT 'responder',
+  p_status TEXT DEFAULT 'Staged',
+  p_device_id TEXT DEFAULT NULL
+)
+RETURNS SETOF responders AS $func$
+BEGIN
+  RETURN QUERY
+  INSERT INTO responders (
+    incident_id, 
+    auth_uid, 
+    name, 
+    agency, 
+    identifier, 
+    cell_phone, 
+    responder_type, 
+    special_skills, 
+    access_level, 
+    status, 
+    device_id, 
+    checkin_datetime
+  )
+  VALUES (
+    p_incident_id, 
+    p_auth_uid, 
+    p_name, 
+    p_agency, 
+    p_identifier, 
+    p_cell_phone, 
+    p_responder_type::responder_type, 
+    p_special_skills, 
+    p_access_level::access_level, 
+    p_status::responder_status, 
+    COALESCE(p_device_id, 'web_' || p_auth_uid || '_' || p_incident_id),
+    CURRENT_TIMESTAMP
+  )
+  ON CONFLICT (device_id) DO UPDATE SET
+    auth_uid = EXCLUDED.auth_uid,
+    updated_at = CURRENT_TIMESTAMP
+  RETURNING *;
+END;
+$func$ LANGUAGE plpgsql SECURITY DEFINER;
+
 -- Policies for `incidents`
 CREATE POLICY "Allow all authenticated to view active incidents" ON incidents 
   FOR SELECT TO authenticated USING (end_datetime IS NULL);
 CREATE POLICY "Admins can manage all incidents" ON incidents 
   FOR ALL TO authenticated USING (check_is_operational_staff()) WITH CHECK (check_is_operational_staff());
 CREATE POLICY "Allow anonymous to start an incident" ON incidents
-  FOR INSERT TO authenticated WITH CHECK (is_anonymous_responder());
+  FOR INSERT TO authenticated WITH CHECK (is_anonymous_responder() OR check_is_operational_staff());
 
 -- Policies for `responders`
 CREATE POLICY "Allow anonymous to insert their own record" ON responders
   FOR INSERT TO authenticated WITH CHECK (auth_uid = auth.uid());
+-- Allow users to see their own record regardless of incident status, or any active responder
 CREATE POLICY "Allow authenticated to view active responders" ON responders
-  FOR SELECT TO authenticated USING (incident_id IN (SELECT incident_id FROM incidents WHERE end_datetime IS NULL));
-CREATE POLICY "Allow anonymous to update their own record" ON responders
-  FOR UPDATE TO authenticated USING (auth_uid = auth.uid()) WITH CHECK (auth_uid = auth.uid());
+  FOR SELECT TO authenticated
+  USING (auth_uid = auth.uid() OR check_is_operational_staff() OR incident_id IN (SELECT incident_id FROM incidents WHERE end_datetime IS NULL));
+-- Allow users to update their own record, or claim an unowned record by setting their UID
+CREATE POLICY "Allow users to update or claim their own record" ON responders
+  FOR UPDATE TO authenticated 
+  USING (auth_uid = auth.uid() OR auth_uid IS NULL) 
+  WITH CHECK (auth_uid = auth.uid());
 -- Allow Team Leaders to update their members' status (via helper)
 CREATE POLICY "Allow team leaders to update their members" ON responders
   FOR UPDATE TO authenticated
@@ -778,7 +891,7 @@ CREATE POLICY "Allow authenticated to view active operational periods" ON operat
 CREATE POLICY "Admins/Staff can manage all operational periods" ON operational_periods
   FOR ALL TO authenticated USING (check_is_operational_staff()) WITH CHECK (check_is_operational_staff());
 CREATE POLICY "Allow anonymous to create operational periods" ON operational_periods
-  FOR INSERT TO authenticated WITH CHECK (is_anonymous_responder());
+  FOR INSERT TO authenticated WITH CHECK (is_anonymous_responder() OR check_is_operational_staff());
 
 -- Policies for `teams`
 -- REVISED: Allow any authenticated user to view teams if their parent incident is active.
@@ -930,7 +1043,7 @@ BEGIN
   ON CONFLICT (email) DO UPDATE SET
     username = EXCLUDED.username,
     password = CASE 
-      WHEN p_password IS NOT NULL AND p_password <> '' THEN EXCLUDED.password 
+          WHEN p_password IS NOT NULL AND p_password <> '''' THEN EXCLUDED.password 
       ELSE users.password 
     END,
     access_level = EXCLUDED.access_level,
@@ -973,7 +1086,39 @@ RETURNS VOID AS $$
 BEGIN
     -- Backup users if the table exists to retain entries during re-initialization
     IF EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'users') THEN
-        EXECUTE 'CREATE TEMP TABLE users_temp_backup AS SELECT * FROM users';
+        -- Create the temp table structure explicitly to ensure compatibility
+        EXECUTE 'CREATE TEMP TABLE users_temp_backup (
+            email TEXT, username TEXT, password TEXT, access_level_text TEXT,
+            name TEXT, agency TEXT, identifier TEXT, cell_phone TEXT, 
+            responder_type_text TEXT, special_skills TEXT, created_at TIMESTAMP WITH TIME ZONE
+        )';
+        
+        -- Populate the backup table using conditional column detection. 
+        -- This prevents "column does not exist" errors when resetting from an older or broken schema.
+        EXECUTE format('INSERT INTO users_temp_backup (email, username, password, access_level_text, name, agency, identifier, cell_phone, responder_type_text, special_skills, created_at)
+                 SELECT 
+                    email, 
+                    %s, 
+                    password, 
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s
+                 FROM users',
+                 CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='username') THEN 'username' ELSE 'email' END,
+                 CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='access_level') THEN 'access_level::TEXT' ELSE '''responder''' END,
+                 CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='name') THEN 'name' ELSE 'NULL' END,
+                 CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='agency') THEN 'agency' ELSE 'NULL' END,
+                 CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='identifier') THEN 'identifier' ELSE 'NULL' END,
+                 CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='cell_phone') THEN 'cell_phone' ELSE 'NULL' END,
+                 CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='responder_type') THEN 'responder_type::TEXT' ELSE '''SAR''' END,
+                 CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='special_skills') THEN 'special_skills' ELSE 'NULL' END,
+                 CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='created_at') THEN 'created_at' ELSE 'CURRENT_TIMESTAMP' END
+        );
     END IF;
 
     -- ENUM TYPES
@@ -1271,9 +1416,11 @@ BEGIN
     RETURNS TRIGGER AS $func$
     DECLARE
         _responder_id UUID;
+        _team_id UUID;
+        _team_status team_status;
         is_command_staff_team_member BOOLEAN;
         target_access_level access_level;
-        staff_team_status team_status;
+        target_status responder_status;
     BEGIN
         IF TG_OP = ''DELETE'' THEN
             _responder_id := OLD.responder_id;
@@ -1285,14 +1432,15 @@ BEGIN
             RETURN NULL;
         END IF;
 
-        SELECT t.status INTO staff_team_status
+        -- Get current team and status info for this responder
+        SELECT tr.team_id, t.status, (t.type = ''Staff'')
+        INTO _team_id, _team_status, is_command_staff_team_member
         FROM team_responders tr
         JOIN teams t ON tr.team_id = t.team_id
         WHERE tr.responder_id = _responder_id
-          AND t.type = ''Staff''
         LIMIT 1;
 
-        is_command_staff_team_member := (staff_team_status IS NOT NULL);
+        is_command_staff_team_member := COALESCE(is_command_staff_team_member, false);
 
         IF is_command_staff_team_member THEN
             target_access_level := ''staff'';
@@ -1300,23 +1448,55 @@ BEGIN
             target_access_level := ''responder'';
         END IF;
 
+        -- Determine the target status based on team attachment and role rules
+        IF _team_id IS NOT NULL THEN
+            target_status := CASE 
+                WHEN is_command_staff_team_member THEN ''Deployed''::responder_status -- Rule: Staff are always Deployed
+                WHEN _team_status = ''Staged'' THEN ''Attached''::responder_status
+                WHEN _team_status = ''Assigned'' THEN ''Assigned''::responder_status
+                WHEN _team_status = ''Deployed'' THEN ''Deployed''::responder_status
+                ELSE ''Attached''::responder_status
+            END;
+        ELSE
+            target_status := ''Staged''::responder_status;
+        END IF;
+
         UPDATE responders
         SET access_level = CASE WHEN access_level = ''admin'' THEN ''admin''::access_level ELSE target_access_level END,
-            status = CASE
-                WHEN is_command_staff_team_member AND staff_team_status = ''Assigned'' THEN ''Assigned''::responder_status
-                WHEN is_command_staff_team_member AND staff_team_status = ''Deployed'' THEN ''Deployed''::responder_status
-                ELSE status
-            END
-        WHERE responder_id = _responder_id
-          AND (
-            (access_level != ''admin'' AND access_level IS DISTINCT FROM target_access_level)
-            OR (is_command_staff_team_member AND staff_team_status = ''Assigned'' AND status IS DISTINCT FROM ''Assigned'')
-            OR (is_command_staff_team_member AND staff_team_status = ''Deployed'' AND status IS DISTINCT FROM ''Deployed'')
-          );
+            status = target_status
+        WHERE responder_id = _responder_id;
 
       RETURN NULL;
     END;
     $func$ LANGUAGE plpgsql;';
+
+    EXECUTE 'CREATE OR REPLACE FUNCTION auto_assign_first_responder_as_ic()
+    RETURNS TRIGGER AS $func$
+    DECLARE
+        _staff_team_id UUID;
+    BEGIN
+        SELECT t.team_id INTO _staff_team_id
+        FROM teams t
+        JOIN operational_periods op ON t.op_period_id = op.op_period_id
+        WHERE op.incident_id = NEW.incident_id
+          AND t.type = ''Staff''
+          AND t.leader_responder_id IS NULL
+        ORDER BY op.op_number ASC
+        LIMIT 1;
+
+        IF _staff_team_id IS NOT NULL THEN
+            INSERT INTO team_responders (team_id, responder_id, role)
+            VALUES (_staff_team_id, NEW.responder_id, ''Incident Commander'')
+            ON CONFLICT DO NOTHING;
+
+            UPDATE teams
+            SET leader_responder_id = NEW.responder_id
+            WHERE team_id = _staff_team_id;
+        END IF;
+
+        RETURN NEW;
+    END;
+    $func$ LANGUAGE plpgsql SECURITY DEFINER;';
 
     EXECUTE 'CREATE OR REPLACE FUNCTION sync_team_members_on_status_change()
     RETURNS TRIGGER AS $func$
@@ -1368,6 +1548,14 @@ BEGIN
     EXECUTE 'CREATE TRIGGER ensure_staff_team_on_new_op
     AFTER INSERT ON operational_periods
     FOR EACH ROW EXECUTE FUNCTION create_staff_team_for_op();';
+
+    EXECUTE 'CREATE TRIGGER trigger_first_responder_ic_check
+    AFTER INSERT ON responders
+    FOR EACH ROW EXECUTE FUNCTION auto_assign_first_responder_as_ic();';
+
+    EXECUTE 'CREATE TRIGGER sync_responder_status_on_responder_update
+    AFTER INSERT OR UPDATE OF auth_uid, incident_id ON responders
+    FOR EACH ROW EXECUTE FUNCTION sync_responder_access_level();';
 
     EXECUTE 'CREATE TRIGGER update_incidents_updated_at BEFORE UPDATE ON incidents
       FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();';
@@ -1524,7 +1712,12 @@ BEGIN
     RETURNS BOOLEAN AS $func$
     BEGIN
       RETURN (
-        COALESCE((auth.jwt() ->> ''is_anonymous'')::boolean, false) IS FALSE
+        -- Use auth.uid to join against auth.users for a reliable system user check
+        EXISTS (
+          SELECT 1 FROM users 
+          WHERE email = (SELECT email FROM auth.users WHERE id = auth.uid()) 
+          AND access_level IN (''staff'', ''admin'')
+        )
         OR EXISTS (
           SELECT 1 FROM responders
           WHERE auth_uid = auth.uid()
@@ -1568,21 +1761,67 @@ BEGIN
     END;
     $func$ LANGUAGE plpgsql STABLE SECURITY DEFINER;';
 
-    EXECUTE 'DROP FUNCTION IF EXISTS verify_admin_login(TEXT, TEXT);';
+    EXECUTE 'CREATE OR REPLACE FUNCTION verify_user_login(p_email TEXT, p_password TEXT)
+    RETURNS SETOF users AS $func$
+    BEGIN
+      RETURN QUERY
+      SELECT * FROM users
+      WHERE email = LOWER(p_email) 
+        AND (password = p_password OR password = crypt(p_password, password));
+    END;
+    $func$ LANGUAGE plpgsql SECURITY DEFINER;';
+
+    EXECUTE 'CREATE OR REPLACE FUNCTION checkin_responder_securely(
+      p_incident_id TEXT,
+      p_auth_uid UUID,
+      p_name TEXT,
+      p_agency TEXT,
+      p_identifier TEXT,
+      p_cell_phone TEXT DEFAULT NULL,
+      p_responder_type TEXT DEFAULT ''SAR'',
+      p_special_skills TEXT DEFAULT NULL,
+      p_access_level TEXT DEFAULT ''responder'',
+      p_status TEXT DEFAULT ''Staged'',
+      p_device_id TEXT DEFAULT NULL
+    )
+    RETURNS SETOF responders AS $inner_func$
+    BEGIN
+      RETURN QUERY
+      INSERT INTO responders (
+        incident_id, auth_uid, name, agency, identifier, 
+        cell_phone, responder_type, special_skills, 
+        access_level, status, device_id, checkin_datetime
+      )
+      VALUES (
+        p_incident_id, p_auth_uid, p_name, p_agency, p_identifier, 
+        p_cell_phone, p_responder_type::responder_type, p_special_skills, 
+        p_access_level::access_level, p_status::responder_status, 
+        COALESCE(p_device_id, ''web_'' || p_auth_uid || ''_'' || p_incident_id),
+        CURRENT_TIMESTAMP
+      )
+      ON CONFLICT (device_id) DO UPDATE SET
+        auth_uid = EXCLUDED.auth_uid,
+        updated_at = CURRENT_TIMESTAMP
+      RETURNING *;
+    END;
+    $inner_func$ LANGUAGE plpgsql SECURITY DEFINER;';
 
     EXECUTE 'CREATE POLICY "Allow all authenticated to view active incidents" ON incidents
       FOR SELECT TO authenticated USING (end_datetime IS NULL);';
     EXECUTE 'CREATE POLICY "Admins can manage all incidents" ON incidents
       FOR ALL TO authenticated USING (check_is_operational_staff()) WITH CHECK (check_is_operational_staff());';
     EXECUTE 'CREATE POLICY "Allow anonymous to start an incident" ON incidents
-      FOR INSERT TO authenticated WITH CHECK (is_anonymous_responder());';
+      FOR INSERT TO authenticated WITH CHECK (is_anonymous_responder() OR check_is_operational_staff());';
 
     EXECUTE 'CREATE POLICY "Allow anonymous to insert their own record" ON responders
       FOR INSERT TO authenticated WITH CHECK (auth_uid = auth.uid());';
     EXECUTE 'CREATE POLICY "Allow authenticated to view active responders" ON responders
-      FOR SELECT TO authenticated USING (incident_id IN (SELECT incident_id FROM incidents WHERE end_datetime IS NULL));';
-    EXECUTE 'CREATE POLICY "Allow anonymous to update their own record" ON responders
-      FOR UPDATE TO authenticated USING (auth_uid = auth.uid()) WITH CHECK (auth_uid = auth.uid());';
+      FOR SELECT TO authenticated
+      USING (auth_uid = auth.uid() OR check_is_operational_staff() OR incident_id IN (SELECT incident_id FROM incidents WHERE end_datetime IS NULL));';
+    EXECUTE 'CREATE POLICY "Allow users to update or claim their own record" ON responders
+      FOR UPDATE TO authenticated 
+      USING (auth_uid = auth.uid() OR auth_uid IS NULL) 
+      WITH CHECK (auth_uid = auth.uid());';
     EXECUTE 'CREATE POLICY "Allow team leaders to update their members" ON responders
       FOR UPDATE TO authenticated
       USING (is_leader_of_member(responder_id) OR check_is_operational_staff())
@@ -1595,7 +1834,7 @@ BEGIN
     EXECUTE 'CREATE POLICY "Admins/Staff can manage all operational periods" ON operational_periods
       FOR ALL TO authenticated USING (check_is_operational_staff()) WITH CHECK (check_is_operational_staff());';
     EXECUTE 'CREATE POLICY "Allow anonymous to create operational periods" ON operational_periods
-      FOR INSERT TO authenticated WITH CHECK (is_anonymous_responder());';
+      FOR INSERT TO authenticated WITH CHECK (is_anonymous_responder() OR check_is_operational_staff());';
 
     EXECUTE 'CREATE POLICY "Allow authenticated to view active teams" ON teams
       FOR SELECT TO authenticated USING (is_active_op_period(op_period_id));';
@@ -1699,9 +1938,9 @@ BEGIN
       FOR SELECT TO authenticated USING (check_is_operational_staff());';
 
     EXECUTE 'CREATE OR REPLACE FUNCTION admin_add_user(
-      p_email TEXT, 
-      p_username TEXT, 
-      p_password TEXT, 
+      p_email TEXT,
+      p_username TEXT,
+      p_password TEXT,
       p_access_level TEXT,
       p_name TEXT DEFAULT NULL,
       p_agency TEXT DEFAULT NULL,
@@ -1712,27 +1951,35 @@ BEGIN
     )
     RETURNS VOID AS $func$
     BEGIN
-      INSERT INTO users (
-        email, username, password, access_level, 
-        name, agency, identifier, cell_phone, responder_type, special_skills
-      )
-      VALUES (
-        LOWER(p_email), p_username, crypt(p_password, gen_salt(''bf'')), p_access_level::access_level,
-        p_name, p_agency, p_identifier, p_phone, p_type::responder_type, p_skills
-      )
-      ON CONFLICT (email) DO UPDATE SET
-        username = EXCLUDED.username,
-        password = CASE 
-          WHEN p_password IS NOT NULL AND p_password <> $sq$$sq$ THEN EXCLUDED.password 
-          ELSE users.password 
-        END,
-        access_level = EXCLUDED.access_level,
-        name = EXCLUDED.name,
-        agency = EXCLUDED.agency,
-        identifier = EXCLUDED.identifier,
-        cell_phone = EXCLUDED.cell_phone,
-        responder_type = EXCLUDED.responder_type,
-        special_skills = EXCLUDED.special_skills;
+  -- Normalize email for lookup to prevent mismatch due to casing or whitespace
+  IF EXISTS (SELECT 1 FROM users WHERE email = LOWER(TRIM(p_email))) THEN
+        UPDATE users SET
+          username = p_username,
+          password = CASE
+        -- Only update password if a non-empty string is provided
+        WHEN p_password IS NOT NULL AND TRIM(p_password) <> '' THEN crypt(p_password, gen_salt('bf'))
+            ELSE password
+          END,
+          access_level = p_access_level::access_level,
+          name = p_name,
+          agency = p_agency,
+          identifier = p_identifier,
+          cell_phone = p_phone,
+          responder_type = p_type::responder_type,
+          special_skills = p_skills
+    WHERE email = LOWER(TRIM(p_email));
+      ELSE
+    -- For new users, a password is required. If p_password is null, 
+    -- this will correctly trigger the not-null constraint violation.
+        INSERT INTO users (
+          email, username, password, access_level,
+          name, agency, identifier, cell_phone, responder_type, special_skills
+        )
+        VALUES (
+      LOWER(TRIM(p_email)), p_username, crypt(p_password, gen_salt('bf')), p_access_level::access_level,
+          p_name, p_agency, p_identifier, p_phone, p_type::responder_type, p_skills
+        );
+      END IF;
     END;
     $func$ LANGUAGE plpgsql SECURITY DEFINER;';
 
@@ -1754,17 +2001,18 @@ BEGIN
 
     -- Restore users from backup
     IF EXISTS (SELECT FROM pg_class WHERE relname = 'users_temp_backup') THEN
-        EXECUTE 'INSERT INTO users (email, username, password, access_level, name, agency, identifier, cell_phone, responder_type, special_skills, created_at) 
-        SELECT email, username, password, access_level, name, agency, identifier, cell_phone, responder_type, special_skills, created_at 
+        EXECUTE 'INSERT INTO users (email, username, password, access_level, name, agency, identifier, cell_phone, responder_type, special_skills, created_at)
+        SELECT email, COALESCE(username, email), password, access_level_text::access_level, name, agency, identifier, cell_phone, responder_type_text::responder_type, special_skills, created_at 
         FROM users_temp_backup ON CONFLICT (email) DO NOTHING';
         EXECUTE 'DROP TABLE users_temp_backup';
     END IF;
 
     -- Re-apply grants inside the re-initialization block to ensure API access persists
     EXECUTE 'GRANT EXECUTE ON FUNCTION admin_add_user(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated;';
-    EXECUTE 'GRANT EXECUTE ON FUNCTION admin_remove_user TO authenticated;';
-    EXECUTE 'GRANT EXECUTE ON FUNCTION admin_update_password TO authenticated;';
-    EXECUTE 'GRANT EXECUTE ON FUNCTION verify_user_login TO anon, authenticated;';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION admin_remove_user(TEXT) TO authenticated;';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION admin_update_password(TEXT, TEXT) TO authenticated;';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION verify_user_login(TEXT, TEXT) TO anon, authenticated;';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION checkin_responder_securely(TEXT, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated;';
     EXECUTE 'GRANT EXECUTE ON FUNCTION reinitialize_database TO authenticated;';
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -1774,6 +2022,7 @@ GRANT EXECUTE ON FUNCTION admin_add_user(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEX
 GRANT EXECUTE ON FUNCTION admin_remove_user TO authenticated;
 GRANT EXECUTE ON FUNCTION admin_update_password TO authenticated;
 GRANT EXECUTE ON FUNCTION verify_user_login TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION checkin_responder_securely(TEXT, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION reinitialize_database TO authenticated;
 
 -- ============================================================================
@@ -1781,13 +2030,39 @@ GRANT EXECUTE ON FUNCTION reinitialize_database TO authenticated;
 -- ============================================================================
 INSERT INTO users (email, username, password, access_level, name, agency, identifier, cell_phone, responder_type, special_skills) 
 VALUES (
-  'slanaghen@gmail.com', 
-  'slanaghen@gmail.com', 
+  'admin@gmail.com', 
+  'admin@gmail.com', 
   crypt('grigware', gen_salt('bf')), 
   'admin', 
-  'Steve Lanaghen', 
+  'Steve Admin', 
   'SAROps', 
   'SL-001', 
+  '303-555-1234', 
+  'SAR', 
+  'Leadership, Communication'
+) ON CONFLICT (email) DO NOTHING;
+INSERT INTO users (email, username, password, access_level, name, agency, identifier, cell_phone, responder_type, special_skills) 
+VALUES (
+  'staff@gmail.com', 
+  'staff@gmail.com', 
+  crypt('grigware', gen_salt('bf')), 
+  'staff', 
+  'Steve Staff', 
+  'SAROps', 
+  'SL-002', 
+  '303-555-1234', 
+  'SAR', 
+  ''
+) ON CONFLICT (email) DO NOTHING;
+INSERT INTO users (email, username, password, access_level, name, agency, identifier, cell_phone, responder_type, special_skills) 
+VALUES (
+  'responder@gmail.com', 
+  'responder@gmail.com', 
+  crypt('grigware', gen_salt('bf')), 
+  'responder', 
+  'Steve Responder', 
+  'SAROps', 
+  'SL-003', 
   '303-555-1234', 
   'SAR', 
   'Leadership, Communication'

@@ -2,7 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useIncident } from '../context/IncidentContext';
-import AdminLogin from '../components/admin/AdminLogin';
+import LoginForm from '../components/admin/Login';
 
 const LoginPage = () => {
   const navigate = useNavigate();
@@ -52,13 +52,14 @@ const LoginPage = () => {
 
     // Prioritize the responder ID from the check-in record, 
     // but fallback to a profile lookup if the upsert return was empty
-    const finalResponderId = responderRecord?.responder_id;
+    const finalResponder = Array.isArray(responderRecord) ? responderRecord[0] : responderRecord;
+    const finalResponderId = finalResponder?.responder_id;
     
     if (finalResponderId) {
       setResponderId(finalResponderId);
-      setResponderName(responderRecord.name || userRecord.name || userRecord.username);
-      setResponderStatus(responderRecord.status || 'Staged');
-      setAccessLevel(responderRecord.access_level || userRecord.access_level);
+      setResponderName(finalResponder.name || userRecord.name || userRecord.username);
+      setResponderStatus(finalResponder.status || 'Staged');
+      setAccessLevel(finalResponder.access_level || userRecord.access_level);
     } else {
       // Fallback: If we don't have a responder ID yet but have an identity, 
       // set the basic info to allow the dashboard to attempt its own lookup.
@@ -88,7 +89,7 @@ const LoginPage = () => {
   };
 
   return (
-    <AdminLogin onLoginSuccess={handleLoginSuccess} />
+    <LoginForm onLoginSuccess={handleLoginSuccess} />
   );
 };
 

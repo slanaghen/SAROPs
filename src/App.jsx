@@ -74,17 +74,32 @@ function App() {
   const { team, assignment, responderRecord, loading: hookLoading } = useResponderTeamAndAssignment(supabase, responderId);
 
   const handleSignOut = async () => {
+    // Perform operational checkout if responder is still active
     if (responderId && responderStatus !== 'CheckedOut') {
-      // Synchronize logout with operational check-out
       try {
-        await supabase.from('teams').update({ leader_responder_id: null }).eq('leader_responder_id', responderId);
-        await supabase.from('responders')
+        const { error: teamErr } = await supabase
+          .from('teams')
+          .update({ leader_responder_id: null })
+          .eq('leader_responder_id', responderId);
+        if (teamErr) console.error('Sign-out: Failed to clear leader status', teamErr);
+
+        const { error: respErr } = await supabase
+          .from('responders')
           .update({ status: 'CheckedOut', checkout_datetime: new Date().toISOString() })
           .eq('responder_id', responderId);
+        if (respErr) console.error('Sign-out: Failed to update responder status', respErr);
+
+        // Remove responder from any teams they were attached to
+        const { error: trErr } = await supabase
+          .from('team_responders')
+          .delete()
+          .eq('responder_id', responderId);
+        if (trErr) console.error('Sign-out: Failed to remove responder from teams', trErr);
       } catch (err) {
-        console.error('Failed to perform operational check-out during sign-out:', err);
+        console.error('Sign-out: Unexpected error during operational checkout', err);
       }
     }
+
     await supabase.auth.signOut();
     localStorage.removeItem('sarops_user_email');
     logout();
@@ -135,7 +150,7 @@ function App() {
       });
       navigate('/checkin');
     } else if (isAdmin && accessLevel === 'responder' && !responderOnlyPaths.includes(location.pathname)) {
-      // Enforce: Responders cannot access Operations, Planning, SARTopo, PDFs, Action Log, or Google ICS
+      // Enforce: Responders cannot access Operations, Planning, SARTopo, Action Log, or Google ICS
       console.warn(`[App Guard] Responder attempted to access staff-only page: ${location.pathname}`);
       navigate('/responder');
     } else if (isAdmin && accessLevel === 'staff' && location.pathname === '/admin') {
@@ -167,16 +182,16 @@ function App() {
               <>
                 {responderName}
                 <span style={{ fontSize: '0.9em', opacity: 0.8, marginLeft: '4px' }}>
-                  ({(accessLevel === 'staff' || isAdmin) ? 'Staff' : 'Responder'})
+                  ({accessLevel === 'admin' ? 'Admin' : (accessLevel === 'staff' ? 'Staff' : 'Responder')})
                 </span>
               </>
             ) : (user?.email || 'Guest')}
           </div>
           {(responderStatus || currentTeamStatus || user) && (
             <span className={`status-indicator ${(
-              (currentTeamStatus && currentTeamStatus !== 'Disbanded') ? currentTeamStatus : (responderStatus || 'online')
+              (currentTeamStatus && currentTeamStatus !== 'Disbanded') ? currentTeamStatus : (responderStatus || 'Staged')
             ).toLowerCase()}`}>
-              {(currentTeamStatus && currentTeamStatus !== 'Disbanded') ? currentTeamStatus : (responderStatus || 'Authenticated')}
+              {(currentTeamStatus && currentTeamStatus !== 'Disbanded') ? currentTeamStatus : (responderStatus || 'Staged')}
             </span>
           )}
           <div className={`connection-dot ${offline ? 'offline' : 'online'}`} title={offline ? 'Offline' : 'Online'}></div>
@@ -190,7 +205,6 @@ function App() {
               {menuOpen && (
                 <div className="banner-dropdown">
                   {isActive && <Link to="/responder" onClick={() => setMenuOpen(false)}>My Dashboard</Link>}
-                  <Link to="/checkin" onClick={() => setMenuOpen(false)}>Check-in</Link>
                   {user && <Link to="/settings" onClick={() => setMenuOpen(false)}>Settings</Link>}
                   {isActive && <Link to="/ics" onClick={() => setMenuOpen(false)}>ICS Chart</Link>}
                   {isActive && <Link to="/qrcodes" onClick={() => setMenuOpen(false)}>QR Codes</Link>}
@@ -202,7 +216,6 @@ function App() {
                       <Link to="/incident" onClick={() => setMenuOpen(false)}>Incident</Link>
                       <Link to="/action-log" onClick={() => setMenuOpen(false)}>Action Log</Link>
                       <Link to="/sartopo" onClick={() => setMenuOpen(false)}>SARTopo Data</Link>
-                      <Link to="/pdfs" onClick={() => setMenuOpen(false)}>PDFs</Link>
                       <Link to="/google-ics" onClick={() => setMenuOpen(false)}>Google ICS Forms</Link>
                     </>
                   )}

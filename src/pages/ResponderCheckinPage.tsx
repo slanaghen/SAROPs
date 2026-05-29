@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { Incident, Responder, Team, ResponderStatus } from '../types/sarops-types';
 import ResponderCheckin from '../components/ResponderCheckin';
@@ -529,14 +529,15 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
   // Show check-in form
   return (
     <div className="responder-checkin" style={{ display: 'flex', justifyContent: 'center', padding: '24px 24px' }}>
-      <div className="checkin-container" style={{ width: '100%', maxWidth: '480px', textAlign: 'center' }}>
-        {isAuthenticating ? (
+      {isAuthenticating ? (
+        <div className="checkin-container" style={{ width: '100%', maxWidth: '480px', textAlign: 'center' }}>
           <div className="checkin-transition">
             <div className="loading-spinner" style={{ fontSize: '40px', marginBottom: '20px' }}>⏳</div>
             <h2 style={{ fontSize: '24px', fontWeight: 700, marginBottom: '8px' }}>Initializing Session</h2>
             <p style={{ color: '#64748b' }}>Establishing secure temporary access...</p>
           </div>
-        ) : (
+        </div>
+      ) : (
         <ResponderCheckin
           onCheckIn={handleCheckIn}
           isLoading={loading}
@@ -550,8 +551,7 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
           selectedIncidentId={selectedIncidentId}
           initialData={location.state?.responderData}
         />
-        )}
-      </div>
+      )}
     </div>
   );
 };

@@ -630,11 +630,11 @@ const PlanningDashboard = ({
                 >
                   <div className="responder-header">
                     <div className="responder-name clickable-name">{responder.name}</div>
-                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                      <span className={`status-indicator ${responder.status?.toLowerCase() || ''}`} style={{ fontSize: '10px' }}>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginLeft: 'auto' }}>
+                      <div className="responder-id-badge">{responder.identifier}</div>
+                      <span className={`status-indicator ${responder.status?.toLowerCase() || ''}`}>
                         {responder.status}
                       </span>
-                      <div className="responder-id-badge">{responder.identifier}</div>
                     </div>
                   </div>
                   <div className="responder-agency-meta">{responder.agency}</div>
@@ -692,7 +692,7 @@ const PlanningDashboard = ({
                   role="option"
                   tabIndex={0}
                 >
-                  <div className="team-header" style={{ gap: '8px', justifyContent: 'flex-start', flexWrap: 'wrap' }}>
+                  <div className="team-header" style={{ gap: '8px', justifyContent: 'flex-start', flexWrap: 'wrap', alignItems: 'center' }}>
                     <div className="team-name clickable-name" style={{ marginRight: '4px' }}>{team.team_name_number}</div>
                     <div className={`team-type ${team.type.replace(/\s+/g, '-').toLowerCase()}`}>
                       {team.type}
@@ -700,6 +700,9 @@ const PlanningDashboard = ({
                     <span style={{ fontSize: '11px', color: '#64748b' }}>Size: {getTeamMemberCount(team)}</span>
                     <span style={{ fontSize: '11px', color: '#1e293b', fontWeight: 500 }}>
                       {team.type === 'Staff' ? 'IC' : 'Ldr'}: {getResponderName(team.leader_responder_id)}
+                    </span>
+                    <span className={`status-indicator ${team.status?.toLowerCase() || ''}`} style={{ marginLeft: 'auto' }}>
+                      {team.status}
                     </span>
                   </div>
 

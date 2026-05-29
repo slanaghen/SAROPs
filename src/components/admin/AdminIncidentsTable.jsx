@@ -8,6 +8,7 @@ const AdminIncidentsTable = ({
   handleEditIncident, // Added for consistency, though incidents are edited via IncidentEditPage
   handleNewIncident,
   handleDeleteIncident,
+  currentIncidentId
 }) => {
   return (
     <div className="section-card">
@@ -51,6 +52,7 @@ const AdminIncidentsTable = ({
               ) : (
                 allIncidents.map(inc => {
                   const isActive = !inc.end_datetime;
+                  const isCurrentlyActiveInSession = inc.incident_id === currentIncidentId;
                   const latestOpObj = inc.operational_periods?.sort((a, b) =>
                     new Date(b.start_datetime) - new Date(a.start_datetime)
                   )[0];
@@ -58,7 +60,7 @@ const AdminIncidentsTable = ({
                   const latestOpStart = latestOpObj?.start_datetime ? new Date(latestOpObj.start_datetime).toLocaleString() : '';
 
                   return (
-                    <tr key={inc.incident_id}>
+                    <tr key={inc.incident_id} style={isCurrentlyActiveInSession ? { backgroundColor: '#f0f9ff', borderLeft: '4px solid #0ea5e9' } : {}}>
                       <td>
                         <div style={{ fontWeight: 600 }}>{inc.name}</div>
                       </td>
@@ -74,7 +76,12 @@ const AdminIncidentsTable = ({
                         </span>
                       </td>
                       <td style={{ textAlign: 'right' }}>
-                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', alignItems: 'center' }}>
+                          {isCurrentlyActiveInSession && (
+                            <span className="status-indicator assigned" style={{ margin: 0 }}>
+                              Active Session
+                            </span>
+                          )}
                           <button onClick={() => handleEditIncident(inc)} className="btn btn-secondary btn-sm">Edit</button>
                           {isActive && (
                             <button

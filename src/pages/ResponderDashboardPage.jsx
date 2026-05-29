@@ -17,6 +17,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
   const { 
     responderId: contextId, 
     incidentId, 
+    setResponderId,
     incidentData, 
     responderName,
     accessLevel,
@@ -31,6 +32,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
   const isStaffOrAdmin = accessLevel === 'staff' || accessLevel === 'admin';
   const responderId = propId || contextId;
   const [responders, setResponders] = useState([]);
+  const [isResolvingIdentity, setIsResolvingIdentity] = useState(false);
   const [isLeavingTeam, setIsLeavingTeam] = useState(false);
   const [messages, setMessages] = useState([]);
   const [messageText, setMessageText] = useState('');
@@ -161,6 +163,32 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     };
     fetchResponders();
   }, [incidentId]);
+
+  // Identity Resolution: If responderId is missing but we have an active incident and an authenticated session,
+  // attempt to locate the responder record for this user to bridge the "System User" to "Responder" gap.
+  useEffect(() => {
+    const resolveIdentity = async () => {
+      if (responderId || !incidentId) return;
+      
+      setIsResolvingIdentity(true);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.user?.id) return;
+
+        const { data } = await supabase
+          .from('responders')
+          .select('responder_id')
+          .eq('incident_id', incidentId)
+          .eq('auth_uid', session.user.id)
+          .maybeSingle();
+
+        if (data?.responder_id) setResponderId(data.responder_id);
+      } finally {
+        setIsResolvingIdentity(false);
+      }
+    };
+    resolveIdentity();
+  }, [responderId, incidentId, setResponderId]);
 
   useEffect(() => {
     const fetchIncidentDetails = async () => {
@@ -542,11 +570,11 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
 
   // If responderId is missing from context, show a loading state for a moment 
   // to allow global state hydration to finish after a redirect.
-  if (!responderId || loading) {
+  if ((!responderId && isResolvingIdentity) || loading) {
     return (
       <div style={{ padding: '40px', textAlign: 'center', color: '#64748b' }}>
         <div className="loading-spinner" style={{ fontSize: '32px', marginBottom: '16px' }}>⏳</div>
-        <p>{!responderId ? 'Verifying responder identity...' : 'Loading mission data...'}</p>
+        <p>{loading ? 'Loading mission data...' : 'Verifying responder identity...'}</p>
       </div>
     );
   }
@@ -612,15 +640,9 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
               <span 
                 className="status-indicator incomplete" 
                 style={{ 
-                  display: 'inline-flex', 
-                  alignItems: 'center', 
-                  gap: '4px',
                   backgroundColor: '#dc2626', 
                   color: 'white', 
-                  padding: '2px 8px', 
-                  borderRadius: '4px', 
-                  fontSize: '11px',
-                  fontWeight: 700,
+                  gap: '4px',
                   whiteSpace: 'nowrap'
                 }}
               >
@@ -685,15 +707,10 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
                             onClick={() => handleParResponse('OK')}
                             title="Click to reset PAR"
                             style={{ 
-                              display: 'inline-flex', 
-                              alignItems: 'center', 
                               gap: '4px',
                               backgroundColor: '#dc2626', 
                               color: 'white', 
-                              padding: '2px 8px', 
-                              borderRadius: '4px', 
-                              fontSize: '11px',
-                              fontWeight: 700,
+                              padding: '2px 8px',
                               whiteSpace: 'nowrap',
                               cursor: 'pointer'
                             }}
@@ -881,7 +898,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
           <SectionHeader 
             title="Team Communications" 
             sectionKey="messages" 
-            showBadge={messages.length > lastMessageCountRef.current && <span className="status-indicator active" style={{ fontSize: '9px' }}>NEW</span>}
+            showBadge={messages.length > lastMessageCountRef.current && <span className="status-indicator active">NEW</span>}
           />
           {isExpanded.messages && (
             <div style={{ marginTop: '10px' }}>

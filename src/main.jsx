@@ -14,7 +14,6 @@ import ErrorPage from './components/ErrorPage';
 import ICSAssignmentPage from './pages/ICSAssignmentPage';
 import SARTopoDataPage from './pages/SARTopoDataPage';
 import QRCodesPage from './pages/QRCodesPage';
-import PDFsPage from './pages/PDFsPage';
 import GoogleICSFormsPage from './pages/GoogleICSFormsPage';
 import SettingsPage from './pages/SettingsPage';
 import { IncidentProvider, useIncident } from './context/IncidentContext';
@@ -64,7 +63,6 @@ const router = createBrowserRouter([
       { path: "action-log", element: <StaffProtectedRoute><ActionLogPage /></StaffProtectedRoute> },
       { path: "qrcodes", element: <QRCodesPage /> },
       { path: "sartopo", element: <StaffProtectedRoute><SARTopoDataPage /></StaffProtectedRoute> },
-      { path: "pdfs", element: <StaffProtectedRoute><PDFsPage /></StaffProtectedRoute> },
       { path: "ics", element: <ICSAssignmentPage /> },
       { path: "google-ics", element: <StaffProtectedRoute><GoogleICSFormsPage /></StaffProtectedRoute> },
     ],

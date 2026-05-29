@@ -193,15 +193,9 @@ const OperationsTable = ({
                       onClick={() => onResetPar(row.teamId, row.teamName)}
                       title="Click to reset PAR"
                       style={{ 
-                        display: 'inline-flex', 
-                        alignItems: 'center', 
                         gap: '4px',
                         backgroundColor: '#dc2626', 
                         color: 'white', 
-                        padding: '2px 8px', 
-                        borderRadius: '4px', 
-                        fontSize: '11px',
-                        fontWeight: 700,
                         whiteSpace: 'nowrap',
                         cursor: 'pointer'
                       }}

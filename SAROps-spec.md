@@ -6,11 +6,12 @@ SAROps is a web application for public safety emergency services management to s
 ## Architecture
 - Framework: Progressive Web App (PWA)
 - Frontend: React with Vite
-- Pattern: Conventional Model / View / Controller
-- Offline-first: local cache + upload sync when reconnected
-- Data model: JSON-LD linked data for incident assets, tasks, assignments, and status
-- Sync: Supabase cloud Postgres + PowerSync + local SQLite mirror
-- Event architecture: Node.js / Socket.io event-driven backend for triggers and fan-out actions
+- Pattern: Component-based with React Hooks for business logic
+- Navigation: Guarded routing based on Session State and Access Levels (Anonymous, Responder, Staff, Admin)
+- State Management: React Context API for session/incident metadata; Custom Hooks for operational data synchronization
+- Data Model: Relational schema in PostgreSQL (Incidents, Operational Periods, Responders, Teams, Assignments)
+- Data Sync: Supabase Realtime (Postgres Changes) for live updates across all dashboards
+- Backend Logic: Thick-database approach using PostgreSQL Functions and Triggers for operational integrity and status synchronization
 
 ## Key Goals
 - MVP focused on initial tasking and deployment during OP1
@@ -19,60 +20,49 @@ SAROps is a web application for public safety emergency services management to s
 - Support real-time updates for status, mapping, image, and message flows
 - Cloud-hosted database for production; local laptop development for initial work
 
-## Components
-### Model
-- JSON-LD based definitions for:
-  - Incident
-  - Task
-  - Resource
-  - Assignment
-  - Status update
-  - Location / geospatial data
-  - Media / images
+## Security and Access Control
+### Identity Management
+- **Anonymous Sessions**: Temporary access for field responders during initial check-in via `signInAnonymously`.
+- **System Users**: Persistent accounts for Staff and Admins using email-based authentication.
 
-### View
-- React views for:
-  - Incident dashboard
-  - Task list and assignment board
-  - Map / position awareness
-  - Status and timeline
-  - Offline sync indicator
+### Authorization (RLS)
+- **Row Level Security**: Access to data is strictly enforced at the database level based on `auth.uid()` and `access_level`.
+- **Guard Components**: `AdminProtectedRoute` and `StaffProtectedRoute` enforce role-based access for specific dashboards and administrative tools.
 
-### Controller
-- React controllers / hooks handle:
-  - User input
-  - Data validation
-  - Offline queueing
-  - Sync operations
-  - Event triggers
-
-### Event-driven Actions
-- Single trigger (e.g. voice command or button press) can:
-  - update the database
-  - send notifications to Slack or responder channels
-  - refresh images or map overlays
-  - create and assign tasks
+## Operational Logic (Database Triggers)
+The system uses server-side triggers to maintain "operational parity," automating transitions across entities:
+- **Status Sync**: Synchronizes status changes between Assignments, Teams, and Responders (e.g., Deployed Assignment -> Deployed Team -> Deployed Responders).
+- **Integrity**: Automatically manages Team membership history, clears leadership upon checkout, and performs bulk cleanup when an incident ends.
+- **Staff Automation**: Automatically creates a "Staff" team and "Command Staff" assignment for every new Operational Period.
 
 ## Technology Stack
-- Frontend: React, Vite, PWA service worker
-- Backend: Node.js / Socket.io event bus
-- Database: Supabase Postgres, local SQLite via PowerSync
-- Hosting: cloud database on DigitalOcean or AWS; local dev on laptop
-- Offline: browser caches, IndexedDB/SQLite, retry queue
+- Frontend: React 18+, Vite, Typescript
+- Styling: Scoped CSS/Stylesheets
+- Database: Supabase (PostgreSQL 15+)
+- Realtime: Supabase Realtime (WebSockets)
+- Authentication: Supabase Auth (GoTrue)
+- Hosting: DigitalOcean / Vercel (Frontend), Supabase (Backend/DB)
 
 ## Project Structure
 - `/src` - React application source
+- `/src/components` - UI components (Admin, Dashboards, Mapping)
+- `/src/context` - Global state providers (Incident, Auth)
+- `/src/hooks` - Operational logic and data synchronization hooks
+- `/src/services` - Supabase-specific CRUD and RPC operations
 - `/public` - static PWA assets
-- `package.json` - build and run scripts
-- `README.md` - developer guidance
+
+## Core Operational Entities
+1. **Incident**: The root object containing all operational data.
+2. **Operational Period (OP)**: Time-bounded slices of an incident.
+3. **Responder**: Personnel checked into the incident with a specific `status` and `access_level`.
+4. **Team**: A grouping of responders (Hasty, Ground, UAS, Staff, etc.) assigned to an OP.
+5. **Assignment**: Tasks defined by Planning and assigned to specific Teams.
 
 ## Next Steps
-1. Build JSON-LD schema definitions for incident and task models.
-2. Scaffold React views for dashboard and assignment management.
-3. Add PWA service worker with offline caching.
-4. Integrate Supabase auth and realtime sync.
-5. Add PowerSync / SQLite local mirror support.
-6. Add Node.js + Socket.io backend event handler for commands.
+1. Implement PWA service worker for full offline asset caching.
+2. Integrate PowerSync / SQLite local mirror for offline-first data persistence.
+3. Expand SARTopo real-time synchronization for geospatial assets.
+4. Develop automated PDF reporting for ICS forms (e.g., ICS 204).
 
 ---
 
