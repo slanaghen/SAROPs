@@ -31,11 +31,10 @@ export const checkIsParOverdue = (team, parIntervalMinutes, now = Date.now()) =>
  * Formats a timestamp as a human-readable duration since it occurred.
  * 
  * @param {string|Date} timestamp - The ISO string or Date object.
- * @param {any} _ - Unused parameter (placeholder for compatibility).
  * @param {number} [now] - Optional current timestamp for testing.
  * @returns {string} - Formatted string (e.g., "15m ago", "2h 15m ago").
  */
-export const formatTimeSince = (timestamp, _, now = Date.now()) => {
+export const formatTimeSince = (timestamp, now = Date.now()) => {
   if (!timestamp) return 'never';
   
   const then = new Date(timestamp).getTime();

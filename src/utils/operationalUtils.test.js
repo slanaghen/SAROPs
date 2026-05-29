@@ -56,17 +56,17 @@ describe('operationalUtils', () => {
 
     it('returns "just now" for very recent timestamps', () => {
       const timestamp = new Date(currentTime - 30000).toISOString();
-      expect(formatTimeSince(timestamp, null, currentTime)).toBe('just now');
+      expect(formatTimeSince(timestamp, currentTime)).toBe('just now');
     });
 
     it('formats minutes correctly', () => {
       const timestamp = new Date(currentTime - 15 * 60000).toISOString();
-      expect(formatTimeSince(timestamp, null, currentTime)).toBe('15m ago');
+      expect(formatTimeSince(timestamp, currentTime)).toBe('15m ago');
     });
 
     it('formats hours and minutes correctly', () => {
       const timestamp = new Date(currentTime - (2 * 60 + 15) * 60000).toISOString();
-      expect(formatTimeSince(timestamp, null, currentTime)).toBe('2h 15m ago');
+      expect(formatTimeSince(timestamp, currentTime)).toBe('2h 15m ago');
     });
   });
 });

@@ -22,8 +22,15 @@ import { IncidentProvider, useIncident } from './context/IncidentContext';
 const OperationsDashboardPage = lazy(() => import('./pages/OperationsDashboardPage'));
 
 const AdminProtectedRoute = ({ children }) => {
-  const { isAdmin } = useIncident();
-  if (!isAdmin) return <Navigate to="/" replace />;
+  const { accessLevel, isAdmin } = useIncident();
+  if (!isAdmin || accessLevel !== 'admin') return <Navigate to="/operations" replace />;
+  return children;
+};
+
+const StaffProtectedRoute = ({ children }) => {
+  const { accessLevel, isAdmin } = useIncident();
+  const isStaff = isAdmin && (accessLevel === 'staff' || accessLevel === 'admin');
+  if (!isStaff) return <Navigate to="/responder" replace />;
   return children;
 };
 
@@ -37,29 +44,29 @@ const router = createBrowserRouter([
       { path: "checkin", element: <ResponderCheckinPage /> },
       { path: "login", element: <LoginPage /> },
       { path: "checkout", element: <CheckOutPage /> },
-      { path: "planning", element: <PlanningDashboardPage /> },
+      { path: "planning", element: <StaffProtectedRoute><PlanningDashboardPage /></StaffProtectedRoute> },
       { 
         path: "operations", 
         element: (
-          <Suspense fallback={
+          <StaffProtectedRoute><Suspense fallback={
             <div style={{ padding: '40px', textAlign: 'center', color: '#64748b' }}>
               Loading Operations Dashboard...
             </div>
           }>
             <OperationsDashboardPage />
-          </Suspense>
+          </Suspense></StaffProtectedRoute>
         ) 
       },
       { path: "responder", element: <ResponderDashboardPage /> },
-      { path: "incident", element: <IncidentEditPage /> },
-      { path: "admin", element: <AdminPage /> },
+      { path: "incident", element: <StaffProtectedRoute><IncidentEditPage /></StaffProtectedRoute> },
+      { path: "admin", element: <AdminProtectedRoute><AdminPage /></AdminProtectedRoute> },
       { path: "settings", element: <SettingsPage /> },
-      { path: "action-log", element: <ActionLogPage /> },
+      { path: "action-log", element: <StaffProtectedRoute><ActionLogPage /></StaffProtectedRoute> },
       { path: "qrcodes", element: <QRCodesPage /> },
-      { path: "sartopo", element: <SARTopoDataPage /> },
-      { path: "pdfs", element: <PDFsPage /> },
+      { path: "sartopo", element: <StaffProtectedRoute><SARTopoDataPage /></StaffProtectedRoute> },
+      { path: "pdfs", element: <StaffProtectedRoute><PDFsPage /></StaffProtectedRoute> },
       { path: "ics", element: <ICSAssignmentPage /> },
-      { path: "google-ics", element: <GoogleICSFormsPage /> },
+      { path: "google-ics", element: <StaffProtectedRoute><GoogleICSFormsPage /></StaffProtectedRoute> },
     ],
   },
 ]);

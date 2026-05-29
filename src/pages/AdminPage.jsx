@@ -5,6 +5,7 @@ import { useIncident } from '../context/IncidentContext';
 import { v4 as uuidv4 } from 'uuid';
 import '../styles/IncidentEditPage.css'; // Reusing form styles for consistency
 import { usePlanningDashboard } from '../hooks/usePlanningDashboard'; // Import usePlanningDashboard
+import { useAdminData } from '../hooks/useAdminData';
 import { 
   OPERATIONS_REFRESH_INTERVAL,
   RESPONDER_REFRESH_INTERVAL,
@@ -25,21 +26,22 @@ import AdminIncidentsTable from '../components/admin/AdminIncidentsTable';
 const AdminPage = () => {
   const navigate = useNavigate();
   const { 
-    isAdmin, setIsAdmin, incidentId, responderId, endIncident, logout, startIncident,
+    isAdmin, setIsAdmin, incidentId, responderId, responderStatus, endIncident, logout, startIncident,
     setResponderId, setResponderName, setResponderStatus, setAccessLevel,
     setOperationsRefreshInterval: setOpsRate, setResponderRefreshInterval: setResRate, setSartopoRefreshInterval: setTopoRate
   } = useIncident();
-  const [users, setUsers] = useState([]);
-  const [fetching, setFetching] = useState(false);
-  const [allIncidents, setAllIncidents] = useState([]);
-  const [allResponders, setAllResponders] = useState([]);
-  const [allTeams, setAllTeams] = useState([]);
-  const [allAssignments, setAllAssignments] = useState([]);
+
+  const { 
+    users, incidents: allIncidents, responders: allResponders, 
+    teams: allTeams, assignments: allAssignments, 
+    loading: fetching, refresh: fetchTable, refreshAll: refreshDashboardData
+  } = useAdminData();
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [isRespondersExpanded, setIsRespondersExpanded] = useState(true);
-  const { recordAction } = usePlanningDashboard(supabase, incidentId); // Use recordAction from hook
+  const { recordAction } = usePlanningDashboard(supabase, incidentId);
 
   const [opRefresh, setOpRefresh] = useState(OPERATIONS_REFRESH_INTERVAL / 1000);
   const [resRefresh, setResRefresh] = useState(RESPONDER_REFRESH_INTERVAL / 1000);
@@ -77,88 +79,18 @@ const AdminPage = () => {
     }
   }, [isAdmin, fetching, navigate]);
 
-  const fetchUsers = useCallback(async () => {
-    if (!isAdmin) return;
-    setFetching(true);
-    try {
-      const { data, error: fetchError } = await supabase
-        .from('users')
-        .select('*')
-        .order('email');
-
-      if (fetchError) throw fetchError;
-      console.log('All system users retrieved:', data);
-      setUsers(data || []);
-    } catch (err) {
-      setError('Failed to load user list');
-      console.error(err);
-    } finally {
-      setFetching(false);
-    }
-  }, [isAdmin]);
-
-  const fetchAllIncidents = useCallback(async () => {
-    if (!isAdmin) return;
-    try {
-      // Fetch incidents and join with operational periods to find the latest one
-      const { data, error: fetchError } = await supabase
-        .from('incidents')
-        .select('*, operational_periods(op_number, start_datetime)')
-        .order('start_datetime', { ascending: false });
-
-      if (fetchError) throw fetchError;
-      setAllIncidents(data || []);
-    } catch (err) {
-      console.error('Error fetching incident list:', err);
-    }
-  }, [isAdmin]);
-
-  const fetchAllResponders = useCallback(async () => {
-    if (!isAdmin) return;
-    try {
-      const { data, error: fetchError } = await supabase
-        .from('responders')
-        .select('*')
-        .order('checkin_datetime', { ascending: false });
-
-      if (fetchError) throw fetchError;
-      setAllResponders(data || []);
-    } catch (err) {
-      console.error('Error fetching responders list:', err);
-    }
-  }, [isAdmin]);
-
-  const fetchAllTeams = useCallback(async () => {
-    if (!isAdmin) return;
-    try {
-      const { data, error: fetchError } = await supabase
-        .from('teams')
-        .select('*, operational_periods(op_number, incidents(name, number))')
-        .order('created_at', { ascending: false });
-
-      if (fetchError) throw fetchError;
-      setAllTeams(data || []);
-    } catch (err) {
-      console.error('Error fetching teams list:', err);
-    }
-  }, [isAdmin]);
-
-  const fetchAllAssignments = useCallback(async () => {
-    if (!isAdmin) return;
-    try {
-      const { data, error: fetchError } = await supabase
-        .from('assignments')
-        .select('*, operational_periods(op_period_id, op_number, incident_id)') // Fetch incident_id from op_periods
-        .order('created_at', { ascending: false });
-
-      if (fetchError) throw fetchError;
-      setAllAssignments(data || []);
-    } catch (err) {
-      console.error('Error fetching assignments list:', err);
-    }
-  }, [isAdmin]);
-
   const handleLogout = async () => {
+    if (responderId && responderStatus !== 'CheckedOut') {
+      // Synchronize logout with operational check-out
+      try {
+        await supabase.from('teams').update({ leader_responder_id: null }).eq('leader_responder_id', responderId);
+        await supabase.from('responders')
+          .update({ status: 'CheckedOut', checkout_datetime: new Date().toISOString() })
+          .eq('responder_id', responderId);
+      } catch (err) {
+        console.error('Failed to perform operational check-out during logout:', err);
+      }
+    }
     await supabase.auth.signOut();
     localStorage.removeItem('sarops_user_email');
     logout(); // Use the global logout to clear everything
@@ -185,14 +117,8 @@ const AdminPage = () => {
       if (seedError) throw seedError;
 
       await recordAction?.('Admin triggered specific development data seeding (15 assignments, 31 responders).');
-      
-      // Await all refreshes to ensure UI parity
-      await Promise.all([
-        fetchAllIncidents(),
-        fetchAllResponders(),
-        fetchAllTeams(),
-        fetchAllAssignments()
-      ]);
+
+      await refreshDashboardData();
       setSuccess('Database successfully seeded with test data.');
     } catch (err) {
       let userFriendlyMessage = err.message;
@@ -249,13 +175,9 @@ const AdminPage = () => {
 
   useEffect(() => {
     if (isAdmin) {
-      fetchUsers();
-      fetchAllIncidents();
-      fetchAllResponders();
-      fetchAllTeams();
-      fetchAllAssignments();
+      refreshDashboardData();
     }
-  }, [isAdmin, fetchUsers, fetchAllIncidents, fetchAllResponders, fetchAllTeams, fetchAllAssignments]);
+  }, [isAdmin, refreshDashboardData]);
 
   const handleSaveUser = async (formData) => {
     setLoading(true);
@@ -295,7 +217,7 @@ const AdminPage = () => {
         if (insertError) throw insertError;
         setSuccess(`User ${formData.email} added successfully.`);
       }
-      await fetchUsers();
+      await fetchTable('users');
     } catch (err) {
       setError(err.message || 'Failed to save user.');
     } finally {
@@ -341,7 +263,7 @@ const AdminPage = () => {
         if (insertError) throw insertError;
         setSuccess(`Responder ${formData.name} added to system.`);
       }
-      await fetchAllResponders();
+      await fetchTable('responders');
     } catch (err) {
       setError(err.message || 'Failed to save responder.');
     } finally {
@@ -385,7 +307,7 @@ const AdminPage = () => {
         if (insertError) throw insertError;
         setSuccess(`Team ${formData.team_name_number} created.`);
       }
-      await fetchAllTeams();
+      await fetchTable('teams');
     } catch (err) {
       setError(err.message || 'Failed to save team.');
     } finally {
@@ -410,6 +332,8 @@ const AdminPage = () => {
 
       // Update context if we checked out our own current responder session
       if (id === responderId) {
+        await supabase.auth.signOut();
+        localStorage.removeItem('sarops_user_email');
         logout();
       }
 
@@ -417,7 +341,7 @@ const AdminPage = () => {
       await recordAction?.(`Admin checked out responder "${responder?.name || 'Unknown'}" (ID: ${id}). Fields modified: status="CheckedOut", checkout_datetime="${now}".`);
 
       setSuccess('Responder checked out.');
-      await fetchAllResponders();
+      await fetchTable('responders');
     } catch (err) {
       setError('Failed to check out responder: ' + err.message);
     }
@@ -443,11 +367,7 @@ const AdminPage = () => {
 
       await recordAction?.(`Admin disbanded team "${name}" (ID: ${id}, Type: ${type}). Fields modified: status="Disbanded", last_par_check=null. Automated trigger: All members released to "Staged".`);
       
-      // Await refreshes since responder status is affected by the disband trigger
-      await Promise.all([
-        fetchAllTeams(),
-        fetchAllResponders()
-      ]);
+      await refreshDashboardData();
       setSuccess('Team disbanded.');
     } catch (err) {
       setError('Failed to disband team: ' + err.message);
@@ -481,7 +401,7 @@ const AdminPage = () => {
 
       await recordAction?.(`Admin deleted team "${name}" (ID: ${id}, Type: ${type}).`);
       setSuccess('Team record deleted.');
-      await fetchAllTeams();
+      await fetchTable('teams');
     } catch (err) {
       setError('Failed to delete team: ' + err.message);
     }
@@ -500,7 +420,7 @@ const AdminPage = () => {
 
       await recordAction?.(`Admin deleted assignment "${name}" (ID: ${id}, Type: ${type}).`);
       setSuccess('Assignment record deleted.');
-      await fetchAllAssignments();
+      await fetchTable('assignments');
     } catch (err) {
       setError('Failed to delete assignment: ' + err.message);
     }
@@ -524,7 +444,7 @@ const AdminPage = () => {
 
       await recordAction?.(`Admin deleted responder "${name}" (ID: ${id}, Agency: ${agency}).`);
       setSuccess('Responder record deleted.');
-      await fetchAllResponders();
+      await fetchTable('responders');
     } catch (err) {
       setError('Failed to delete responder: ' + err.message);
     }
@@ -597,13 +517,7 @@ const AdminPage = () => {
 
       setSuccess('Incident ended and resources cleaned up.');
       
-      // Refresh all management views simultaneously
-      await Promise.all([
-        fetchAllIncidents(),
-        fetchAllResponders(),
-        fetchAllTeams(),
-        fetchAllAssignments()
-      ]);
+      await refreshDashboardData();
     } catch (err) {
       setError('Failed to end incident: ' + err.message);
     } finally {
@@ -652,7 +566,7 @@ const AdminPage = () => {
         if (insertError) throw insertError;
         setSuccess(`Assignment ${formData.title} created.`);
       }
-      await fetchAllAssignments();
+      await fetchTable('assignments');
     } catch (err) {
       setError(err.message || 'Failed to save assignment.');
     } finally {
@@ -686,7 +600,7 @@ const AdminPage = () => {
         await supabase.from('operational_periods').insert({ op_period_id: uuidv4(), incident_id: inc_id, op_number: 1, start_datetime: formData.start_datetime, situation_narrative: 'Incident started.' });
         setSuccess(`Incident ${formData.name} created successfully.`);
       }
-      await fetchAllIncidents();
+      await fetchTable('incidents');
     } catch (err) {
       setError(err.message || 'Failed to save incident.');
     } finally {
@@ -721,13 +635,7 @@ const AdminPage = () => {
 
       setSuccess('Incident and all associated data deleted.');
       
-      // 4. Await all refreshes to ensure UI is in sync
-      await Promise.all([
-        fetchAllIncidents(),
-        fetchAllResponders(),
-        fetchAllTeams(),
-        fetchAllAssignments()
-      ]);
+      await refreshDashboardData();
     } catch (err) {
       setError('Failed to delete incident: ' + err.message);
     } finally {
@@ -773,7 +681,7 @@ const AdminPage = () => {
       const { error: deleteError } = await supabase.rpc('admin_remove_user', { p_email: email });
       
       if (deleteError) throw deleteError;
-      await fetchUsers();
+      await fetchTable('users');
     } catch (err) {
       setError('Failed to remove user');
     }

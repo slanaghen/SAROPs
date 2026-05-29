@@ -97,6 +97,7 @@ describe('ResponderCheckinPage Routing', () => {
   it('should redirect active command staff to operations', async () => {
     vi.mocked(useIncident).mockReturnValue({
       isActive: true,
+      isAdmin: true,
       responderName: 'Steve',
       responderStatus: 'Staged',
       accessLevel: 'staff',

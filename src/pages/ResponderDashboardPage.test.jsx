@@ -165,7 +165,7 @@ describe('ResponderDashboardPage', () => {
     });
 
     render(<ResponderDashboardPage />);
-    expect(screen.getByText(/Loading responder dashboard data/i)).toBeInTheDocument();
+    expect(screen.getByText(/Loading mission data/i)).toBeInTheDocument();
   });
 
   it('should show Deploy button for leader and cascade Deployed status to team and members', async () => {

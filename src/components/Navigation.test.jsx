@@ -7,8 +7,9 @@ import { useIncident } from '../context/IncidentContext';
 
 expect.extend(matchers);
 
+const mockUseIncident = vi.fn();
 vi.mock('../context/IncidentContext', () => ({
-  useIncident: vi.fn(),
+  useIncident: () => mockUseIncident(),
 }));
 
 afterEach(() => {
@@ -17,12 +18,21 @@ afterEach(() => {
 
 describe('Navigation Component', () => {
   beforeEach(() => {
-    vi.mocked(useIncident).mockReturnValue({
+    vi.clearAllMocks();
+    mockUseIncident.mockReturnValue({
       isAdmin: false,
+      accessLevel: 'responder',
+      isActive: false
     });
   });
 
   it('renders all navigation links with correct text', () => {
+    mockUseIncident.mockReturnValue({
+      isAdmin: true,
+      accessLevel: 'staff', // Use 'staff' so 'Login' renders instead of 'Admin'
+      isActive: true
+    });
+
     render(
       <MemoryRouter>
         <Navigation />
@@ -35,12 +45,17 @@ describe('Navigation Component', () => {
     expect(screen.getByText(/Check-Out/i)).toBeInTheDocument();
     expect(screen.getByText(/My Dashboard/i)).toBeInTheDocument();
     expect(screen.getByText(/Incident/i)).toBeInTheDocument();
+    expect(screen.getByText(/ICS Chart/i)).toBeInTheDocument();
+    expect(screen.getByText(/QR Codes/i)).toBeInTheDocument();
+    expect(screen.getByText(/SARTopo Data/i)).toBeInTheDocument();
+    expect(screen.getByText(/PDFs/i)).toBeInTheDocument();
     expect(screen.getByText(/Login/i)).toBeInTheDocument();
   });
 
   it('renders the Admin link instead of Login when user is an admin', () => {
-    vi.mocked(useIncident).mockReturnValue({
+    mockUseIncident.mockReturnValue({
       isAdmin: true,
+      accessLevel: 'admin',
     });
 
     render(
@@ -54,6 +69,12 @@ describe('Navigation Component', () => {
   });
 
   it('applies the active class to the tab matching the current path', () => {
+    mockUseIncident.mockReturnValue({
+      isAdmin: true,
+      accessLevel: 'staff',
+      isActive: true
+    });
+
     render(
       <MemoryRouter initialEntries={['/operations']}>
         <Navigation />
@@ -68,6 +89,12 @@ describe('Navigation Component', () => {
   });
 
   it('uses prefix matching for the planning tab', () => {
+    mockUseIncident.mockReturnValue({
+      isAdmin: true,
+      accessLevel: 'staff',
+      isActive: true
+    });
+
     render(
       <MemoryRouter initialEntries={['/planning/some-uuid']}>
         <Navigation />

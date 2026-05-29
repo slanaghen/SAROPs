@@ -150,7 +150,7 @@ const AdminLogin = ({ onLoginSuccess }) => {
       // Create system user record with Responder access level via secure RPC
       const { error: rpcError } = await supabase.rpc('admin_add_user', {
         p_email: email.trim().toLowerCase(),
-        p_username: email.trim().toLowerCase().split('@')[0],
+        p_username: email.trim().toLowerCase(),
         p_password: Math.random().toString(36).slice(-12), // Temporary placeholder password
         p_access_level: 'responder'
       });

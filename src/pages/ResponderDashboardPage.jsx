@@ -97,7 +97,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
   // Memoized PAR status and time formatting to ensure visual parity with Operations page
   const { parRequired, timeSinceLastPar } = useMemo(() => {
     const required = checkIsParOverdue(team, parInterval, currentTime);
-    const displayTime = formatTimeSince(team?.last_par_check || team?.created_at, null, currentTime);
+    const displayTime = formatTimeSince(team?.last_par_check || team?.created_at, currentTime);
     return { parRequired: required, timeSinceLastPar: displayTime }; 
   }, [team, parInterval, currentTime]);
 
@@ -540,18 +540,13 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     }
   }, [responderId, team?.team_id]);
 
-  if (!responderId) {
+  // If responderId is missing from context, show a loading state for a moment 
+  // to allow global state hydration to finish after a redirect.
+  if (!responderId || loading) {
     return (
-      <div style={{ padding: '24px', textAlign: 'center' }}>
-        <p>Please provide a Responder ID to view the dashboard.</p>
-      </div>
-    );
-  }
-
-  if (loading) {
-    return (
-      <div style={{ padding: '24px', textAlign: 'center', color: '#666' }}>
-        <p>Loading responder dashboard data...</p>
+      <div style={{ padding: '40px', textAlign: 'center', color: '#64748b' }}>
+        <div className="loading-spinner" style={{ fontSize: '32px', marginBottom: '16px' }}>⏳</div>
+        <p>{!responderId ? 'Verifying responder identity...' : 'Loading mission data...'}</p>
       </div>
     );
   }

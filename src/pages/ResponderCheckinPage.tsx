@@ -86,7 +86,7 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
 
   // Centralized definition of staff-level access
   const isStaff = useMemo(() => 
-    accessLevel === 'staff' || accessLevel === 'admin', 
+    isAdmin && (accessLevel === 'staff' || accessLevel === 'admin'), 
     [accessLevel]
   );
 
@@ -315,9 +315,10 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
       }
 
       // If operational period provided, show team assignment or staff confirmation
-      const isStaff = finalResponder.access_level === 'staff' || finalResponder.access_level === 'admin';
+      // Only allow staff/admin confirmation flows if the user is logged in
+      const isStaffCheck = isAdmin && (finalResponder.access_level === 'staff' || finalResponder.access_level === 'admin');
 
-      if (isStaff && targetIncidentId) {
+      if (isStaffCheck && targetIncidentId) {
         const { data: roleData } = await supabase
           .from('team_responders')
           .select('role, teams!inner(type)')
@@ -338,7 +339,7 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
           .eq('op_period_id', effectiveOpId)
           .in('status', ['Staged', 'Assigned']);
 
-        if (!teamsError && teamsData && (isStaff || teamsData.length > 0)) {
+        if (!teamsError && teamsData && (isStaffCheck || teamsData.length > 0)) {
           setTeams(teamsData);
           setShowTeamSelection(true);
         } else {

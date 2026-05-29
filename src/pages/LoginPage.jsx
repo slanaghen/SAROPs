@@ -50,11 +50,20 @@ const LoginPage = () => {
       }
     }
 
-    if (responderRecord) {
-      setResponderId(responderRecord.responder_id);
-      setResponderName(responderRecord.name);
-      setResponderStatus(responderRecord.status);
-      setAccessLevel(responderRecord.access_level);
+    // Prioritize the responder ID from the check-in record, 
+    // but fallback to a profile lookup if the upsert return was empty
+    const finalResponderId = responderRecord?.responder_id;
+    
+    if (finalResponderId) {
+      setResponderId(finalResponderId);
+      setResponderName(responderRecord.name || userRecord.name || userRecord.username);
+      setResponderStatus(responderRecord.status || 'Staged');
+      setAccessLevel(responderRecord.access_level || userRecord.access_level);
+    } else {
+      // Fallback: If we don't have a responder ID yet but have an identity, 
+      // set the basic info to allow the dashboard to attempt its own lookup.
+      setResponderName(userRecord.name || userRecord.username);
+      setAccessLevel(userRecord.access_level);
     }
 
     if (selectedId) {

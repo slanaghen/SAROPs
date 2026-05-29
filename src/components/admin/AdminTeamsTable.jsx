@@ -1,7 +1,7 @@
 import React from 'react';
 
 const AdminTeamsTable = ({
-  allTeams,
+  allTeams = [],
   isTeamsExpanded,
   setIsTeamsExpanded,
   handleDisbandTeam,

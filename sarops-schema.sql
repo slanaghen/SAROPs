@@ -267,7 +267,7 @@ CREATE TABLE team_messages (
 -- Simple table-based auth for system users (managed via Admin page)
 CREATE TABLE users (
   email TEXT PRIMARY KEY,
-  username TEXT NOT NULL,
+  username TEXT NOT NULL UNIQUE,
   password TEXT NOT NULL, -- Store as crypt(password, gen_salt('bf'))
   access_level access_level NOT NULL DEFAULT 'responder',
   name TEXT,
@@ -1161,7 +1161,7 @@ BEGIN
 
     EXECUTE 'CREATE TABLE users (
       email TEXT PRIMARY KEY,
-      username TEXT NOT NULL,
+      username TEXT NOT NULL UNIQUE,
       password TEXT NOT NULL,
       access_level access_level NOT NULL DEFAULT ''responder'',
       name TEXT,
@@ -1569,20 +1569,6 @@ BEGIN
     $func$ LANGUAGE plpgsql STABLE SECURITY DEFINER;';
 
     EXECUTE 'DROP FUNCTION IF EXISTS verify_admin_login(TEXT, TEXT);';
-    EXECUTE 'DROP FUNCTION IF EXISTS verify_user_login(TEXT, TEXT);';
-
-    EXECUTE 'CREATE OR REPLACE FUNCTION verify_user_login(p_email TEXT, p_password TEXT)
-    RETURNS SETOF users AS $func$
-    -- This function authenticates ANY user from the ''users'' table,
-    -- regardless of their ''access_level''. Subsequent application logic
-    -- determines what they can access based on their access_level.
-    BEGIN
-      RETURN QUERY
-      SELECT * FROM users
-      WHERE (LOWER(email) = LOWER(p_email) OR LOWER(username) = LOWER(p_email))
-        AND (password = p_password OR password = crypt(p_password, password));
-    END;
-    $func$ LANGUAGE plpgsql SECURITY DEFINER;';
 
     EXECUTE 'CREATE POLICY "Allow all authenticated to view active incidents" ON incidents
       FOR SELECT TO authenticated USING (end_datetime IS NULL);';
@@ -1733,7 +1719,20 @@ BEGIN
       VALUES (
         LOWER(p_email), p_username, crypt(p_password, gen_salt(''bf'')), p_access_level::access_level,
         p_name, p_agency, p_identifier, p_phone, p_type::responder_type, p_skills
-      );
+      )
+      ON CONFLICT (email) DO UPDATE SET
+        username = EXCLUDED.username,
+        password = CASE 
+          WHEN p_password IS NOT NULL AND p_password <> $sq$$sq$ THEN EXCLUDED.password 
+          ELSE users.password 
+        END,
+        access_level = EXCLUDED.access_level,
+        name = EXCLUDED.name,
+        agency = EXCLUDED.agency,
+        identifier = EXCLUDED.identifier,
+        cell_phone = EXCLUDED.cell_phone,
+        responder_type = EXCLUDED.responder_type,
+        special_skills = EXCLUDED.special_skills;
     END;
     $func$ LANGUAGE plpgsql SECURITY DEFINER;';
 

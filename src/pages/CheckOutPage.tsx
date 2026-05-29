@@ -45,6 +45,7 @@ const CheckOutPage: React.FC = () => {
       if (dbError) throw dbError;
 
       // Invalidate the anonymous session
+      localStorage.removeItem('sarops_user_email');
       await supabase.auth.signOut();
 
       // Clear the global incident context and local session

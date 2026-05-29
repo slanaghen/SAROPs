@@ -475,7 +475,7 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
                 id="incident"
                 value={selectedIncidentId}
                 onChange={(e) => {
-                  if (e.target.value === 'CREATE_NEW') {
+                if (e.target.value === 'NEW_INCIDENT') {
                     onCreateIncident?.(formData);
                   } else {
                     onIncidentSelected?.(e.target.value);
@@ -491,7 +491,7 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
                   </option>
                 ))}
                 {(incidents.length === 0 || isAdmin || !confirmedResponder) && (
-                  <option value="CREATE_NEW">+ Create New Incident</option>
+                  <option value="NEW_INCIDENT">+ Create New Incident</option>
                 )}
               </select>
               {incidentError && <small className="form-hint error-text">{incidentError}</small>}

@@ -14,8 +14,9 @@ export const useAdminData = () => {
   const refresh = useCallback(async (table) => {
     setLoading(true);
     try {
-      const { data: result } = await supabase.from(table).select('*');
-      setData(prev => ({ ...prev, [table]: result }));
+      const { data: result, error } = await supabase.from(table).select('*');
+      if (error) console.error(`[useAdminData] Error fetching ${table}:`, error);
+      setData(prev => ({ ...prev, [table]: result || [] }));
     } finally {
       setLoading(false);
     }

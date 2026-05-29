@@ -1,7 +1,7 @@
 import React from 'react';
 
 const AdminRespondersTable = ({
-  allResponders,
+  allResponders = [],
   isRespondersExpanded,
   setIsRespondersExpanded,
   handleCheckOutResponder,

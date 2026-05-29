@@ -32,24 +32,26 @@ const GoogleICSFormsPage = () => {
     setNamedRanges([]);
 
     try {
-      // NOTE: This requires VITE_GOOGLE_SHEETS_API_KEY to be set in your .env file
-      const apiKey = import.meta.env.VITE_GOOGLE_SHEETS_API_KEY;
+      console.log('Debugging Google Sheets JWT Auth Load:');
+      console.log('URL:', sheetUrl);
+      console.log('Client Email:', keys.client_email);
       
-      if (!apiKey) {
-        throw new Error('Google API Key is not configured. Please add VITE_GOOGLE_SHEETS_API_KEY to your environment variables.');
-      }
-
-      // Fetch spreadsheet metadata specifically for named ranges
-      const response = await fetch(
-        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=namedRanges&key=${apiKey}`
+      const auth = new google.auth.JWT(
+        keys.client_email,
+        null,
+        keys.private_key,
+        ['https://www.googleapis.com/auth/spreadsheets']
       );
 
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error?.message || `Google API error: ${response.status}`);
-      }
+      const sheets = google.sheets({ version: 'v4', auth });
 
-      const data = await response.json();
+      // Fetch spreadsheet metadata specifically for named ranges using the library client
+      const response = await sheets.spreadsheets.get({
+        spreadsheetId,
+        fields: 'namedRanges',
+      });
+
+      const data = response.data;
       const ranges = data.namedRanges || [];
       
       if (ranges.length === 0) {

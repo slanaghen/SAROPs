@@ -1,7 +1,7 @@
 import React from 'react';
 
 const AdminIncidentsTable = ({
-  allIncidents,
+  allIncidents = [],
   isIncidentsExpanded,
   setIsIncidentsExpanded,
   handleEndIncident,

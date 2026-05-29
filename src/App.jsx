@@ -3,6 +3,7 @@ import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from './lib/supabase';
 import { useIncident } from './context/IncidentContext';
 import useResponderTeamAndAssignment from './hooks/useResponderTeamAndAssignment';
+import { useRealTimeNotifications } from './hooks/useRealTimeNotifications';
 import logo from './assets/logo.png';
 import './styles.css';
 
@@ -72,12 +73,36 @@ function App() {
   // are perfectly synchronized with the database state at all times.
   const { team, assignment, responderRecord, loading: hookLoading } = useResponderTeamAndAssignment(supabase, responderId);
 
+  const handleSignOut = async () => {
+    if (responderId && responderStatus !== 'CheckedOut') {
+      // Synchronize logout with operational check-out
+      try {
+        await supabase.from('teams').update({ leader_responder_id: null }).eq('leader_responder_id', responderId);
+        await supabase.from('responders')
+          .update({ status: 'CheckedOut', checkout_datetime: new Date().toISOString() })
+          .eq('responder_id', responderId);
+      } catch (err) {
+        console.error('Failed to perform operational check-out during sign-out:', err);
+      }
+    }
+    await supabase.auth.signOut();
+    localStorage.removeItem('sarops_user_email');
+    logout();
+    setMenuOpen(false);
+    navigate('/checkin');
+  };
+
   useEffect(() => {
     if (!isActive || !responderId || hookLoading) return;
 
     if (responderRecord) {
       setResponderStatus(responderRecord.status);
       if (setAccessLevel) setAccessLevel(responderRecord.access_level);
+
+      // Requirement: If check-out occurs (even remotely), synchronize the session state
+      if (responderRecord.status === 'CheckedOut') {
+        handleSignOut();
+      }
     }
 
     if (team && team.status !== 'Disbanded') {
@@ -93,70 +118,32 @@ function App() {
     setResponderStatus, setAccessLevel, setCurrentTeamStatus, setCurrentAssignmentStatus
   ]);
 
-  // Audio and browser notification for status changes (responder, team, assignment)
-  const prevStatusRef = useRef(responderStatus);
-  const prevTeamStatusRef = useRef(currentTeamStatus);
-  const prevAssignmentStatusRef = useRef(currentAssignmentStatus);
-
-  useEffect(() => {
-    const triggerNotification = (title, body) => {
-      // 1. Play Sound
-      if (typeof Audio !== 'undefined') {
-        try {
-          // Using a clear notification sound
-          const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
-          audio.play().catch(() => console.debug('Audio blocked: interaction required'));
-        } catch (e) {
-          console.debug('Audio playback failed');
-        }
-      }
-      // 2. Browser Notification (if permitted)
-      if ("Notification" in window && Notification.permission === "granted") {
-        new Notification(title, {
-          body: body,
-          icon: logo,
-          tag: 'status-change'
-        });
-      }
-    };
-
-    if (isActive) {
-      if (prevStatusRef.current && responderStatus && prevStatusRef.current !== responderStatus) {
-        triggerNotification("SAROps: Your Status Changed", `Your operational status has changed to: ${responderStatus}`);
-      }
-      if (prevTeamStatusRef.current && currentTeamStatus && prevTeamStatusRef.current !== currentTeamStatus) {
-        triggerNotification("SAROps: Team Status Changed", `Your team's status has changed to: ${currentTeamStatus}`);
-      }
-      if (prevAssignmentStatusRef.current && currentAssignmentStatus && prevAssignmentStatusRef.current !== currentAssignmentStatus) {
-        triggerNotification("SAROps: Assignment Status Changed", `Your team's assignment status has changed to: ${currentAssignmentStatus}`);
-      }
-    }
-    prevStatusRef.current = responderStatus;
-    prevTeamStatusRef.current = currentTeamStatus;
-    prevAssignmentStatusRef.current = currentAssignmentStatus;
-  }, [responderStatus, currentTeamStatus, currentAssignmentStatus, isActive]);
+  // Centralized Notifications
+  useRealTimeNotifications(isActive, responderStatus, currentTeamStatus, currentAssignmentStatus);
 
   // Navigation Guard: Redirect to check-in if trying to access operational pages without a session
   useEffect(() => {
-    // Added /incident and /qrcodes to public paths so anonymous users can start incidents
     const publicPaths = ['/', '/checkin', '/admin', '/incident', '/qrcodes', '/login'];
     
+    const isStaffOrAdmin = accessLevel === 'staff' || accessLevel === 'admin';
+    const responderOnlyPaths = ['/', '/checkin', '/login', '/responder', '/settings', '/qrcodes', '/ics', '/checkout'];
+
     if (!isActive && !isAdmin && !publicPaths.includes(location.pathname)) {
       console.warn(`[App Guard] Unauthorized access attempt to ${location.pathname}. Redirecting to /checkin.`, {
         isActive,
         isAdmin
       });
       navigate('/checkin');
+    } else if (isAdmin && accessLevel === 'responder' && !responderOnlyPaths.includes(location.pathname)) {
+      // Enforce: Responders cannot access Operations, Planning, SARTopo, PDFs, Action Log, or Google ICS
+      console.warn(`[App Guard] Responder attempted to access staff-only page: ${location.pathname}`);
+      navigate('/responder');
+    } else if (isAdmin && accessLevel === 'staff' && location.pathname === '/admin') {
+      // Enforce: Staff cannot access Admin
+      console.warn(`[App Guard] Staff attempted to access admin page.`);
+      navigate('/operations');
     }
-  }, [isActive, isAdmin, location.pathname, navigate]);
-
-  const handleSignOut = async () => {
-    await supabase.auth.signOut();
-    localStorage.removeItem('sarops_user_email');
-    logout();
-    setMenuOpen(false);
-    navigate('/checkin');
-  };
+  }, [isActive, isAdmin, accessLevel, location.pathname, navigate]);
 
   return (
     <div className="app-shell">
@@ -202,19 +189,24 @@ function App() {
               </button>
               {menuOpen && (
                 <div className="banner-dropdown">
-                  <Link to="/responder" onClick={() => setMenuOpen(false)}>My Dashboard</Link>
-                  <Link to="/operations" onClick={() => setMenuOpen(false)}>Operations</Link>
-                  <Link to="/planning" onClick={() => setMenuOpen(false)}>Planning</Link>
+                  {isActive && <Link to="/responder" onClick={() => setMenuOpen(false)}>My Dashboard</Link>}
                   <Link to="/checkin" onClick={() => setMenuOpen(false)}>Check-in</Link>
-                  <Link to="/incident" onClick={() => setMenuOpen(false)}>Incident</Link>
-                  <Link to="/settings" onClick={() => setMenuOpen(false)}>Settings</Link>
-                  <Link to="/admin" onClick={() => setMenuOpen(false)}>Administration</Link>
-                  <Link to="/ics" onClick={() => setMenuOpen(false)}>ICS Chart</Link>
-                  <Link to="/action-log" onClick={() => setMenuOpen(false)}>Action Log</Link>
-                  <Link to="/qrcodes" onClick={() => setMenuOpen(false)}>QR Codes</Link>
-                  <Link to="/sartopo" onClick={() => setMenuOpen(false)}>SARTopo Data</Link>
-                  <Link to="/pdfs" onClick={() => setMenuOpen(false)}>PDFs</Link>
-                  <Link to="/google-ics" onClick={() => setMenuOpen(false)}>Google ICS Forms</Link>
+                  {user && <Link to="/settings" onClick={() => setMenuOpen(false)}>Settings</Link>}
+                  {isActive && <Link to="/ics" onClick={() => setMenuOpen(false)}>ICS Chart</Link>}
+                  {isActive && <Link to="/qrcodes" onClick={() => setMenuOpen(false)}>QR Codes</Link>}
+                  {(accessLevel === 'staff' || accessLevel === 'admin') && (
+                    <>
+                      <div className="dropdown-divider"></div>
+                      <Link to="/operations" onClick={() => setMenuOpen(false)}>Operations</Link>
+                      <Link to="/planning" onClick={() => setMenuOpen(false)}>Planning</Link>
+                      <Link to="/incident" onClick={() => setMenuOpen(false)}>Incident</Link>
+                      <Link to="/action-log" onClick={() => setMenuOpen(false)}>Action Log</Link>
+                      <Link to="/sartopo" onClick={() => setMenuOpen(false)}>SARTopo Data</Link>
+                      <Link to="/pdfs" onClick={() => setMenuOpen(false)}>PDFs</Link>
+                      <Link to="/google-ics" onClick={() => setMenuOpen(false)}>Google ICS Forms</Link>
+                    </>
+                  )}
+                  {accessLevel === 'admin' && <Link to="/admin" onClick={() => setMenuOpen(false)}>Administration</Link>}
                   <div className="dropdown-divider"></div>
                   <Link to="/checkout" onClick={() => setMenuOpen(false)} className="dropdown-item">Check Out</Link>
                   <button onClick={handleSignOut} className="dropdown-item checkout">Sign Out / Clear All</button>
