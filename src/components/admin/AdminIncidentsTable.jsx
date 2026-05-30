@@ -21,7 +21,7 @@ const AdminIncidentsTable = ({
           <button 
             className="btn btn-primary btn-sm" 
             onClick={(e) => { e.stopPropagation(); handleNewIncident(); }}
-            style={{ padding: '4px 12px', fontSize: '12px' }}
+            style={{ padding: '4px 12px', fontSize: '16px' }}
           >
             + New
           </button>
@@ -53,24 +53,23 @@ const AdminIncidentsTable = ({
                 allIncidents.map(inc => {
                   const isActive = !inc.end_datetime;
                   const isCurrentlyActiveInSession = inc.incident_id === currentIncidentId;
-                  const latestOpObj = inc.operational_periods?.sort((a, b) =>
-                    new Date(b.start_datetime) - new Date(a.start_datetime)
-                  )[0];
+                  // Leverage pre-sorted operational_periods from the useAdminData join
+                  const latestOpObj = inc.operational_periods?.[0];
                   const latestOpNumber = latestOpObj?.op_number || '—';
                   const latestOpStart = latestOpObj?.start_datetime ? new Date(latestOpObj.start_datetime).toLocaleString() : '';
 
                   return (
                     <tr key={inc.incident_id} style={isCurrentlyActiveInSession ? { backgroundColor: '#f0f9ff', borderLeft: '4px solid #0ea5e9' } : {}}>
-                      <td>
+                      <td style={{ fontSize: '16px', color: isCurrentlyActiveInSession ? '#0369a1' : '#000' }}>
                         <div style={{ fontWeight: 600 }}>{inc.name}</div>
                       </td>
-                      <td style={{ fontSize: '12px', color: '#64748b' }}>#{inc.number}</td>
-                      <td>{new Date(inc.start_datetime).toLocaleDateString()}</td>
-                      <td>{latestOpNumber}</td>
-                      <td>
-                        {latestOpStart && <div style={{ fontSize: '12px', color: '#64748b' }}>{latestOpStart}</div>}
+                      <td style={{ fontSize: '16px', color: isCurrentlyActiveInSession ? '#0369a1' : '#000' }}>#{inc.number}</td>
+                      <td style={{ fontSize: '16px', color: isCurrentlyActiveInSession ? '#0369a1' : '#000' }}>{new Date(inc.start_datetime).toLocaleDateString()}</td>
+                      <td style={{ fontSize: '16px', color: isCurrentlyActiveInSession ? '#0369a1' : '#000' }}>{latestOpNumber}</td>
+                      <td style={{ fontSize: '16px', color: isCurrentlyActiveInSession ? '#0369a1' : '#000' }}>
+                        {latestOpStart && <div>{latestOpStart}</div>}
                       </td>
-                      <td>
+                      <td style={{ fontSize: '16px', color: isCurrentlyActiveInSession ? '#0369a1' : '#000' }}>
                         <span className={`status-indicator ${isActive ? 'active' : 'ended'}`}>
                           {isActive ? 'Active' : 'Ended'}
                         </span>
@@ -78,16 +77,16 @@ const AdminIncidentsTable = ({
                       <td style={{ textAlign: 'right' }}>
                         <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', alignItems: 'center' }}>
                           {isCurrentlyActiveInSession && (
-                            <span className="status-indicator assigned" style={{ margin: 0 }}>
+                            <span className="status-indicator assigned" style={{ margin: 0, fontWeight: 800, border: '1px solid rgba(255,255,255,0.3)' }}>
                               Active Session
                             </span>
                           )}
-                          <button onClick={() => handleEditIncident(inc)} className="btn btn-secondary btn-sm">Edit</button>
+                          <button onClick={() => handleEditIncident(inc)} className="btn btn-secondary btn-sm" style={{ fontSize: '16px' }}>Edit</button>
                           {isActive && (
                             <button
                               onClick={() => handleEndIncident(inc.incident_id)}
                               className="btn btn-secondary btn-sm"
-                              style={{ color: '#f59e0b' }}
+                              style={{ color: '#f59e0b', fontSize: '16px' }}
                             >
                               End Incident
                             </button>
@@ -95,7 +94,7 @@ const AdminIncidentsTable = ({
                           <button
                             onClick={() => handleDeleteIncident(inc.incident_id, inc.name)}
                             className="btn btn-secondary btn-sm"
-                            style={{ color: '#dc2626' }}
+                            style={{ color: '#dc2626', fontSize: '16px' }}
                           >
                             Delete
                           </button>

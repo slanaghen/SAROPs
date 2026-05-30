@@ -1,10 +1,14 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import logo from '../assets/logo.png';
 
 /**
  * Custom hook to handle audio and browser notifications for status changes.
  */
 export const useRealTimeNotifications = (isActive, responderStatus, teamStatus, assignmentStatus) => {
+  const [permission, setPermission] = useState(
+    typeof Notification !== 'undefined' ? Notification.permission : 'unsupported'
+  );
+
   const prevStatusRef = useRef(responderStatus);
   const prevTeamStatusRef = useRef(teamStatus);
   const prevAssignmentStatusRef = useRef(assignmentStatus);
@@ -20,14 +24,29 @@ export const useRealTimeNotifications = (isActive, responderStatus, teamStatus, 
       }
     }
     // 2. Browser Notification
-    if ("Notification" in window && Notification.permission === "granted") {
+    if ("Notification" in window) {
+      if (Notification.permission === "granted") {
       new Notification(title, {
         body: body,
         icon: logo,
         tag: 'status-change'
       });
+      } else if (Notification.permission === "denied") {
+        console.warn('[Notifications] Visual notifications are blocked by browser settings. Falling back to audio alerts only.');
+      }
     }
   };
+
+  // Monitor for permission changes and handle initial request logic
+  useEffect(() => {
+    if (isActive && "Notification" in window) {
+      if (Notification.permission === "default") {
+        Notification.requestPermission().then(setPermission);
+      } else {
+        setPermission(Notification.permission);
+      }
+    }
+  }, [isActive]);
 
   useEffect(() => {
     if (!isActive) return;
@@ -47,5 +66,5 @@ export const useRealTimeNotifications = (isActive, responderStatus, teamStatus, 
     prevAssignmentStatusRef.current = assignmentStatus;
   }, [responderStatus, teamStatus, assignmentStatus, isActive]);
 
-  return null;
+  return { permission };
 };

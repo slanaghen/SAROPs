@@ -29,7 +29,11 @@ vi.mock('../lib/supabase', () => ({
       const mock = globalThis.createSupabaseQueryMock([]);
       return mock;
     }),
-    rpc: vi.fn(() => globalThis.createSupabaseQueryMock(null)),
+    rpc: vi.fn(() => {
+      const mock = globalThis.createSupabaseQueryMock(null);
+      mock.maybeSingle = vi.fn().mockReturnThis();
+      return mock;
+    }),
     auth: {
       getSession: vi.fn().mockResolvedValue({ data: { session: null } }),
       signInAnonymously: vi.fn().mockResolvedValue({ data: { user: { id: 'test-anon-user' } }, error: null }),
@@ -105,7 +109,14 @@ describe('AdminPage Authentication Gate', () => {
     });
 
     // Mock data for incidents and responders
-    const mockIncident = { incident_id: 'i1', name: 'Lost Hiker', number: '101', start_datetime: new Date().toISOString() };
+    const mockIncident = { 
+      incident_id: 'i1', 
+      name: 'Lost Hiker', 
+      number: '101', 
+      start_datetime: new Date().toISOString(),
+      // Include nested op periods to match the updated useAdminData behavior
+      operational_periods: [{ op_number: 1, op_period_id: 'op1', start_datetime: new Date().toISOString() }]
+    };
     const mockUser = { email: 'user@example.com', username: 'SystemUser', access_level: 'responder', name: 'Test User' };
     
     supabase.from.mockImplementation((table) => {
@@ -781,5 +792,99 @@ describe('AdminPage Authentication Gate', () => {
     });
     
     resolveReset({ error: null }); // Resolve to allow clean termination
+  });
+
+  it('deactivates the operational session context without logging out', async () => {
+    const mockClearIncident = vi.fn();
+    vi.mocked(useIncident).mockReturnValue({
+      isAdmin: true,
+      isActive: true,
+      responderId: 'res-123',
+      responderStatus: 'Staged',
+      clearIncident: mockClearIncident,
+      incidentData: { name: 'Active Session' },
+      operationsRefreshInterval: 30000,
+      responderRefreshInterval: 30000,
+      sartopoRefreshInterval: 30000,
+    });
+
+    supabase.from.mockImplementation(() => globalThis.createSupabaseQueryMock([]));
+
+    render(<BrowserRouter><AdminPage /></BrowserRouter>);
+    
+    const deactivateBtn = await screen.findByRole('button', { name: /Deactivate Session/i });
+    fireEvent.click(deactivateBtn);
+
+    await waitFor(() => {
+      expect(supabase.from).toHaveBeenCalledWith('responders');
+      expect(mockClearIncident).toHaveBeenCalled();
+    });
+  });
+
+  it('displays an error message if incident activation RPC fails', async () => {
+    vi.mocked(useIncident).mockReturnValue({
+      isAdmin: true,
+      isActive: false,
+      incidentId: null,
+      startIncident: vi.fn(),
+      incidentData: { name: '' },
+    });
+
+    const mockIncident = { 
+      incident_id: 'i1', 
+      name: 'Failed Inc', 
+      number: '101', 
+      start_datetime: new Date().toISOString(),
+      operational_periods: [{ op_number: 1, op_period_id: 'op1' }]
+    };
+    supabase.from.mockImplementation((table) => {
+      if (table === 'incidents') return globalThis.createSupabaseQueryMock([mockIncident]);
+      if (table === 'users') return globalThis.createSupabaseQueryMock([{ email: 'admin@test.com' }]);
+      return globalThis.createSupabaseQueryMock([]);
+    });
+    
+    supabase.auth.getSession.mockResolvedValue({ data: { session: { user: { email: 'admin@test.com' } } } });
+    supabase.rpc.mockImplementation(() => {
+      const mock = globalThis.createSupabaseQueryMock(null, { message: 'RPC Activation Error' });
+      mock.maybeSingle = vi.fn().mockReturnThis();
+      return mock;
+    });
+
+    render(<BrowserRouter><AdminPage /></BrowserRouter>);
+
+    const select = await screen.findByLabelText(/Select Incident/i);
+    fireEvent.change(select, { target: { value: 'i1' } });
+    fireEvent.click(screen.getByRole('button', { name: /Activate Session/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/RPC Activation Error/i)).toBeInTheDocument();
+    });
+  });
+
+  it('applies system refresh intervals and updates global context', async () => {
+    const mockSetOpsRate = vi.fn();
+    vi.mocked(useIncident).mockReturnValue({
+      isAdmin: true,
+      setIsAdmin: vi.fn(),
+      setOperationsRefreshInterval: mockSetOpsRate,
+      setResponderRefreshInterval: vi.fn(),
+      setSartopoRefreshInterval: vi.fn(),
+      operationsRefreshInterval: 30000,
+      responderRefreshInterval: 30000,
+      sartopoRefreshInterval: 30000,
+      incidentId: 'i1',
+      incidentData: { name: 'Test Mission' }
+    });
+
+    render(<BrowserRouter><AdminPage /></BrowserRouter>);
+
+    const opsInput = screen.getByLabelText(/Operations Refresh/i);
+    fireEvent.change(opsInput, { target: { value: '45' } });
+
+    const applyBtn = screen.getByRole('button', { name: /Apply/i });
+    fireEvent.click(applyBtn);
+
+    expect(mockSetOpsRate).toHaveBeenCalledWith(45000);
+    expect(screen.getByText(/refresh intervals updated successfully/i)).toBeInTheDocument();
   });
 });

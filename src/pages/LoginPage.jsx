@@ -42,10 +42,11 @@ const LoginPage = () => {
         .from('incidents')
         .select('*, operational_periods(*)')
         .eq('incident_id', selectedId)
+        .order('op_number', { foreignTable: 'operational_periods', ascending: false })
         .maybeSingle();
       
       if (data) {
-        const latestOp = data.operational_periods?.sort((a, b) => b.op_number - a.op_number)[0];
+        const latestOp = data.operational_periods?.[0];
         startIncident(data.incident_id, data.name, latestOp?.op_number, latestOp?.op_period_id, data.sartopo_id, latestOp?.par_check_interval);
       }
     }

@@ -21,7 +21,7 @@ const AdminUsersTable = ({
           <button 
             className="btn btn-primary btn-sm" 
             onClick={(e) => { e.stopPropagation(); handleNewUser(); }}
-            style={{ padding: '4px 12px', fontSize: '12px' }}
+            style={{ padding: '4px 12px', fontSize: '16px' }}
           >
             + New
           </button>
@@ -54,33 +54,33 @@ const AdminUsersTable = ({
               ) : (
                 users.map(user => (
                   <tr key={user.email}>
-                    <td>
+                    <td style={{ fontSize: '16px', color: '#000' }}>
                       <div style={{ fontWeight: 600 }}>{user.name || user.username || '—'}</div>
                     </td>
-                    <td style={{ fontSize: '11px', color: '#64748b' }}>{user.email}</td>
-                    <td>
+                    <td style={{ fontSize: '16px', color: '#000' }}>{user.email}</td>
+                    <td style={{ fontSize: '16px', color: '#000' }}>
                       <span className={`status-indicator ${user.access_level || 'responder'}`}>
                         {user.access_level || 'responder'}
                       </span>
                     </td>
-                    <td style={{ fontSize: '13px' }}>{user.cell_phone || '—'}</td>
-                    <td>
-                      <div style={{ fontSize: '11px', color: '#64748b' }}>{user.agency || '—'}</div>
+                    <td style={{ fontSize: '16px', color: '#000' }}>{user.cell_phone || '—'}</td>
+                    <td style={{ fontSize: '16px', color: '#000' }}>
+                      <div>{user.agency || '—'}</div>
                     </td>
-                    <td>
-                      <div style={{ fontSize: '11px', color: '#64748b' }}>{user.identifier || '—'}</div>
+                    <td style={{ fontSize: '16px', color: '#000' }}>
+                      <div>{user.identifier || '—'}</div>
                     </td>
 
-                    <td>
-                      <div style={{ fontSize: '11px', fontStyle: 'italic', maxWidth: '200px' }}>
+                    <td style={{ fontSize: '16px', color: '#000' }}>
+                      <div style={{ fontStyle: 'italic', maxWidth: '200px' }}>
                         {user.special_skills || '—'}
                       </div>
                     </td>
                     <td style={{ textAlign: 'right' }}>
                       <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                        <button onClick={() => handleEditUser(user)} className="btn btn-secondary btn-sm">Edit</button>
-                        <button onClick={() => handleChangePassword(user.email)} className="btn btn-secondary btn-sm">Password</button>
-                        <button onClick={() => handleRemoveAdmin(user.email)} className="btn btn-secondary btn-sm" style={{ color: '#dc2626' }}>Remove</button>
+                        <button onClick={() => handleEditUser(user)} className="btn btn-secondary btn-sm" style={{ fontSize: '16px' }}>Edit</button>
+                        <button onClick={() => handleChangePassword(user.email)} className="btn btn-secondary btn-sm" style={{ fontSize: '16px' }}>Password</button>
+                        <button onClick={() => handleRemoveAdmin(user.email)} className="btn btn-secondary btn-sm" style={{ color: '#dc2626', fontSize: '16px' }}>Remove</button>
                       </div>
                     </td>
                   </tr>

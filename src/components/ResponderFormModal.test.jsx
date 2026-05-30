@@ -2,16 +2,10 @@ import { render, screen, fireEvent, within, cleanup } from '@testing-library/rea
 import * as matchers from '@testing-library/jest-dom/matchers';
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import ResponderFormModal from './ResponderFormModal';
-import { useIncident } from '../context/IncidentContext';
 
 expect.extend(matchers);
 
-vi.mock('../context/IncidentContext', () => ({
-  useIncident: vi.fn(),
-}));
-
 describe('ResponderFormModal', () => {
-  const mockSetAccessLevel = vi.fn();
   const defaultProps = {
     isOpen: true,
     onClose: vi.fn(),
@@ -30,10 +24,6 @@ describe('ResponderFormModal', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers(); // For consistency, though this modal is simple
-    vi.mocked(useIncident).mockImplementation(() => ({
-      responderId: 'r1',
-      setAccessLevel: mockSetAccessLevel,
-    }));
   });
 
   it('handles multi-select skills correctly by joining them into a string', () => {
@@ -60,35 +50,6 @@ describe('ResponderFormModal', () => {
     expect(defaultProps.onSave).toHaveBeenCalledWith(expect.objectContaining({
       special_skills: 'UAS, Medical'
     }));
-  });
-
-  it('synchronizes the global access level context when the role is updated', () => {
-    render(<ResponderFormModal {...defaultProps} />);
-    
-    const levelSelect = screen.getByLabelText(/Access Level/i);
-    fireEvent.change(levelSelect, { 
-      target: { name: 'access_level', value: 'staff' } 
-    });
-
-    expect(mockSetAccessLevel).toHaveBeenCalledWith('staff');
-  });
-
-  it('does NOT synchronize access level context when editing a different responder', () => {
-    // Mock current user as 'r-admin', but we are editing 'r1'
-    vi.mocked(useIncident).mockImplementation(() => ({
-      responderId: 'r-admin',
-      setAccessLevel: mockSetAccessLevel,
-    }));
-
-    render(<ResponderFormModal {...defaultProps} />);
-    
-    const levelSelect = screen.getByLabelText(/Access Level/i);
-    fireEvent.change(levelSelect, { 
-      target: { name: 'access_level', value: 'staff' } 
-    });
-
-    // Local state updates for the target, but global context for the admin should remain untouched
-    expect(mockSetAccessLevel).not.toHaveBeenCalled();
   });
 
   afterEach(() => {

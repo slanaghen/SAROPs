@@ -26,9 +26,10 @@ import AdminIncidentsTable from '../components/admin/AdminIncidentsTable';
 const AdminPage = () => {
   const navigate = useNavigate();
   const { 
-    isAdmin, setIsAdmin, incidentId, responderId, responderStatus, endIncident, logout, startIncident,
+    isAdmin, setIsAdmin, isActive, incidentId, incidentData, responderId, responderName, responderStatus, endIncident, logout, startIncident,
     setResponderId, setResponderName, setResponderStatus, setAccessLevel,
-    setOperationsRefreshInterval: setOpsRate, setResponderRefreshInterval: setResRate, setSartopoRefreshInterval: setTopoRate
+    setOperationsRefreshInterval: setOpsRate, setResponderRefreshInterval: setResRate, setSartopoRefreshInterval: setTopoRate,
+    clearIncident
   } = useIncident();
 
   const { 
@@ -56,6 +57,12 @@ const AdminPage = () => {
   const isSettingsDirty = opRefresh !== appliedSettings.op || 
                           resRefresh !== appliedSettings.res || 
                           sartopoRefresh !== appliedSettings.sartopo;
+
+  // Sync activation dropdown with current context
+  useEffect(() => {
+    if (incidentId) setSelectedActivationId(incidentId);
+  }, [incidentId]);
+
   const [isTeamsExpanded, setIsTeamsExpanded] = useState(true);
   const [isAssignmentsExpanded, setIsAssignmentsExpanded] = useState(true);
   const [isIncidentsExpanded, setIsIncidentsExpanded] = useState(true);
@@ -163,6 +170,41 @@ const AdminPage = () => {
   };
 
   /**
+   * Clears the current operational session context without signing the administrator out of the system.
+   * This allows the banner to return to the system identity and hides incident-specific tools.
+   */
+  const handleDeactivateSession = async () => {
+    if (responderId && responderStatus !== 'CheckedOut') {
+      setLoading(true);
+      try {
+        // Perform a clean operational checkout for the current session
+        await supabase.from('teams').update({ leader_responder_id: null }).eq('leader_responder_id', responderId);
+        await supabase.from('responders')
+          .update({ status: 'CheckedOut', checkout_datetime: new Date().toISOString() })
+          .eq('responder_id', responderId);
+        
+        if (clearIncident) clearIncident();
+
+        await supabase.from('action_logs').insert({
+          incident_id: incidentId,
+          action: `Admin deactivated their operational session and checked out: ${responderName}`,
+          user_name: responderName
+        });
+
+        setSuccess("Operational session deactivated. The banner now reflects your system identity.");
+      } catch (err) {
+        console.error('Failed to deactivate session:', err);
+        setError("Deactivation encountered an error. Context has been reset locally.");
+        if (clearIncident) clearIncident();
+      } finally {
+        setLoading(false);
+      }
+    } else if (clearIncident) {
+      clearIncident();
+    }
+  };
+
+  /**
    * Effectively checks the current admin user into the selected incident.
    * This establishes both the database responder record and the global
    * application context for navigation and monitoring.
@@ -184,9 +226,8 @@ const AdminPage = () => {
       const selectedInc = allIncidents.find(i => i.incident_id === selectedActivationId);
       if (!selectedInc) throw new Error("Selected incident not found.");
 
-      const latestOp = [...(selectedInc.operational_periods || [])].sort((a, b) =>
-        (b.op_number || 0) - (a.op_number || 0)
-      )[0];
+      // Since useAdminData now pre-sorts nested resources, we can simply take the first record
+      const latestOp = selectedInc.operational_periods?.[0];
 
       if (!latestOp) throw new Error("Selected incident has no operational periods.");
 
@@ -217,6 +258,15 @@ const AdminPage = () => {
         setAccessLevel(finalResponder.access_level);
       }
 
+      // Log administrative check-in
+      await supabase.from('action_logs').insert({
+        incident_id: selectedActivationId,
+        action: `Admin activated session and checked in: ${finalResponder.name || myProfile.name || myProfile.username}`,
+        user_name: finalResponder.name || myProfile.name || myProfile.username
+      });
+
+      // Hydrate incident context and establish operational "Active" state
+      // This triggers the appearance of Operations/Planning links in the banner menu
       startIncident(
         selectedActivationId,
         selectedInc.name,
@@ -225,6 +275,11 @@ const AdminPage = () => {
         selectedInc.sartopo_id,
         latestOp.par_check_interval
       );
+
+      setIsAdmin(true);
+      
+      // Refresh local data so the Incidents table immediately reflects the highlighted active session
+      if (refreshDashboardData) await refreshDashboardData();
 
       setSuccess(`Session activated for "${selectedInc.name}". Your responder identity has been established.`);
       // Immediately transition to the operations view for the activated incident context
@@ -783,35 +838,57 @@ const AdminPage = () => {
         </button>
       </div>
 
+      {error && <div className="alert alert-error" style={{ marginBottom: '24px' }}>{error}</div>}
+      {success && <div className="alert alert-success" style={{ marginBottom: '24px' }}>{success}</div>}
+
       <div className="section-card" style={{ marginBottom: '24px' }}>
         <h2>Incident Activation</h2>
-        <p className="subtitle" style={{ fontSize: '13px', margin: '0 0 16px' }}>
-          Select an active incident to check in as a responder and establish session context.
-        </p>
-        <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
-          <label style={{ flex: 1, minWidth: '250px', marginBottom: 0 }}>
-            Select Incident
-            <select 
-              value={selectedActivationId} 
-              onChange={(e) => setSelectedActivationId(e.target.value)}
-            >
-              <option value="">— Select an active incident —</option>
-              {allIncidents.filter(inc => !inc.end_datetime).map(inc => (
-                <option key={inc.incident_id} value={inc.incident_id}>
-                  {inc.name} (#{inc.number})
-                </option>
-              ))}
-            </select>
-          </label>
-          <button 
-            className="btn btn-primary" 
-            onClick={handleActivateSession} 
-            disabled={loading || !selectedActivationId}
-            style={{ height: '38px' }}
-          >
-            {loading ? 'Activating...' : 'Activate Session'}
-          </button>
-        </div>
+        {isActive ? (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f0f9ff', padding: '16px', borderRadius: '8px', border: '1px solid #bae6fd' }}>
+            <div>
+              <p style={{ margin: 0, fontWeight: 700, color: '#0369a1' }}>Current Active Session: {incidentData?.name || 'In Progress'}</p>
+              <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#0c4a6e' }}>
+                The top banner now reflects this incident. Use the menu to navigate to Operations, Planning, or Dashboards.
+              </p>
+            </div>
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <button className="btn btn-primary btn-sm" onClick={() => navigate('/operations')} style={{ fontSize: '16px' }}>Go to Operations</button>
+              <button className="btn btn-primary btn-sm" onClick={() => navigate('/planning')} style={{ fontSize: '16px' }}>Go to Planning</button>
+              <button className="btn btn-secondary btn-sm" style={{ color: '#dc2626', borderColor: '#fecaca', fontSize: '16px' }} onClick={handleDeactivateSession}>Deactivate Session</button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <p className="subtitle" style={{ fontSize: '13px', margin: '0 0 16px' }}>
+              Select an active incident to check in as a responder and establish session context.
+            </p>
+            <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+              <label style={{ flex: 1, minWidth: '250px', marginBottom: 0 }}>
+                Select Incident
+                <select 
+                  value={selectedActivationId} 
+                  onChange={(e) => setSelectedActivationId(e.target.value)}
+                  style={{ fontSize: '16px' }}
+                >
+                  <option value="">— Select an active incident —</option>
+                  {allIncidents.filter(inc => !inc.end_datetime).map(inc => (
+                    <option key={inc.incident_id} value={inc.incident_id}>
+                      {inc.name} (#{inc.number})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button 
+                className="btn btn-primary" 
+                onClick={handleActivateSession} 
+                disabled={loading || !selectedActivationId}
+                style={{ height: '38px', fontSize: '16px' }}
+              >
+                {loading ? 'Activating...' : 'Activate Session'}
+              </button>
+            </div>
+          </>
+        )}
       </div>
 
       <div className="section-card" style={{ marginBottom: '24px' }}>
@@ -825,6 +902,7 @@ const AdminPage = () => {
               value={opRefresh} 
               onChange={(e) => setOpRefresh(parseInt(e.target.value, 10) || 0)}
               min="5"
+              style={{ fontSize: '16px' }}
             />
           </label>
           <label style={{ flex: 1, minWidth: '150px', marginBottom: 0 }}>
@@ -834,6 +912,7 @@ const AdminPage = () => {
               value={resRefresh} 
               onChange={(e) => setResRefresh(parseInt(e.target.value, 10) || 0)}
               min="5"
+              style={{ fontSize: '16px' }}
             />
           </label>
           <label style={{ flex: 1, minWidth: '150px', marginBottom: 0 }}>
@@ -843,9 +922,10 @@ const AdminPage = () => {
               value={sartopoRefresh} 
               onChange={(e) => setSartopoRefresh(parseInt(e.target.value, 10) || 0)}
               min="5"
+              style={{ fontSize: '16px' }}
             />
           </label>
-          <button className="btn btn-primary" onClick={handleApplySettings} disabled={!isSettingsDirty} style={{ height: '38px' }}>
+          <button className="btn btn-primary" onClick={handleApplySettings} disabled={!isSettingsDirty} style={{ height: '38px', fontSize: '16px' }}>
             Apply
           </button>
         </div>
@@ -859,7 +939,7 @@ const AdminPage = () => {
             onClick={handleSeedData} 
             className="btn btn-secondary" 
             disabled={loading} 
-            style={{ height: '38px' }}
+            style={{ height: '38px', fontSize: '16px' }}
           >
             {loading ? 'Seeding...' : 'Seed Data'}
           </button>
@@ -867,7 +947,7 @@ const AdminPage = () => {
             onClick={handleReinitializeDatabase} 
             className="btn btn-secondary" 
             disabled={loading} 
-            style={{ height: '38px', color: '#dc2626', borderColor: '#fecaca' }}
+            style={{ height: '38px', color: '#dc2626', borderColor: '#fecaca', fontSize: '16px' }}
           >
             {loading ? 'Resetting...' : 'Re-initialize Database'}
           </button>

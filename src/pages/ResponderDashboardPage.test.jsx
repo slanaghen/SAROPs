@@ -68,6 +68,15 @@ beforeEach(() => {
     setCurrentTeamStatus: vi.fn(),
     setCurrentAssignmentStatus: vi.fn(),
   });
+
+  // Provide a safe default for the sync hook to prevent crashes on initial render
+  vi.mocked(useResponderTeamAndAssignment).mockReturnValue({
+    team: null,
+    assignment: null,
+    responderRecord: null,
+    loading: false,
+    refetch: vi.fn(),
+  });
 });
 
 afterEach(() => {

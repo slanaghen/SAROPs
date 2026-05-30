@@ -7,7 +7,7 @@ import { normalizeResourceTypeName } from '../utils/dataNormalization';
 import { SARTOPO_REFRESH_INTERVAL } from '../components/operationalConstants';
 
 const SARTopoDataPage = () => {
-  const { incidentId, isActive, incidentData } = useIncident();
+  const { incidentId, isActive, incidentData, responderName } = useIncident();
   const [sartopoId, setSartopoId] = useState('CVJP9L4');
   const [features, setFeatures] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -167,6 +167,14 @@ const SARTopoDataPage = () => {
         .upsert(syncPayloads, { onConflict: 'op_period_id,sartopo_id' });
 
       if (syncError) throw syncError;
+
+      // Log synchronization details for the audit trail
+      const titles = syncPayloads.map(p => p.title).join(', ');
+      await supabase.from('action_logs').insert({
+        incident_id: incidentId,
+        action: `Synced ${syncPayloads.length} assignments from SARTopo: ${titles}`,
+        user_name: responderName || 'SARTopo Sync'
+      });
       
       const createdCount = syncPayloads.filter(p => !p.assignment_id).length;
       const updatedCount = syncPayloads.length - createdCount;
@@ -181,7 +189,7 @@ const SARTopoDataPage = () => {
     } finally {
       setSyncing(false);
     }
-  }, [features?.features, incidentData?.opPeriodId, setError, setSyncing, setSyncedAssignmentNames]);
+  }, [features?.features, incidentData?.opPeriodId, incidentId, responderName, setError, setSyncing, setSyncedAssignmentNames]);
 
   const handleFetchFeatures = useCallback(async () => {
     if (!fetchUrl) {

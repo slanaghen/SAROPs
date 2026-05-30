@@ -77,7 +77,17 @@ const Login = ({ onLoginSuccess }) => {
           .maybeSingle();
 
         if (checkinError) console.error('Check-in failed:', checkinError);
-        else responderRecord = upsertData;
+        else {
+          responderRecord = upsertData;
+
+          // Log responder check-in
+          const checkinUser = data.name || data.username;
+          await supabase.from('action_logs').insert({
+            incident_id: selectedIncidentId,
+            action: `Responder checked in (Login): ${checkinUser} (${data.agency || 'Unknown'})`,
+            user_name: checkinUser
+          });
+        }
       }
 
       onLoginSuccess(selectedIncidentId, data, responderRecord);

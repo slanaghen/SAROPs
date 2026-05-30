@@ -47,6 +47,7 @@ function App() {
   const { 
     isActive, 
     isAdmin, 
+    incidentId,
     incidentData, 
     responderName, 
     responderId,
@@ -61,17 +62,22 @@ function App() {
     logout
   } = useIncident();
 
-  // Request notification permission on first load if checked in
-  useEffect(() => {
-    if (isActive && "Notification" in window && Notification.permission === "default") {
-      Notification.requestPermission();
-    }
-  }, [isActive]);
-
   // Centralized Real-time Session Sync
   // Uses the shared operational hook to ensure the banner and global context
   // are perfectly synchronized with the database state at all times.
-  const { team, assignment, responderRecord, loading: hookLoading } = useResponderTeamAndAssignment(supabase, responderId);
+  const { team, assignment, responderRecord, loading: hookLoading, refetch } = useResponderTeamAndAssignment(supabase, responderId);
+
+  // Re-synchronize session when window gains focus (e.g. returning to tab)
+  useEffect(() => {
+    const handleFocus = () => {
+      if (isActive && responderId && refetch) {
+        refetch();
+      }
+    };
+
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [isActive, responderId, refetch]);
 
   const handleSignOut = async () => {
     // Perform operational checkout if responder is still active
@@ -88,6 +94,15 @@ function App() {
           .update({ status: 'CheckedOut', checkout_datetime: new Date().toISOString() })
           .eq('responder_id', responderId);
         if (respErr) console.error('Sign-out: Failed to update responder status', respErr);
+
+        // Log responder check-out for the audit trail
+        if (!respErr && incidentId) {
+          await supabase.from('action_logs').insert({
+            incident_id: incidentId,
+            action: `Responder checked out: ${responderName}`,
+            user_name: responderName
+          });
+        }
 
         // Remove responder from any teams they were attached to
         const { error: trErr } = await supabase
@@ -122,8 +137,7 @@ function App() {
 
     if (team && team.status !== 'Disbanded') {
       setCurrentTeamStatus(team.status);
-      const activeAsn = Array.isArray(team.assignments) ? team.assignments[0] : team.assignments;
-      setCurrentAssignmentStatus(activeAsn?.status || null);
+      setCurrentAssignmentStatus(assignment?.status || null);
     } else {
       setCurrentTeamStatus(null);
       setCurrentAssignmentStatus(null);
@@ -134,7 +148,7 @@ function App() {
   ]);
 
   // Centralized Notifications
-  useRealTimeNotifications(isActive, responderStatus, currentTeamStatus, currentAssignmentStatus);
+  const { permission: notificationPermission } = useRealTimeNotifications(isActive, responderStatus, currentTeamStatus, currentAssignmentStatus);
 
   // Navigation Guard: Redirect to check-in if trying to access operational pages without a session
   useEffect(() => {
@@ -194,6 +208,16 @@ function App() {
               {(currentTeamStatus && currentTeamStatus !== 'Disbanded') ? currentTeamStatus : (responderStatus || 'Staged')}
             </span>
           )}
+          {isActive && notificationPermission === 'denied' && (
+            <div 
+              className="connection-dot offline" 
+              title="System notifications are blocked. Visual alerts disabled; audio only. Check browser settings." 
+              style={{ 
+                display: 'flex', alignItems: 'center', justifyContent: 'center', 
+                fontSize: '9px', color: 'white', cursor: 'help', width: '12px', height: '12px', fontWeight: 900 
+              }}
+            >!</div>
+          )}
           <div className={`connection-dot ${offline ? 'offline' : 'online'}`} title={offline ? 'Offline' : 'Online'}></div>
           {(user || isActive) && (
             <div className="banner-menu-container">
@@ -211,12 +235,12 @@ function App() {
                   {(accessLevel === 'staff' || accessLevel === 'admin') && (
                     <>
                       <div className="dropdown-divider"></div>
-                      <Link to="/operations" onClick={() => setMenuOpen(false)}>Operations</Link>
-                      <Link to="/planning" onClick={() => setMenuOpen(false)}>Planning</Link>
+                      {isActive && <Link to="/operations" onClick={() => setMenuOpen(false)}>Operations</Link>}
+                      {isActive && <Link to="/planning" onClick={() => setMenuOpen(false)}>Planning</Link>}
                       <Link to="/incident" onClick={() => setMenuOpen(false)}>Incident</Link>
-                      <Link to="/action-log" onClick={() => setMenuOpen(false)}>Action Log</Link>
-                      <Link to="/sartopo" onClick={() => setMenuOpen(false)}>SARTopo Data</Link>
-                      <Link to="/google-ics" onClick={() => setMenuOpen(false)}>Google ICS Forms</Link>
+                      {isActive && <Link to="/action-log" onClick={() => setMenuOpen(false)}>Action Log</Link>}
+                      {isActive && <Link to="/sartopo" onClick={() => setMenuOpen(false)}>SARTopo</Link>}
+                      {isActive && <Link to="/google-ics" onClick={() => setMenuOpen(false)}>Google Forms</Link>}
                     </>
                   )}
                   {accessLevel === 'admin' && <Link to="/admin" onClick={() => setMenuOpen(false)}>Administration</Link>}

@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
+import { useIncident } from '../context/IncidentContext';
 import '../styles.css';
 
 /**
@@ -13,10 +14,13 @@ const contextFields = [
     category: 'Incident Context',
     icon: '🏔️',
     fields: [
+      { name: 'incident_id', desc: 'Internal unique identifier' },
       { name: 'incident_name', desc: 'The official name of the incident' },
       { name: 'incident_number', desc: 'The operational/agency tracking number' },
       { name: 'incident_location', desc: 'Coordinates/location of Incident Command Post' },
-      { name: 'incident_type', desc: 'Type of incident (e.g. Lost Person)' }
+      { name: 'incident_type', desc: 'Type of incident (e.g. Lost Person)' },
+      { name: 'incident_notes', desc: 'General notes and background information' },
+      { name: 'sartopo_map_id', desc: 'Linked SARTopo Map ID' }
     ]
   },
   {
@@ -25,17 +29,44 @@ const contextFields = [
     fields: [
       { name: 'op_period_number', desc: 'Current operational period number' },
       { name: 'op_period_start', desc: 'Start date & time of current period' },
-      { name: 'op_period_end', desc: 'End date & time of current period' }
+      { name: 'op_period_end', desc: 'End date & time of current period' },
+      { name: 'situation_summary', desc: 'Full narrative summary of the current situation' },
+      { name: 'safety_narrative', desc: 'Hazards and safety considerations for the period' },
+      { name: 'par_check_interval', desc: 'Required interval for personnel accountability checks' }
     ]
   },
   {
-    category: 'Staff Team',
+    category: 'Command & General Staff',
     icon: '👥',
     fields: [
-      { name: 'commander_name', desc: 'Incident Commander (IC) name' },
-      { name: 'operations_chief', desc: 'Operations Section Chief (OSC) name' },
-      { name: 'planning_chief', desc: 'Planning Section Chief (PSC) name' },
-      { name: 'logistics_chief', desc: 'Logistics Section Chief (LSC) name' }
+      { name: 'incident_commander', desc: 'The person in overall command' },
+      { name: 'public_info_officer', desc: 'PIO - Responsible for media/public relations' },
+      { name: 'safety_officer', desc: 'Responsible for monitoring safety conditions' },
+      { name: 'liaison_officer', desc: 'Point of contact for assisting agencies' },
+      { name: 'operations_chief', desc: 'OSC - Manages all tactical operations' },
+      { name: 'planning_chief', desc: 'PSC - Manages information and planning' },
+      { name: 'logistics_chief', desc: 'LSC - Provides resources and services' },
+      { name: 'finance_chief', desc: 'FSC - Responsible for financial and cost analysis' }
+    ]
+  },
+  {
+    category: 'Assignment & Tactical',
+    icon: '🚩',
+    fields: [
+      { name: 'assignment_title', desc: 'Name of the specific task or area' },
+      { name: 'assignment_status', desc: 'Current state (Planned, Deployed, etc.)' },
+      { name: 'assignment_segment', desc: 'Division/Group or segment identifier' },
+      { name: 'resource_type', desc: 'Required resource kind/type' },
+      { name: 'team_size', desc: 'Target or current personnel count' },
+      { name: 'comms_primary', desc: 'Primary tactical frequency/channel' },
+      { name: 'task_description', desc: 'Detailed tactical instructions' },
+      { name: 'debrief_narrative', desc: 'Summary of findings after completion' },
+      { name: 'pod_percentage', desc: 'Probability of Detection achieved' },
+      { name: 'assignment_priority', desc: 'Mission criticality level' },
+      { name: 'hazards_tactical', desc: 'Site-specific hazards' },
+      { name: 'transportation_plan', desc: 'Infiltration/Exfiltration method' },
+      { name: 'team_members', desc: 'Comma-separated list of all team members' },
+      { name: 'team_leader', desc: 'Name of the assigned team leader' }
     ]
   },
   {
@@ -45,21 +76,136 @@ const contextFields = [
       { name: 'action_log_entries', desc: 'Serialized array of all incident log events' },
       { name: 'last_action_timestamp', desc: 'Timestamp of the most recent logged activity' }
     ]
+  },
+  {
+    category: 'Current Responder',
+    icon: '👤',
+    fields: [
+      { name: 'responder_name', desc: 'Full name of the current user' },
+      { name: 'responder_agency', desc: 'Agency affiliation' },
+      { name: 'responder_identifier', desc: 'Radio ID or Badge number' },
+      { name: 'responder_phone', desc: 'Contact cell number' },
+      { name: 'responder_type', desc: 'Service type (SAR, Fire, etc.)' },
+      { name: 'responder_skills', desc: 'Specialized capabilities and certifications' }
+    ]
   }
 ];
 
 const GoogleICSFormsPage = () => {
+  const { incidentData, incidentId, responderId } = useIncident();
   const [sheetUrl, setSheetUrl] = useState('');
   const [namedRanges, setNamedRanges] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [transferring, setTransferring] = useState(false);
   const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(null);
   const [associations, setAssociations] = useState({});
+  const [assignments, setAssignments] = useState([]);
+  const [selectedAssignmentId, setSelectedAssignmentId] = useState('');
+  const [currentResponder, setCurrentResponder] = useState(null);
+  const [staffMapping, setStaffMapping] = useState({});
+  const [selectedTeamDetails, setSelectedTeamDetails] = useState(null);
 
   // Helper to extract spreadsheet ID from typical Google Sheets URL
   const extractSpreadsheetId = (url) => {
     const matches = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
     return matches ? matches[1] : null;
   };
+
+  // Fetch assignments for the current OP period to populate the tactical dropdown
+  useEffect(() => {
+    const fetchAssignments = async () => {
+      if (!incidentData?.opPeriodId) return;
+      const { data, error: fetchErr } = await supabase
+        .from('assignments')
+        .select('*')
+        .eq('op_period_id', incidentData.opPeriodId)
+        .eq('is_orphaned', false)
+        .order('title');
+      
+      if (!fetchErr && data) setAssignments(data);
+    };
+    fetchAssignments();
+  }, [incidentData?.opPeriodId]);
+
+  // Fetch full details for the current responder session
+  useEffect(() => {
+    const fetchResponder = async () => {
+      if (!responderId) return;
+      const { data } = await supabase
+        .from('responders')
+        .select('*')
+        .eq('responder_id', responderId)
+        .maybeSingle();
+      if (data) setCurrentResponder(data);
+    };
+    fetchResponder();
+  }, [responderId]);
+
+  // Fetch and resolve Command & General Staff roles for the current operational period
+  useEffect(() => {
+    const fetchStaff = async () => {
+      if (!incidentData?.opPeriodId) return;
+      const { data: staffTeam } = await supabase
+        .from('teams')
+        .select(`
+          team_id,
+          team_responders (
+            role,
+            responders ( name )
+          )
+        `)
+        .eq('op_period_id', incidentData.opPeriodId)
+        .eq('type', 'Staff')
+        .maybeSingle();
+
+      if (staffTeam) {
+        const mapping = {};
+        staffTeam.team_responders?.forEach(tr => {
+          const r = tr.role?.toLowerCase() || '';
+          const name = tr.responders?.name;
+          if (!name) return;
+
+          if (r === 'incident commander') mapping.incident_commander = name;
+          else if (r.includes('pio') || r.includes('public info')) mapping.public_info_officer = name;
+          else if (r.includes('safety')) mapping.safety_officer = name;
+          else if (r.includes('liaison')) mapping.liaison_officer = name;
+          else if (r.includes('operations')) mapping.operations_chief = name;
+          else if (r.includes('planning')) mapping.planning_chief = name;
+          else if (r.includes('logistics')) mapping.logistics_chief = name;
+          else if (r.includes('finance') || r.includes('admin')) mapping.finance_chief = name;
+        });
+        setStaffMapping(mapping);
+      }
+    };
+    fetchStaff();
+  }, [incidentData?.opPeriodId]);
+
+  // Fetch and resolve members/leader for the selected assignment's team
+  useEffect(() => {
+    const fetchTeamData = async () => {
+      const selectedAsn = assignments.find(a => a.assignment_id === selectedAssignmentId);
+      if (!selectedAsn?.team_id) {
+        setSelectedTeamDetails(null);
+        return;
+      }
+
+      const { data } = await supabase
+        .from('teams')
+        .select(`
+          leader_responder_id,
+          team_responders (
+            role,
+            responders ( name, responder_id )
+          )
+        `)
+        .eq('team_id', selectedAsn.team_id)
+        .maybeSingle();
+
+      if (data) setSelectedTeamDetails(data);
+    };
+    fetchTeamData();
+  }, [selectedAssignmentId, assignments]);
 
   const handleLoad = async () => {
     const spreadsheetId = extractSpreadsheetId(sheetUrl);
@@ -71,6 +217,7 @@ const GoogleICSFormsPage = () => {
 
     setLoading(true);
     setError(null);
+    setSuccess(null);
     setNamedRanges([]);
 
     try {
@@ -118,11 +265,96 @@ const GoogleICSFormsPage = () => {
     }
   };
 
+  const handleTransfer = async () => {
+    const spreadsheetId = extractSpreadsheetId(sheetUrl);
+    if (!spreadsheetId || Object.keys(associations).length === 0) {
+      setError('Please load a spreadsheet and map at least one field before transferring.');
+      return;
+    }
+
+    setTransferring(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const selectedAsn = assignments.find(a => a.assignment_id === selectedAssignmentId);
+      const valuesToUpdate = {};
+
+      // Map data from context and selected assignment based on associations
+      for (const [rangeName, fieldName] of Object.entries(associations)) {
+        let value = null;
+
+        // Global Context resolving
+        if (fieldName === 'incident_id') value = incidentId;
+        else if (fieldName === 'incident_name') value = incidentData?.name;
+        else if (fieldName === 'incident_number') value = incidentId; // fallback to ID/Number
+        else if (fieldName === 'op_period_number') value = incidentData?.opNumber;
+
+        // Responder Context resolving
+        else if (fieldName === 'responder_name') value = currentResponder?.name;
+        else if (fieldName === 'responder_agency') value = currentResponder?.agency;
+        else if (fieldName === 'responder_identifier') value = currentResponder?.identifier;
+        else if (fieldName === 'responder_phone') value = currentResponder?.cell_phone;
+        else if (fieldName === 'responder_type') value = currentResponder?.responder_type;
+        else if (fieldName === 'responder_skills') value = currentResponder?.special_skills;
+
+        // Command & General Staff resolving
+        else if (staffMapping[fieldName]) {
+          value = staffMapping[fieldName];
+        }
+
+        // Tactical Context resolving (requires selected assignment)
+        else if (selectedAsn) {
+          if (fieldName === 'assignment_title') value = selectedAsn.title;
+          else if (fieldName === 'assignment_status') value = selectedAsn.status;
+          else if (fieldName === 'assignment_segment') value = selectedAsn.segment;
+          else if (fieldName === 'resource_type') value = selectedAsn.resource_type;
+          else if (fieldName === 'team_size') value = selectedAsn.team_size;
+          else if (fieldName === 'comms_primary') value = selectedAsn.frequency_primary;
+          else if (fieldName === 'task_description') value = selectedAsn.description;
+          else if (fieldName === 'debrief_narrative') value = selectedAsn.debrief_narrative;
+          else if (fieldName === 'pod_percentage') value = selectedAsn.probability_of_detection;
+          else if (fieldName === 'assignment_priority') value = selectedAsn.priority;
+          else if (fieldName === 'hazards_tactical') value = selectedAsn.hazards;
+          else if (fieldName === 'transportation_plan') value = selectedAsn.transportation;
+          
+          else if (fieldName === 'team_members') {
+            value = selectedTeamDetails?.team_responders?.map(tr => tr.responders?.name).filter(Boolean).join(', ');
+          }
+          else if (fieldName === 'team_leader') {
+            const leader = selectedTeamDetails?.team_responders?.find(tr => tr.responders?.responder_id === selectedTeamDetails.leader_responder_id);
+            value = leader?.responders?.name;
+          }
+        }
+
+        if (value !== null && value !== undefined) {
+          valuesToUpdate[rangeName] = String(value);
+        }
+      }
+
+      const PROXY_BASE = import.meta.env.VITE_PROXY_URL || '';
+      const response = await fetch(`${PROXY_BASE}/api/sheets/update-values`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ spreadsheetId, values: valuesToUpdate })
+      });
+
+      if (!response.ok) throw new Error('Transfer failed. Please ensure the backend proxy is configured for write access.');
+      
+      setSuccess(`Data successfully transferred: ${Object.keys(valuesToUpdate).length} fields updated in Google Sheets.`);
+    } catch (err) {
+      console.error('Transfer error:', err);
+      setError(err.message);
+    } finally {
+      setTransferring(false);
+    }
+  };
+
   return (
     <div className="app-shell" style={{ padding: '24px' }}>
       <div className="page-header">
         <div>
-          <h1>Google ICS Forms</h1>
+          <h1>Google Forms</h1>
           <p className="subtitle">Inspect and import field definitions from Google Sheets templates.</p>
         </div>
       </div>
@@ -148,6 +380,15 @@ const GoogleICSFormsPage = () => {
             >
               {loading ? 'Loading...' : 'Load'}
             </button>
+            <button 
+              className="btn btn-primary"
+              style={{ height: '40px', padding: '0 24px', whiteSpace: 'nowrap', backgroundColor: '#059669', borderColor: '#059669' }}
+              onClick={handleTransfer}
+              disabled={loading || transferring || !sheetUrl.trim() || Object.keys(associations).length === 0}
+              title="Push current operational values to the mapped named ranges in Google Sheets"
+            >
+              {transferring ? 'Transferring...' : 'Transfer Data'}
+            </button>
           </div>
         </div>
       </div>
@@ -155,6 +396,12 @@ const GoogleICSFormsPage = () => {
       {error && (
         <div className="alert alert-error" style={{ marginBottom: '24px' }}>
           {error}
+        </div>
+      )}
+
+      {success && (
+        <div className="alert alert-success" style={{ marginBottom: '24px' }}>
+          {success}
         </div>
       )}
 
@@ -291,6 +538,24 @@ const GoogleICSFormsPage = () => {
                 <h3 style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
                   <span>{cat.icon}</span> {cat.category}
                 </h3>
+                {cat.category === 'Assignment & Tactical' && (
+                  <div className="form-row" style={{ marginBottom: '12px' }}>
+                    <select 
+                      className="status-update-select"
+                      style={{ width: '100%', height: '32px', fontSize: '12px' }}
+                      value={selectedAssignmentId}
+                      onChange={(e) => setSelectedAssignmentId(e.target.value)}
+                    >
+                      <option value="">— Select Assignment for Context —</option>
+                      {assignments.map(a => (
+                        <option key={a.assignment_id} value={a.assignment_id}>
+                          {a.title} ({a.segment})
+                        </option>
+                      ))}
+                    </select>
+                    <small className="form-hint" style={{ fontSize: '10px' }}>Assignment fields below will use data from this selection.</small>
+                  </div>
+                )}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   {cat.fields.map((f, fIdx) => (
                     <div 

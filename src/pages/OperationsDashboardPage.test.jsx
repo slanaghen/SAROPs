@@ -528,4 +528,42 @@ describe('OperationsDashboardPage Logic', () => {
     expect(screen.getByText(/Team Staged/i)).toBeInTheDocument();
     expect(screen.getByText(/Staged Mission/i)).toBeInTheDocument();
   });
+
+  it('applies custom operational priority sorting to the rows (Deployed > Assigned > Completed)', async () => {
+    const mockAsn = [
+      { assignment_id: 'a1', title: 'Complete Task', status: 'Completed', op_period_id: 'op-123' },
+      { assignment_id: 'a2', title: 'Assigned Task', status: 'Assigned', team_id: 't1', op_period_id: 'op-123' },
+      { assignment_id: 'a3', title: 'Deployed Task', status: 'Deployed', team_id: 't2', op_period_id: 'op-123' }
+    ];
+    const mockTeams = [
+      { team_id: 't1', team_name_number: 'Team A', status: 'Assigned', op_period_id: 'op-123' },
+      { team_id: 't2', team_name_number: 'Team B', status: 'Deployed', op_period_id: 'op-123' }
+    ];
+
+    // Explicitly mock the hook return value to verify sorting logic
+    vi.mocked(usePlanningDashboard).mockReturnValue({
+      assignments: mockAsn,
+      teams: mockTeams,
+      responders: [],
+      opPeriod: { par_check_interval: 60 },
+      loading: false,
+      error: null,
+      setError: vi.fn(),
+      setLoading: vi.fn(),
+      stats: { teams: {}, assignments: {}, responders: {} },
+      fetchDashboardData: vi.fn(),
+    });
+
+    render(<OperationsDashboardPage />);
+
+    await waitFor(() => expect(screen.getByText('Deployed Task')).toBeInTheDocument());
+
+    // Target rows within the tbody to make the test resilient to changes in header structure.
+    // This allows data-row indexing to begin at 0.
+    const dataRows = within(screen.getByRole('table')).getAllByRole('row').filter(r => r.closest('tbody'));
+
+    expect(dataRows[0]).toHaveTextContent('Deployed Task');
+    expect(dataRows[1]).toHaveTextContent('Assigned Task');
+    expect(dataRows[2]).toHaveTextContent('Complete Task');
+  });
 });

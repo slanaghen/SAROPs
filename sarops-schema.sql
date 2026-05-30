@@ -86,7 +86,6 @@ DROP TABLE IF EXISTS clues CASCADE;
 DROP TABLE IF EXISTS team_responders CASCADE;
 DROP TABLE IF EXISTS action_logs CASCADE;
 DROP TABLE IF EXISTS team_messages CASCADE;
-DROP TABLE IF EXISTS admin_users CASCADE;
 DROP TABLE IF EXISTS users CASCADE;
 DROP VIEW IF EXISTS team_current_responders CASCADE;
 DROP VIEW IF EXISTS incident_summary CASCADE;
@@ -191,6 +190,7 @@ CREATE TABLE assignments (
   is_orphaned BOOLEAN NOT NULL DEFAULT FALSE,
   team_id UUID REFERENCES teams(team_id) ON DELETE SET NULL,
   CONSTRAINT check_team_size_positive CHECK (team_size >= 0),
+  CONSTRAINT check_pod_range CHECK (probability_of_detection >= 0 AND probability_of_detection <= 100),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   origin assignment_origin NOT NULL DEFAULT 'SAROps',
@@ -664,6 +664,40 @@ CREATE TRIGGER trigger_incident_cleanup_on_end
 AFTER UPDATE OF end_datetime ON incidents
 FOR EACH ROW EXECUTE FUNCTION cleanup_resources_on_incident_end();
 
+-- Function to sync assignment team size when a team is assigned or changed
+CREATE OR REPLACE FUNCTION sync_assignment_team_size()
+RETURNS TRIGGER AS $func$
+BEGIN
+    -- Use TG_OP to avoid referencing OLD during INSERT operations
+    IF NEW.team_id IS NOT NULL AND (TG_OP = 'INSERT' OR (TG_OP = 'UPDATE' AND OLD.team_id IS DISTINCT FROM NEW.team_id)) THEN
+        NEW.team_size := (SELECT COUNT(*) FROM team_responders WHERE team_id = NEW.team_id);
+    ELSIF TG_OP = 'UPDATE' AND NEW.team_id IS NULL THEN
+        NEW.team_size := 0; -- Reset size to 0 if team is unassigned
+    END IF;
+    RETURN NEW;
+END;
+$func$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trigger_sync_assignment_team_size
+BEFORE INSERT OR UPDATE OF team_id ON assignments
+FOR EACH ROW EXECUTE FUNCTION sync_assignment_team_size();
+
+-- Function to sync assignment team size if the team's membership changes while assigned
+CREATE OR REPLACE FUNCTION sync_assignment_size_on_membership_change()
+RETURNS TRIGGER AS $func$
+DECLARE
+    _team_id UUID := CASE WHEN TG_OP = 'DELETE' THEN OLD.team_id ELSE NEW.team_id END;
+BEGIN
+    UPDATE assignments SET team_size = (SELECT COUNT(*) FROM team_responders WHERE team_id = _team_id)
+    WHERE team_id = _team_id;
+    RETURN NULL;
+END;
+$func$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trigger_sync_assignment_size_from_membership
+AFTER INSERT OR UPDATE OR DELETE ON team_responders
+FOR EACH ROW EXECUTE FUNCTION sync_assignment_size_on_membership_change();
+
 
 -- ============================================================================
 -- ROW LEVEL SECURITY (RLS) POLICIES
@@ -740,10 +774,10 @@ CREATE OR REPLACE FUNCTION check_is_operational_staff()
 RETURNS BOOLEAN AS $func$
 BEGIN
   RETURN (
-    -- Check if they are a logged-in System User with staff/admin privileges
+    -- Use auth.uid to join against auth.users for a reliable system user check
     EXISTS (
       SELECT 1 FROM users 
-      WHERE email = auth.jwt() ->> 'email' 
+      WHERE email = (SELECT email FROM auth.users WHERE id = auth.uid())
       AND access_level IN ('staff', 'admin')
     )
     OR EXISTS (
@@ -1008,7 +1042,7 @@ CREATE POLICY "Admins/Staff can manage all team messages" ON team_messages
 -- Policies for users
 -- Allow staff/admins to view the list of system users
 CREATE POLICY "Allow all authenticated to view user list" ON users
-  FOR SELECT TO authenticated USING (TRUE);
+  FOR SELECT TO authenticated USING (check_is_operational_staff());
 
 -- Secure RPCs for managing users
 -- These functions use SECURITY DEFINER to bypass RLS and ensure 
@@ -1030,31 +1064,38 @@ CREATE OR REPLACE FUNCTION admin_add_user(
   p_type TEXT DEFAULT NULL,
   p_skills TEXT DEFAULT NULL
 )
-RETURNS VOID AS $func$
+RETURNS VOID AS $outer_func$
 BEGIN
-  INSERT INTO users (
-    email, username, password, access_level, 
-    name, agency, identifier, cell_phone, responder_type, special_skills
-  )
-  VALUES (
-    LOWER(p_email), p_username, crypt(p_password, gen_salt('bf')), p_access_level::access_level,
-    p_name, p_agency, p_identifier, p_phone, p_type::responder_type, p_skills
-  )
-  ON CONFLICT (email) DO UPDATE SET
-    username = EXCLUDED.username,
-    password = CASE 
-          WHEN p_password IS NOT NULL AND p_password <> '''' THEN EXCLUDED.password 
-      ELSE users.password 
-    END,
-    access_level = EXCLUDED.access_level,
-    name = EXCLUDED.name,
-    agency = EXCLUDED.agency,
-    identifier = EXCLUDED.identifier,
-    cell_phone = EXCLUDED.cell_phone,
-    responder_type = EXCLUDED.responder_type,
-    special_skills = EXCLUDED.special_skills;
+  -- Normalize email for lookup to prevent mismatch due to casing or whitespace
+  IF EXISTS (SELECT 1 FROM users WHERE email = LOWER(TRIM(p_email))) THEN
+    UPDATE users SET
+      username = p_username,
+      password = CASE
+        -- Only update password if a non-empty string is provided
+        WHEN p_password IS NOT NULL AND TRIM(p_password) <> '' THEN crypt(p_password, gen_salt('bf'))
+        ELSE password
+      END,
+      access_level = p_access_level::access_level,
+      name = p_name,
+      agency = p_agency,
+      identifier = p_identifier,
+      cell_phone = p_phone,
+      responder_type = p_type::responder_type,
+      special_skills = p_skills
+    WHERE email = LOWER(TRIM(p_email));
+  ELSE
+    -- For new users, a password is required.
+    INSERT INTO users (
+      email, username, password, access_level,
+      name, agency, identifier, cell_phone, responder_type, special_skills
+    )
+    VALUES (
+      LOWER(TRIM(p_email)), p_username, crypt(p_password, gen_salt('bf')), p_access_level::access_level,
+      p_name, p_agency, p_identifier, p_phone, p_type::responder_type, p_skills
+    );
+  END IF;
 END;
-$func$ LANGUAGE plpgsql SECURITY DEFINER;
+$outer_func$ LANGUAGE plpgsql SECURITY DEFINER;
 
 DROP FUNCTION IF EXISTS admin_remove_user(TEXT);
 
@@ -1245,6 +1286,7 @@ BEGIN
       is_orphaned BOOLEAN NOT NULL DEFAULT FALSE,
       team_id UUID REFERENCES teams(team_id) ON DELETE SET NULL,
       CONSTRAINT check_team_size_positive CHECK (team_size >= 0),
+      CONSTRAINT check_pod_range CHECK (probability_of_detection >= 0 AND probability_of_detection <= 100),
       created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
       origin assignment_origin NOT NULL DEFAULT ''SAROps'',
@@ -1650,6 +1692,37 @@ BEGIN
     AFTER UPDATE OF end_datetime ON incidents
     FOR EACH ROW EXECUTE FUNCTION cleanup_resources_on_incident_end();';
 
+    EXECUTE 'CREATE OR REPLACE FUNCTION sync_assignment_team_size()
+    RETURNS TRIGGER AS $func$
+    BEGIN
+        IF NEW.team_id IS NOT NULL AND (TG_OP = ''INSERT'' OR (TG_OP = ''UPDATE'' AND OLD.team_id IS DISTINCT FROM NEW.team_id)) THEN
+            NEW.team_size := (SELECT COUNT(*) FROM team_responders WHERE team_id = NEW.team_id);
+        ELSIF TG_OP = ''UPDATE'' AND NEW.team_id IS NULL THEN
+            NEW.team_size := 0;
+        END IF;
+        RETURN NEW;
+    END;
+    $func$ LANGUAGE plpgsql;';
+
+    EXECUTE 'CREATE TRIGGER trigger_sync_assignment_team_size
+    BEFORE INSERT OR UPDATE OF team_id ON assignments
+    FOR EACH ROW EXECUTE FUNCTION sync_assignment_team_size();';
+
+    EXECUTE 'CREATE OR REPLACE FUNCTION sync_assignment_size_on_membership_change()
+    RETURNS TRIGGER AS $func$
+    DECLARE
+        _team_id UUID := CASE WHEN TG_OP = ''DELETE'' THEN OLD.team_id ELSE NEW.team_id END;
+    BEGIN
+        UPDATE assignments SET team_size = (SELECT COUNT(*) FROM team_responders WHERE team_id = _team_id)
+        WHERE team_id = _team_id;
+        RETURN NULL;
+    END;
+    $func$ LANGUAGE plpgsql;';
+
+    EXECUTE 'CREATE TRIGGER trigger_sync_assignment_size_from_membership
+    AFTER INSERT OR UPDATE OR DELETE ON team_responders
+    FOR EACH ROW EXECUTE FUNCTION sync_assignment_size_on_membership_change();';
+
     -- ROW LEVEL SECURITY (RLS) POLICIES
     EXECUTE 'ALTER TABLE incidents ENABLE ROW LEVEL SECURITY;';
     EXECUTE 'ALTER TABLE responders ENABLE ROW LEVEL SECURITY;';
@@ -1800,7 +1873,17 @@ BEGIN
         CURRENT_TIMESTAMP
       )
       ON CONFLICT (device_id) DO UPDATE SET
+        incident_id = EXCLUDED.incident_id,
+        name = EXCLUDED.name,
+        agency = EXCLUDED.agency,
+        identifier = EXCLUDED.identifier,
+        cell_phone = EXCLUDED.cell_phone,
+        responder_type = EXCLUDED.responder_type,
+        special_skills = EXCLUDED.special_skills,
+        access_level = EXCLUDED.access_level,
+        status = EXCLUDED.status,
         auth_uid = EXCLUDED.auth_uid,
+        checkin_datetime = EXCLUDED.checkin_datetime,
         updated_at = CURRENT_TIMESTAMP
       RETURNING *;
     END;

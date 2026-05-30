@@ -20,7 +20,7 @@ const AdminAssignmentsTable = ({
           <button 
             className="btn btn-primary btn-sm" 
             onClick={(e) => { e.stopPropagation(); handleNewAssignment(); }}
-            style={{ padding: '4px 12px', fontSize: '12px' }}
+            style={{ padding: '4px 12px', fontSize: '16px' }}
           >
             + New
           </button>
@@ -66,28 +66,30 @@ const AdminAssignmentsTable = ({
 
                   return (
                     <tr key={asn.assignment_id || `asn-${index}`}>
-                      <td>
+                      <td style={{ fontSize: '16px', color: '#000' }}>
                         <div style={{ fontWeight: 600 }}>{asn.title}</div>
                       </td>
-                      <td style={{ fontSize: '11px', color: '#64748b' }}>{asn.segment || '—'}</td>
-                      <td>{asn.resource_type || '—'}</td>
-                      <td>{incidentName || '—'}</td>
-                      <td style={{ fontSize: '11px', color: '#64748b' }}>{incidentNumber || '—'}</td>
-                      <td style={{ fontSize: '11px', color: '#64748b' }}>{opNum ? `OP #${opNum}` : '—'}</td>
-                      <td>
+                      <td style={{ fontSize: '16px', color: '#000' }}>{asn.segment || '—'}</td>
+                      <td style={{ fontSize: '16px', color: '#000' }}>{asn.resource_type || '—'}</td>
+                      <td style={{ fontSize: '16px', color: '#000' }}>{incidentName || '—'}</td>
+                      <td style={{ fontSize: '16px', color: '#000' }}>{incidentNumber || '—'}</td>
+                      <td style={{ fontSize: '16px', color: '#000' }}>{opNum ? `OP #${opNum}` : '—'}</td>
+                      <td style={{ fontSize: '16px', color: '#000' }}>
                         <span className={`status-indicator ${asn.status.toLowerCase()}`}>
                           {asn.status}
                         </span>
                       </td>
                       <td style={{ textAlign: 'right' }}>
-                        <button onClick={() => handleEditAssignment(asn)} className="btn btn-secondary btn-sm">Edit</button>
-                        <button
-                          onClick={() => handleDeleteAssignment(asn.assignment_id, asn.title, asn.resource_type)}
-                          className="btn btn-secondary btn-sm"
-                          style={{ color: '#dc2626' }}
-                        >
-                          Delete
-                        </button>
+                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                          <button onClick={() => handleEditAssignment(asn)} className="btn btn-secondary btn-sm" style={{ fontSize: '16px' }}>Edit</button>
+                          <button
+                            onClick={() => handleDeleteAssignment(asn.assignment_id, asn.title, asn.resource_type)}
+                            className="btn btn-secondary btn-sm"
+                            style={{ color: '#dc2626', fontSize: '16px' }}
+                          >
+                            Delete
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );

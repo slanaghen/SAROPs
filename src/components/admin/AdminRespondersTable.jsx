@@ -20,7 +20,7 @@ const AdminRespondersTable = ({
           <button 
             className="btn btn-primary btn-sm" 
             onClick={(e) => { e.stopPropagation(); handleNewResponder(); }}
-            style={{ padding: '4px 12px', fontSize: '12px' }}
+            style={{ padding: '4px 12px', fontSize: '16px' }}
           >
             + New
           </button>
@@ -53,25 +53,25 @@ const AdminRespondersTable = ({
                   const isCheckedOut = !!res.checkout_datetime;
                   return (
                     <tr key={res.responder_id}>
-                      <td>
+                      <td style={{ fontSize: '16px', color: '#000' }}>
                         <div style={{ fontWeight: 600 }}>{res.name}</div>
                       </td>
-                      <td style={{ fontSize: '12px', color: '#64748b' }}>{res.agency || '—'}</td>
-                      <td style={{ fontSize: '12px', color: '#64748b' }}>{res.identifier || '—'}</td>
-                      <td>{new Date(res.checkin_datetime).toLocaleString()}</td>
-                      <td>
+                      <td style={{ fontSize: '16px', color: '#000' }}>{res.agency || '—'}</td>
+                      <td style={{ fontSize: '16px', color: '#000' }}>{res.identifier || '—'}</td>
+                      <td style={{ fontSize: '16px', color: '#000' }}>{new Date(res.checkin_datetime).toLocaleString()}</td>
+                      <td style={{ fontSize: '16px', color: '#000' }}>
                         <span className={`status-indicator ${(res.status || 'unknown').toLowerCase()}`}>
                           {res.status}
                         </span>
                       </td>
                       <td style={{ textAlign: 'right' }}>
                         <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                          <button onClick={() => handleEditResponder(res)} className="btn btn-secondary btn-sm">Edit</button>
+                          <button onClick={() => handleEditResponder(res)} className="btn btn-secondary btn-sm" style={{ fontSize: '16px' }}>Edit</button>
                           {!isCheckedOut && (
                             <button
                               onClick={() => handleCheckOutResponder(res.responder_id)}
                               className="btn btn-secondary btn-sm"
-                              style={{ color: '#f59e0b' }}
+                              style={{ color: '#f59e0b', fontSize: '16px' }}
                             >
                               Check Out
                             </button>
@@ -79,7 +79,7 @@ const AdminRespondersTable = ({
                           <button
                             onClick={() => handleDeleteResponder(res.responder_id, res.name, res.agency)}
                             className="btn btn-secondary btn-sm"
-                            style={{ color: '#dc2626' }}
+                            style={{ color: '#dc2626', fontSize: '16px' }}
                           >
                             Delete
                           </button>

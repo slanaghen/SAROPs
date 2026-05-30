@@ -47,7 +47,7 @@ describe('Navigation Component', () => {
     expect(screen.getByText(/Incident/i)).toBeInTheDocument();
     expect(screen.getByText(/ICS Chart/i)).toBeInTheDocument();
     expect(screen.getByText(/QR Codes/i)).toBeInTheDocument();
-    expect(screen.getByText(/SARTopo Data/i)).toBeInTheDocument();
+    expect(screen.getByText(/SARTopo/i)).toBeInTheDocument();
     expect(screen.getByText(/PDFs/i)).toBeInTheDocument();
     expect(screen.getByText(/Login/i)).toBeInTheDocument();
   });

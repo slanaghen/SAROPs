@@ -8,6 +8,7 @@ describe('OperationsTable', () => {
       id: 'asn-a1',
       assignmentId: 'a1',
       assignmentName: 'Alpha Assignment',
+      assignmentPriority: 'High',
       assignmentType: 'Ground',
       tacChannel: 'TAC 1',
       hasBoth: true,

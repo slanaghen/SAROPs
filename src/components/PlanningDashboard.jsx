@@ -715,7 +715,7 @@ const PlanningDashboard = ({
                     </div>
                   )}
 
-                  <div className="team-actions" style={{ marginTop: '4px' }}>
+                  <div className="team-actions" style={{ marginTop: '4px', display: 'flex', gap: '8px' }}>
                     <button className="btn btn-secondary btn-sm" onClick={(e) => { e.stopPropagation(); openEditTeamForm(team); }}>Edit</button>
                     <button 
                       className="btn btn-secondary btn-sm" 
@@ -793,7 +793,7 @@ const PlanningDashboard = ({
                     </div>
                   )}
 
-                  <div className="team-actions" style={{ marginTop: '6px' }}>
+                  <div className="team-actions" style={{ marginTop: '6px', display: 'flex', gap: '8px' }}>
                     <button className="btn btn-secondary btn-sm" onClick={(e) => { e.stopPropagation(); openEditAssignmentForm(assignment); }}>Edit</button>
                     <button 
                       className="btn btn-secondary btn-sm" 

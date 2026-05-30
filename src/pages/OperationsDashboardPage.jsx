@@ -148,6 +148,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
         assignmentId: asnItem.assignment_id,
         assignmentName: asnItem.title,
         assignmentOrigin: asnItem.origin,
+        assignmentPriority: asnItem.priority || '—',
         assignmentType: asnItem.resource_type || '—',
         assignmentStatus: asnItem.status,
         teamName: matchingTeam?.team_name_number || '',
@@ -169,7 +170,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       id: `team-${tItem.team_id}`,
       isParOverdue: checkIsParOverdue(tItem, parInterval, currentTime),
       timeSincePar: formatTimeSince(tItem.last_par_check, tItem.created_at, currentTime),
-      tacChannel: '', assignmentId: '', assignmentName: '', assignmentType: '', assignmentStatus: '',
+      tacChannel: '', assignmentId: '', assignmentName: '', assignmentPriority: '', assignmentType: '', assignmentStatus: '',
       teamName: tItem.team_name_number, teamType: tItem.type, teamStatus: tItem.status,
       teamLeader: leaderById[tItem.leader_responder_id] || 'Unknown',
       leaderIdentifier: leaderIdentifierById[tItem.leader_responder_id] || '—',
@@ -190,7 +191,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
 
     if (aTerm) {
       result = result.filter(row => {
-        const fields = ['assignmentName', 'assignmentType', 'tacChannel', 'assignmentStatus'];
+        const fields = ['assignmentName', 'assignmentType', 'assignmentPriority', 'tacChannel', 'assignmentStatus'];
         return fields.some(key => (row[key] || '').toString().toLowerCase().includes(aTerm));
       });
     }

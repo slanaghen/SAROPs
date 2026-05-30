@@ -35,7 +35,7 @@ const OperationsTable = ({
       <table className="operations-table" style={{ width: '100%', tableLayout: 'auto' }}>
         <thead>
           <tr className="group-header-row">
-            <th colSpan="4" style={{ textAlign: 'center', padding: '8px 12px', background: '#f8fafc', color: '#64748b', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            <th colSpan="5" style={{ textAlign: 'center', padding: '8px 12px', background: '#f8fafc', color: '#64748b', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px' }}>
                 Assignment
                 <input 
@@ -75,6 +75,9 @@ const OperationsTable = ({
             </th>
             <th onClick={() => requestSort('assignmentType')} style={{ cursor: 'pointer', width: '10%' }}>
               Type {sortConfig.key === 'assignmentType' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+            </th>
+            <th onClick={() => requestSort('assignmentPriority')} style={{ cursor: 'pointer', width: '8%' }}>
+              Priority {sortConfig.key === 'assignmentPriority' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
             </th>
             <th onClick={() => requestSort('tacChannel')} style={{ cursor: 'pointer', width: '7%' }}>
               TAC {sortConfig.key === 'tacChannel' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
@@ -137,6 +140,7 @@ const OperationsTable = ({
                 ) : '—'}
               </td>
               <td style={{ textAlign: 'center' }}>{row.assignmentType || '—'}</td>
+              <td style={{ textAlign: 'center' }}>{row.assignmentPriority || '—'}</td>
               <td style={{ textAlign: 'center' }}>{row.tacChannel || '—'}</td>
               <td style={{ textAlign: 'center' }}>
                 {row.assignmentId ? (

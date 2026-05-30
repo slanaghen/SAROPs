@@ -20,7 +20,7 @@ const AdminTeamsTable = ({
           <button 
             className="btn btn-primary btn-sm" 
             onClick={(e) => { e.stopPropagation(); handleNewTeam(); }}
-            style={{ padding: '4px 12px', fontSize: '12px' }}
+            style={{ padding: '4px 12px', fontSize: '16px' }}
           >
             + New
           </button>
@@ -56,26 +56,26 @@ const AdminTeamsTable = ({
 
                   return (
                     <tr key={team.team_id}>
-                      <td>
+                      <td style={{ fontSize: '16px', color: '#000' }}>
                         <div style={{ fontWeight: 600 }}>{team.team_name_number}</div>
                       </td>
-                      <td>{team.type}</td>
-                      <td>{incident?.name || '—'}</td>
-                      <td>
+                      <td style={{ fontSize: '16px', color: '#000' }}>{team.type}</td>
+                      <td style={{ fontSize: '16px', color: '#000' }}>{incident?.name || '—'}</td>
+                      <td style={{ fontSize: '16px', color: '#000' }}>
                         {opNum ? `OP #${opNum}` : '—'}
                       </td>
-                      <td>
+                      <td style={{ fontSize: '16px', color: '#000' }}>
                         <span className={`status-indicator ${team.status.toLowerCase()}`}>
                           {team.status}
                         </span>
                       </td>
                       <td style={{ textAlign: 'right' }}>
                         <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                          <button onClick={() => handleEditTeam(team)} className="btn btn-secondary btn-sm">Edit</button>
+                          <button onClick={() => handleEditTeam(team)} className="btn btn-secondary btn-sm" style={{ fontSize: '16px' }}>Edit</button>
                           {team.status !== 'Disbanded' && ( // Only show if not already disbanded
-                            <button onClick={() => handleDisbandTeam(team.team_id, team.team_name_number, team.type)} className="btn btn-secondary btn-sm" style={{ color: '#f59e0b' }}>Disband</button>
+                            <button onClick={() => handleDisbandTeam(team.team_id, team.team_name_number, team.type)} className="btn btn-secondary btn-sm" style={{ color: '#f59e0b', fontSize: '16px' }}>Disband</button>
                           )}
-                          <button onClick={() => handleDeleteTeam(team.team_id, team.team_name_number, team.type)} className="btn btn-secondary btn-sm" style={{ color: '#dc2626' }}>Delete</button>
+                          <button onClick={() => handleDeleteTeam(team.team_id, team.team_name_number, team.type)} className="btn btn-secondary btn-sm" style={{ color: '#dc2626', fontSize: '16px' }}>Delete</button>
                         </div>
                       </td>
                     </tr>

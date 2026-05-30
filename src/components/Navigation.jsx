@@ -16,7 +16,7 @@ const Navigation = () => {
   return (
     <nav className="menu-ribbon">
       <div className="nav-container">
-        {isStaffOrAdmin && (
+        {isActive && isStaffOrAdmin && (
           <>
             <Link to="/operations" className={`nav-tab ${path === '/operations' ? 'active' : ''}`}>Operations</Link>
             <Link to="/planning" className={`nav-tab ${path.startsWith('/planning') ? 'active' : ''}`}>Planning</Link>
@@ -40,9 +40,9 @@ const Navigation = () => {
         {isActive && <Link to="/qrcodes" className={`nav-tab ${path === '/qrcodes' ? 'active' : ''}`}>
           QR Codes
         </Link>}
-        {isStaffOrAdmin && (
+        {isActive && isStaffOrAdmin && (
           <>
-            <Link to="/sartopo" className={`nav-tab ${path === '/sartopo' ? 'active' : ''}`}>SARTopo Data</Link>
+            <Link to="/sartopo" className={`nav-tab ${path === '/sartopo' ? 'active' : ''}`}>SARTopo</Link>
             <Link to="/pdfs" className={`nav-tab ${path === '/pdfs' ? 'active' : ''}`}>PDFs</Link>
           </>
         )}

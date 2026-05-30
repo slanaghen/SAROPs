@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import BaseModal from './BaseModal';
-import { useIncident } from '../context/IncidentContext';
 import { 
   RESPONDER_TYPES, 
   RESPONDER_STATUS_LIST, 
@@ -20,7 +19,6 @@ const ResponderFormModal = ({
   loading = false,
   error = null
 }) => {
-  const { setAccessLevel: setContextAccessLevel, responderId } = useIncident();
   const [formData, setFormData] = useState(initialData);
 
   useEffect(() => {
@@ -48,11 +46,6 @@ const ResponderFormModal = ({
       ...prev,
       [name]: processedValue,
     }));
-
-    // Update context if editing current responder session
-    if (name === 'access_level' && initialData.responder_id === responderId) {
-      setContextAccessLevel(processedValue); // Update context if editing current responder
-    }
   };
 
   const handleSave = () => {
@@ -122,12 +115,13 @@ const ResponderFormModal = ({
               name="access_level"
               value={formData.access_level || 'responder'}
               onChange={handleInputChange}
-              disabled={loading}
+              disabled={true}
             >
               {ACCESS_LEVELS.map(level => (
                 <option key={level} value={level}>{level.charAt(0).toUpperCase() + level.slice(1)}</option>
               ))}
             </select>
+            <small className="form-hint" style={{ fontSize: '10px', display: 'block', marginTop: '4px' }}>Access levels can only be modified in the Administration panel.</small>
           </div>
 
           <div className="form-row">

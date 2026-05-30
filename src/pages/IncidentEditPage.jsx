@@ -98,6 +98,7 @@ const IncidentEditPage = () => {
     isActive, 
     incidentId: contextIncidentId, 
     incidentData, 
+    responderName,
     startIncident, 
     endIncident,
     setResponderId,
@@ -444,6 +445,14 @@ const IncidentEditPage = () => {
         if (opError) throw opError;
 
         // 4. Update global state with real IDs
+
+        // Log incident start for audit trail
+        await supabase.from('action_logs').insert({
+          incident_id: newIncidentId,
+          action: `Incident tracking started: "${incident.name}" (#${incident.number})`,
+          user_name: responderName || 'System'
+        });
+
         startIncident(
           newIncidentId, 
           incident.name, 
@@ -509,6 +518,13 @@ const IncidentEditPage = () => {
           });
 
           if (respError) throw respError;
+
+          // Log creator check-in
+          await supabase.from('action_logs').insert({
+            incident_id: incidentId,
+            action: `Responder checked in (Creator): ${responderData.name} (${responderData.agency})`,
+            user_name: responderData.name
+          });
           
           // NOTE: Linking the responder to the Staff team and assigning the 
           // 'Incident Commander' role is now handled atomically by the 
@@ -579,6 +595,13 @@ const IncidentEditPage = () => {
       // automatically closes the OP and cleans up all active assignments, teams, and responders.
       const endTimestamp = new Date().toISOString();
       await supabase.from('incidents').update({ end_datetime: endTimestamp }).eq('incident_id', contextIncidentId);
+
+      // Log incident end
+      await supabase.from('action_logs').insert({
+        incident_id: contextIncidentId,
+        action: `Incident ended. Automated cleanup of assignments, teams, and responders performed.`,
+        user_name: responderName || 'Staff'
+      });
 
       endIncident(); // Reset global context state
       navigate('/checkin');
@@ -779,7 +802,7 @@ const IncidentEditPage = () => {
           </div>
         </div>
 
-        <div className="form-actions">
+        <div className="form-actions" style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
           <button type="submit" className="btn btn-primary" disabled={isSaving || (isActive && !isDirty)}>
             {isSaving ? 'Saving...' : (isActive ? 'Update Incident Information' : 'Start Incident Tracking')}
           </button>
