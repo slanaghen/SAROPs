@@ -317,10 +317,10 @@ CREATE INDEX idx_team_messages_composite ON team_messages(team_id, created_at);
 -- Denormalized view of teams with their current responders for dashboard use
 CREATE OR REPLACE VIEW team_current_responders AS
 SELECT
-  t.team_id,
-  t.op_period_id,
-  t.team_name_number,
-  t.status,
+  t.*,
+  r.name AS leader_name,
+  r.identifier AS leader_identifier,
+  (SELECT COUNT(*) FROM team_responders tr_count WHERE tr_count.team_id = t.team_id) AS member_count,
   COALESCE(
     (
       SELECT json_agg(
@@ -335,10 +335,26 @@ SELECT
       FROM team_responders tr
       JOIN responders r ON tr.responder_id = r.responder_id
       WHERE tr.team_id = t.team_id
-    ),
+    ) AS current_responders,
     '[]'::json
-  ) AS responders
-FROM teams t;
+  ) AS current_responders
+FROM teams t
+LEFT JOIN responders r ON t.leader_responder_id = r.responder_id;
+
+-- View: dashboard_assignments
+-- Pre-joins assignments with team and leader metadata for operations oversight
+CREATE OR REPLACE VIEW dashboard_assignments AS
+SELECT
+  a.*,
+  t.team_name_number AS team_name,
+  t.status AS team_status,
+  t.type AS team_type,
+  r.name AS leader_name,
+  r.identifier AS leader_identifier,
+  t.last_par_check
+FROM assignments a
+LEFT JOIN teams t ON a.team_id = t.team_id
+LEFT JOIN responders r ON t.leader_responder_id = r.responder_id;
 
 -- View: incident_summary
 -- Summary view for incident dashboard
@@ -883,7 +899,17 @@ BEGIN
     CURRENT_TIMESTAMP
   )
   ON CONFLICT (device_id) DO UPDATE SET
+        incident_id = EXCLUDED.incident_id,
+        name = EXCLUDED.name,
+        agency = EXCLUDED.agency,
+        identifier = EXCLUDED.identifier,
+        cell_phone = EXCLUDED.cell_phone,
+        responder_type = EXCLUDED.responder_type,
+        special_skills = EXCLUDED.special_skills,
+        access_level = EXCLUDED.access_level,
+        status = EXCLUDED.status,
     auth_uid = EXCLUDED.auth_uid,
+        checkin_datetime = EXCLUDED.checkin_datetime,
     updated_at = CURRENT_TIMESTAMP
   RETURNING *;
 END;
@@ -1390,10 +1416,10 @@ BEGIN
     -- VIEWS
     EXECUTE 'CREATE OR REPLACE VIEW team_current_responders AS
     SELECT
-      t.team_id,
-      t.op_period_id,
-      t.team_name_number,
-      t.status,
+      t.*,
+      r.name AS leader_name,
+      r.identifier AS leader_identifier,
+      (SELECT COUNT(*) FROM team_responders tr_count WHERE tr_count.team_id = t.team_id) AS member_count,
       COALESCE(
         (
           SELECT json_agg(
@@ -1410,8 +1436,22 @@ BEGIN
           WHERE tr.team_id = t.team_id
         ),
         ''[]''::json
-      ) AS responders
-    FROM teams t;';
+      ) AS current_responders
+    FROM teams t
+    LEFT JOIN responders r ON t.leader_responder_id = r.responder_id;';
+
+    EXECUTE 'CREATE OR REPLACE VIEW dashboard_assignments AS
+    SELECT
+      a.*,
+      t.team_name_number AS team_name,
+      t.status AS team_status,
+      t.type AS team_type,
+      r.name AS leader_name,
+      r.identifier AS leader_identifier,
+      t.last_par_check
+    FROM assignments a
+    LEFT JOIN teams t ON a.team_id = t.team_id
+    LEFT JOIN responders r ON t.leader_responder_id = r.responder_id;';
 
     EXECUTE 'CREATE OR REPLACE VIEW incident_summary AS
     SELECT

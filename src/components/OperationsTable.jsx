@@ -243,7 +243,7 @@ const OperationsTable = ({
                         <>
                           <option value="new-assignment">New Assignment</option>
                           {parInterval > 0 && <option value="reset-par">Reset PAR</option>}
-                          <option value="detach">Disband Team</option>
+                          <option value="detach" disabled={row.teamStatus === 'Deployed'}>Disband Team</option>
                         </>
                       ) : (
                         <>

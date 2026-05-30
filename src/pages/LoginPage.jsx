@@ -62,6 +62,9 @@ const LoginPage = () => {
       setResponderStatus(finalResponder.status || 'Staged');
       setAccessLevel(finalResponder.access_level || userRecord.access_level);
     } else {
+    
+    // Refresh Supabase session to apply new JWT claims (access_level and incident_id)
+    await supabase.auth.refreshSession();
       // Fallback: If we don't have a responder ID yet but have an identity, 
       // set the basic info to allow the dashboard to attempt its own lookup.
       setResponderName(userRecord.name || userRecord.username);

@@ -536,6 +536,9 @@ const IncidentEditPage = () => {
           setResponderName(responderData.name);
           setResponderStatus('Deployed');
           if (setAccessLevel) setAccessLevel('staff');
+
+          // Refresh Supabase session to apply new JWT claims (IC role and incident context)
+          await supabase.auth.refreshSession();
         } catch (err) {
           console.error('[IncidentEdit] Auto check-in failed:', err);
           alert('Incident created, but auto check-in failed: ' + err.message);

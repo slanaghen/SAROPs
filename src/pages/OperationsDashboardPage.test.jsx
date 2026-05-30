@@ -65,8 +65,8 @@ describe('OperationsDashboardPage Logic', () => {
   });
 
   it('should pass linked data to sub-components to render in one row', async () => {
-      const mockAsn = [{ assignment_id: 'a-uuid', title: 'Division Alpha', team_id: 't-uuid', op_period_id: 'op-123', status: 'Assigned' }];
-    const mockTeams = [{ team_id: 't-uuid', team_name_number: 'Team 1', type: 'Ground', op_period_id: 'op-123' }];
+      const mockAsn = [{ assignment_id: 'a-uuid', title: 'Division Alpha', team_id: 't-uuid', team_name: 'Team 1', team_status: 'Assigned', team_type: 'Ground', leader_name: 'Leader Name', op_period_id: 'op-123', status: 'Assigned' }];
+    const mockTeams = [{ team_id: 't-uuid', team_name_number: 'Team 1', type: 'Ground', status: 'Assigned', op_period_id: 'op-123', leader_name: 'Leader Name', member_count: 1 }];
     const mockResponders = [{ responder_id: 'r-uuid', name: 'Leader Name' }];
 
     // Set up mock data responses
@@ -93,8 +93,8 @@ describe('OperationsDashboardPage Logic', () => {
   });
 
   it('should coordinate unassign team action through the planning hook', async () => {
-      const mockAsn = [{ assignment_id: 'a1', title: 'Asn 1', team_id: 't1', op_period_id: 'op-123', status: 'Assigned' }];
-    const mockTeams = [{ team_id: 't1', team_name_number: 'Team 1', op_period_id: 'op-123' }];
+      const mockAsn = [{ assignment_id: 'a1', title: 'Asn 1', team_id: 't1', team_name: 'Team 1', team_status: 'Assigned', team_type: 'Ground', op_period_id: 'op-123', status: 'Assigned' }];
+    const mockTeams = [{ team_id: 't1', team_name_number: 'Team 1', op_period_id: 'op-123', status: 'Assigned', leader_name: 'Unknown', member_count: 1 }];
     window.confirm = vi.fn().mockReturnValue(true);
 
     supabase.from.mockImplementation((table) => {
@@ -183,11 +183,11 @@ describe('OperationsDashboardPage Logic', () => {
   });
 
   it('should disband team and unlink when assignment status is set to Completed', async () => {
-    const mockAsn = [{ assignment_id: 'a1', title: 'Asn 1', team_id: 't1', status: 'Deployed', type: 'Ground' }];
+    const mockAsn = [{ assignment_id: 'a1', title: 'Asn 1', team_id: 't1', team_name: 'Team 1', team_status: 'Deployed', team_type: 'Ground', status: 'Deployed', type: 'Ground' }];
 
     supabase.from.mockImplementation((table) => {
       if (table === 'assignments') return createQueryMock(mockAsn);
-      if (table === 'teams') return createQueryMock([{ team_id: 't1', team_name_number: 'Team 1', status: 'Deployed' }]);
+      if (table === 'teams') return createQueryMock([{ team_id: 't1', team_name_number: 'Team 1', status: 'Deployed', leader_name: 'Unknown', member_count: 1, type: 'Ground' }]);
       return createQueryMock([]);
     });
 
@@ -242,7 +242,7 @@ describe('OperationsDashboardPage Logic', () => {
   });
 
   it('opens the manual assignment modal and links a resource', async () => {
-    const mockAsn = [{ assignment_id: 'a1', title: 'Unassigned Task', status: 'Planned', team_id: null }];
+    const mockAsn = [{ assignment_id: 'a1', title: 'Unassigned Task', status: 'Planned', team_id: null, team_name: null, team_status: '' }];
     const mockTeams = [{ team_id: 't1', team_name_number: 'Staged Team', status: 'Staged', type: 'Dog' }];
 
     supabase.from.mockImplementation((table) => {
@@ -269,8 +269,8 @@ describe('OperationsDashboardPage Logic', () => {
   });
 
   it('handles dropping a responder onto a team row to perform attachment', async () => {
-    const mockAsn = [{ assignment_id: 'a1', title: 'Task 1', team_id: 't1', status: 'Assigned' }];
-    const mockTeams = [{ team_id: 't1', team_name_number: 'Team 1', status: 'Assigned' }];
+    const mockAsn = [{ assignment_id: 'a1', title: 'Task 1', team_id: 't1', team_name: 'Team 1', team_status: 'Assigned', team_type: 'Ground', status: 'Assigned' }];
+    const mockTeams = [{ team_id: 't1', team_name_number: 'Team 1', status: 'Assigned', leader_name: 'Unknown', member_count: 1, type: 'Ground' }];
     
     const mockAttach = vi.fn();
     // Define a full mock object to satisfy component destructuring and prevent runtime crashes
@@ -323,8 +323,8 @@ describe('OperationsDashboardPage Logic', () => {
 
   it('filters rows correctly using the unified team search input', async () => {
     const mockTeams = [
-      { team_id: 't1', team_name_number: 'Team Alpha', type: 'Ground', leader_responder_id: 'r1', status: 'Assigned' },
-      { team_id: 't2', team_name_number: 'Team Bravo', type: 'Dog', leader_responder_id: 'r2', status: 'Assigned' }
+      { team_id: 't1', team_name_number: 'Team Alpha', type: 'Ground', leader_responder_id: 'r1', leader_name: 'Steve', leader_identifier: 'K9-1', status: 'Assigned', member_count: 1, team_status: 'Assigned' },
+      { team_id: 't2', team_name_number: 'Team Bravo', type: 'Dog', leader_responder_id: 'r2', leader_name: 'Bob', leader_identifier: 'RADIO-2', status: 'Assigned', member_count: 1, team_status: 'Assigned' }
     ];
     const mockResponders = [
       { responder_id: 'r1', name: 'Steve', identifier: 'K9-1', status: 'Assigned' },
@@ -364,27 +364,40 @@ describe('OperationsDashboardPage Logic', () => {
     render(<OperationsDashboardPage />);
     await waitFor(() => expect(screen.getByText('Team Alpha')).toBeInTheDocument());
 
+    // Ensure view mode is "All" so Assigned mock teams are visible
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText(/View:/), { target: { value: 'All' } });
+    });
+
     const teamSearch = screen.getAllByPlaceholderText('Search...')[1];
 
     // 1. Search by Team Name
-    fireEvent.change(teamSearch, { target: { value: 'Alpha' } });
-    expect(screen.getByText('Team Alpha')).toBeInTheDocument();
-    expect(screen.queryByText('Team Bravo')).not.toBeInTheDocument();
+    await act(async () => {
+      fireEvent.change(teamSearch, { target: { value: 'Alpha' } });
+    });
+    await waitFor(() => {
+      expect(screen.getByText('Team Alpha')).toBeInTheDocument();
+      expect(screen.queryByText('Team Bravo')).not.toBeInTheDocument();
+    });
 
     // 2. Search by Leader Name
-    fireEvent.change(teamSearch, { target: { value: 'Bob' } });
-    expect(screen.queryByText('Team Alpha')).not.toBeInTheDocument();
-    expect(screen.getByText('Team Bravo')).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.change(teamSearch, { target: { value: 'Bob' } });
+    });
+    await waitFor(() => {
+      expect(screen.queryByText('Team Alpha')).not.toBeInTheDocument();
+      expect(screen.getByText('Team Bravo')).toBeInTheDocument();
+    });
 
     // 3. Search by Leader ID
     fireEvent.change(teamSearch, { target: { value: 'K9-1' } });
-    expect(screen.getByText('Team Alpha')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('Team Alpha')).toBeInTheDocument());
   });
 
   it('filters rows correctly using the localized assignment search input', async () => {
     const mockAsns = [
-      { assignment_id: 'a1', title: 'Grid Alpha', status: 'Assigned', op_period_id: 'op-123' },
-      { assignment_id: 'a2', title: 'Creek Sweep', status: 'Planned', op_period_id: 'op-123' }
+      { assignment_id: 'a1', title: 'Grid Alpha', status: 'Assigned', team_id: 't1', team_name: 'Team 1', team_status: 'Assigned', team_type: 'Ground', op_period_id: 'op-123' },
+      { assignment_id: 'a2', title: 'Creek Sweep', status: 'Planned', team_id: null, team_name: null, team_status: '', op_period_id: 'op-123' }
     ];
 
     // Define a full mock object to avoid state leakage from previous tests
@@ -426,7 +439,7 @@ describe('OperationsDashboardPage Logic', () => {
   });
 
   it('triggers manual PAR reset for a team', async () => {
-    const mockTeams = [{ team_id: 't1', team_name_number: 'Team 1', status: 'Deployed' }];
+    const mockTeams = [{ team_id: 't1', team_name_number: 'Team 1', status: 'Deployed', leader_name: 'Unknown', member_count: 1 }];
     // Define a full mock object to satisfy component destructuring
     vi.mocked(usePlanningDashboard).mockReturnValue({
       assignments: [],
@@ -469,12 +482,12 @@ describe('OperationsDashboardPage Logic', () => {
 
   it('filters rows correctly between Operations and Planning view modes', async () => {
     const mockAsn = [
-      { assignment_id: 'a1', title: 'Active Mission', status: 'Deployed', team_id: 't1', op_period_id: 'op-123' },
-      { assignment_id: 'a2', title: 'Staged Mission', status: 'Planned', team_id: null, op_period_id: 'op-123' }
+      { assignment_id: 'a1', title: 'Active Mission', status: 'Deployed', team_id: 't1', team_name: 'Team Active', team_status: 'Deployed', team_type: 'Ground', op_period_id: 'op-123' },
+      { assignment_id: 'a2', title: 'Staged Mission', status: 'Planned', team_id: null, team_name: null, team_status: '', op_period_id: 'op-123' }
     ];
     const mockTeams = [
-      { team_id: 't1', team_name_number: 'Team Active', status: 'Deployed', type: 'Ground', op_period_id: 'op-123' },
-      { team_id: 't2', team_name_number: 'Team Staged', status: 'Staged', type: 'Ground', op_period_id: 'op-123' }
+      { team_id: 't1', team_name_number: 'Team Active', status: 'Deployed', type: 'Ground', op_period_id: 'op-123', leader_name: 'Steve', leader_identifier: 'S1', member_count: 1 },
+      { team_id: 't2', team_name_number: 'Team Staged', status: 'Staged', type: 'Ground', op_period_id: 'op-123', leader_name: 'Unknown', leader_identifier: 'S2', member_count: 0 }
     ];
 
     // Explicitly mock the hook return value to isolate this test and ensure dynamic rows render correctly.
@@ -531,13 +544,13 @@ describe('OperationsDashboardPage Logic', () => {
 
   it('applies custom operational priority sorting to the rows (Deployed > Assigned > Completed)', async () => {
     const mockAsn = [
-      { assignment_id: 'a1', title: 'Complete Task', status: 'Completed', op_period_id: 'op-123' },
-      { assignment_id: 'a2', title: 'Assigned Task', status: 'Assigned', team_id: 't1', op_period_id: 'op-123' },
-      { assignment_id: 'a3', title: 'Deployed Task', status: 'Deployed', team_id: 't2', op_period_id: 'op-123' }
+      { assignment_id: 'a1', title: 'Complete Task', status: 'Completed', op_period_id: 'op-123', team_id: null, team_name: null },
+      { assignment_id: 'a2', title: 'Assigned Task', status: 'Assigned', team_id: 't1', team_name: 'Team A', op_period_id: 'op-123' },
+      { assignment_id: 'a3', title: 'Deployed Task', status: 'Deployed', team_id: 't2', team_name: 'Team B', op_period_id: 'op-123' }
     ];
     const mockTeams = [
-      { team_id: 't1', team_name_number: 'Team A', status: 'Assigned', op_period_id: 'op-123' },
-      { team_id: 't2', team_name_number: 'Team B', status: 'Deployed', op_period_id: 'op-123' }
+      { team_id: 't1', team_name_number: 'Team A', status: 'Assigned', op_period_id: 'op-123', leader_name: 'Steve', member_count: 2 },
+      { team_id: 't2', team_name_number: 'Team B', status: 'Deployed', op_period_id: 'op-123', leader_name: 'Steve', member_count: 2 }
     ];
 
     // Explicitly mock the hook return value to verify sorting logic

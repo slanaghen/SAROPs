@@ -759,4 +759,96 @@ describe('ResponderDashboardPage', () => {
     });
     confirmSpy.mockRestore();
   });
+
+  it('prevents a Leader from leaving the team while Deployed', async () => {
+    const mockTeam = { 
+      team_id: 't1', 
+      team_name_number: 'Team Alpha', 
+      leader_responder_id: 'r1', 
+      status: 'Deployed' 
+    };
+    const mockAsn = { assignment_id: 'a1', status: 'Deployed' };
+
+    vi.mocked(useIncident).mockReturnValue({ 
+      responderId: 'r1', 
+      accessLevel: 'responder',
+      setResponderStatus: vi.fn(),
+      setCurrentTeamStatus: vi.fn(),
+      setCurrentAssignmentStatus: vi.fn(),
+    });
+
+    vi.mocked(useResponderTeamAndAssignment).mockReturnValue({
+      team: mockTeam,
+      assignment: mockAsn,
+      loading: false,
+      refetch: vi.fn()
+    });
+
+    render(<ResponderDashboardPage />);
+
+    const leaveBtn = screen.getByRole('button', { name: /Leave Team/i });
+    expect(leaveBtn).toBeDisabled();
+    expect(leaveBtn).toHaveAttribute('title', 'Cannot leave team while deployed');
+    expect(removeResponderFromTeam).not.toHaveBeenCalled();
+  });
+
+  it('updates the messaging channel when a specific recipient is selected in Staff mode', async () => {
+    const mockStaffTeam = { team_id: 'staff-123', team_name_number: 'Staff', type: 'Staff', status: 'Deployed' };
+    const mockAllTeams = [
+      mockStaffTeam,
+      { team_id: 't-field-1', team_name_number: 'Ground 1', type: 'Ground' }
+    ];
+    
+    vi.mocked(useIncident).mockReturnValue({
+      responderId: 'admin-1',
+      accessLevel: 'admin',
+      incidentId: 'inc-123',
+      incidentData: { opPeriodId: 'op-123' },
+      setResponderStatus: vi.fn(),
+      setCurrentTeamStatus: vi.fn(),
+      setCurrentAssignmentStatus: vi.fn(),
+    });
+
+    // Provide the team object via the hook mock to render the messaging section
+    vi.mocked(useResponderTeamAndAssignment).mockReturnValue({
+      team: mockStaffTeam,
+      assignment: null,
+      responderRecord: null,
+      loading: false,
+      refetch: vi.fn()
+    });
+
+    // Mock the teams fetch for the staff recipient dropdown
+    vi.mocked(supabase.from).mockImplementation((table) => {
+      if (table === 'teams') return globalThis.createSupabaseQueryMock(mockAllTeams);
+      if (table === 'team_messages') return globalThis.createSupabaseQueryMock([]);
+      return globalThis.createSupabaseQueryMock([]);
+    });
+
+    render(<ResponderDashboardPage />);
+
+    // Wait for recipient dropdown to populate
+    const recipientSelect = await screen.findByDisplayValue(/Staff \(Broadcast\)/i);
+    
+    // Select "Ground 1" from the dropdown
+    fireEvent.change(recipientSelect, { target: { value: 't-field-1' } });
+
+    // Verify messaging history fetch was re-triggered for the new channel
+    await waitFor(() => {
+      const messageCalls = vi.mocked(supabase.from).mock.calls.filter(c => c[0] === 'team_messages');
+      // Expect initial broadcast fetch + subsequent channel fetch
+      expect(messageCalls.length).toBeGreaterThan(1);
+    });
+  });
+
+  it('correctly formats the PAR timer string for different durations', async () => {
+    const now = Date.now();
+    const mockTeam = { team_name_number: 'Team 1', status: 'Assigned', type: 'Ground', last_par_check: new Date(now - 145 * 60000).toISOString() }; // 2h 25m ago
+    
+    vi.mocked(useResponderTeamAndAssignment).mockReturnValue({ team: mockTeam, loading: false, refetch: vi.fn() });
+    render(<ResponderDashboardPage />);
+    
+    const durations = await screen.findAllByText('2h 25m ago');
+    expect(durations.length).toBeGreaterThanOrEqual(1);
+  });
 });

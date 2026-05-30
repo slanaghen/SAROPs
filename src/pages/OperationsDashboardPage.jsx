@@ -97,53 +97,29 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     return rowId;
   };
 
-  const leaderById = useMemo(() => {
-    const leaderLookup = {};
-    for (const r of responders) {
-      if (r?.responder_id) {
-        leaderLookup[r.responder_id] = r.name;
-      }
-    }
-    return leaderLookup;
-  }, [responders]);
-
-  const leaderIdentifierById = useMemo(() => {
-    const lookup = {};
-    for (const r of responders) {
-      if (r?.responder_id) {
-        lookup[r.responder_id] = r.identifier;
-      }
-    }
-    return lookup;
-  }, [responders]);
-
   const teamById = useMemo(() => {
-    const teamLookup = {};
-    for (const t of teams) {
-      if (t?.team_id) {
-        teamLookup[t.team_id] = t;
-      }
-    }
-    return teamLookup;
+    const lookup = {};
+    (teams || []).forEach(t => {
+      if (t?.team_id) lookup[t.team_id] = t;
+    });
+    return lookup;
   }, [teams]);
 
   const assignmentById = useMemo(() => {
     const lookup = {};
-    for (const a of assignments) {
-      if (a?.assignment_id) {
-        lookup[a.assignment_id] = a;
-      }
-    }
+    (assignments || []).forEach(a => {
+      if (a?.assignment_id) lookup[a.assignment_id] = a;
+    });
     return lookup;
   }, [assignments]);
 
   const rows = useMemo(() => {
-      const assignmentRows = (assignments || []).map(asnItem => {
-      const matchingTeam = asnItem.team_id ? teamById[asnItem.team_id] : null;
+    // Assignment rows now benefit from pre-joined metadata in the dashboard_assignments view
+    const assignmentRows = (assignments || []).map(asnItem => {
       return {
         id: `asn-${asnItem.assignment_id}`,
-        isParOverdue: checkIsParOverdue(matchingTeam, parInterval, currentTime),
-        timeSincePar: matchingTeam ? formatTimeSince(matchingTeam.last_par_check, matchingTeam.created_at, currentTime) : '',
+        isParOverdue: checkIsParOverdue(asnItem, parInterval, currentTime),
+        timeSincePar: asnItem.team_id ? formatTimeSince(asnItem.last_par_check, asnItem.created_at, currentTime) : '',
         tacChannel: asnItem.frequency_primary || '—',
         assignmentId: asnItem.assignment_id,
         assignmentName: asnItem.title,
@@ -151,14 +127,14 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
         assignmentPriority: asnItem.priority || '—',
         assignmentType: asnItem.resource_type || '—',
         assignmentStatus: asnItem.status,
-        teamName: matchingTeam?.team_name_number || '',
-        teamType: matchingTeam?.type || '',
-        teamLeader: matchingTeam ? leaderById[matchingTeam.leader_responder_id] || 'Unknown' : '',
-        leaderIdentifier: matchingTeam ? leaderIdentifierById[matchingTeam.leader_responder_id] || '—' : '',
-        teamSize: matchingTeam?.current_responders?.length || 0,
-        leaderId: matchingTeam?.leader_responder_id || null,
-        teamStatus: matchingTeam?.status || '',
-        hasBoth: !!matchingTeam,
+        teamName: asnItem.team_name || '',
+        teamType: asnItem.team_type || '',
+        teamLeader: asnItem.leader_name || '',
+        leaderIdentifier: asnItem.leader_identifier || '—',
+        teamSize: asnItem.team_size || 0,
+        leaderId: asnItem.leader_responder_id || null,
+        teamStatus: asnItem.team_status || '',
+        hasBoth: !!asnItem.team_id,
         teamId: asnItem.team_id,
       };
     });
@@ -166,15 +142,16 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     const assignmentTeamSet = new Set();
     (assignments || []).forEach(a => { if (a.team_id) assignmentTeamSet.add(a.team_id); });
 
+    // Team only rows benefit from metadata in the dashboard_teams view
     const teamOnlyRows = (teams || []).filter(tItem => !assignmentTeamSet.has(tItem.team_id)).map(tItem => ({
       id: `team-${tItem.team_id}`,
       isParOverdue: checkIsParOverdue(tItem, parInterval, currentTime),
       timeSincePar: formatTimeSince(tItem.last_par_check, tItem.created_at, currentTime),
       tacChannel: '', assignmentId: '', assignmentName: '', assignmentPriority: '', assignmentType: '', assignmentStatus: '',
       teamName: tItem.team_name_number, teamType: tItem.type, teamStatus: tItem.status,
-      teamLeader: leaderById[tItem.leader_responder_id] || 'Unknown',
-      leaderIdentifier: leaderIdentifierById[tItem.leader_responder_id] || '—',
-      teamSize: tItem.current_responders?.length || 0,
+      teamLeader: tItem.leader_name || 'Unknown',
+      leaderIdentifier: tItem.leader_identifier || '—',
+      teamSize: tItem.member_count || 0,
       leaderId: tItem.leader_responder_id || null,
       hasBoth: false, teamId: tItem.team_id,
     }));
@@ -228,7 +205,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       return sortConfig.direction === 'asc' ? comparison : -comparison;
     });
     return result; // currentTime is a dependency for checkIsParOverdue and formatTimeSince
-  }, [assignments, teams, teamById, leaderById, leaderIdentifierById, assignmentFilter, teamFilter, sortConfig, viewMode, parInterval, currentTime]);
+  }, [assignments, teams, assignmentFilter, teamFilter, sortConfig, viewMode, parInterval, currentTime]);
 
   // Keep a live clock for timer displays and overdue calculations
   useEffect(() => {
@@ -305,6 +282,11 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
    * Manually detach a staged team
    */
   const handleDisbandTeam = async (teamId, teamName, teamType) => {
+    const team = teams.find(t => t.team_id === teamId);
+    if (team?.status === 'Deployed') {
+      alert(`Cannot disband team "${teamName}" while it is Deployed.`);
+      return;
+    }
     if (!window.confirm(`Disband "${teamName}"? Members will be released back to staging, but the team record will remain for logs.`)) return;
 
     try {

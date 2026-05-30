@@ -258,6 +258,10 @@ const AdminPage = () => {
         setAccessLevel(finalResponder.access_level);
       }
 
+      // Refresh Supabase session to apply new JWT claims (access_level and incident_id)
+      // and ensure RLS policies work immediately without waiting for auto-renewal.
+      await supabase.auth.refreshSession();
+
       // Log administrative check-in
       await supabase.from('action_logs').insert({
         incident_id: selectedActivationId,
@@ -479,6 +483,12 @@ const AdminPage = () => {
   };
 
   const handleDisbandTeam = async (id, name, type) => { // Added type
+    const team = allTeams.find(t => t.team_id === id);
+    if (team?.status === 'Deployed') {
+      alert(`Cannot disband team "${name}" while it is Deployed.`);
+      return;
+    }
+
     if (!window.confirm(`Disband team "${name}"? Members will be released back to staging.`)) return;
 
     try {

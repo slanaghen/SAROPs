@@ -171,4 +171,23 @@ describe('ICSAssignmentPage', () => {
     const box = screen.getByText(/Safety Officer/i).closest('.ics-box');
     expect(within(box).queryByText(/SAR/)).not.toBeInTheDocument();
   });
+
+  it('renders "mapping" data correctly even if some responders are missing from local state', async () => {
+    const mockStaffTeam = {
+      type: 'Staff',
+      current_responders: [
+        { responder_id: 'NON_EXISTENT_ID', role: 'Safety Officer' }
+      ]
+    };
+
+    vi.mocked(usePlanningDashboard).mockReturnValue({
+      teams: [mockStaffTeam],
+      responders: [], 
+      loading: false,
+      fetchDashboardData: vi.fn(),
+    });
+
+    render(<ICSAssignmentPage />);
+    expect(screen.getByText(/Safety Officer/i)).toBeInTheDocument();
+  });
 });

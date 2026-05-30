@@ -311,6 +311,11 @@ const PlanningDashboard = ({
   };
 
   const handleReleaseTeam = async (team) => {
+    if (team.status === 'Deployed') {
+      alert(`Cannot disband team "${team.team_name_number}" while it is Deployed. Please complete or cancel the assignment first.`);
+      return;
+    }
+
     const msg = `Are you sure you want to release "${team.team_name_number}"? This will return all members to Staged status and delete the team record.`;
     if (!window.confirm(msg)) return;
 
@@ -391,6 +396,8 @@ const PlanningDashboard = ({
         await updateTeam(formData.team_id, {
           team_name_number: finalTeamName,
           type: formData.type,
+          sartopo_color_hex: formData.sartopo_color_hex || '#FF0000',
+          op_period_id: formData.op_period_id,
           status: formData.status,
           leader_responder_id: formData.leader_responder_id,
           equipment: formData.equipment,
@@ -438,11 +445,34 @@ const PlanningDashboard = ({
   const handleSaveAssignment = async (formData) => {
     try {
       setLoading(true);
+
+      // Cleanse payload to prevent PostgREST errors with joined/calculated fields (like 'team_name')
+      const payload = {
+        op_period_id: formData.op_period_id,
+        title: formData.title || '',
+        status: formData.status || 'Planned',
+        segment: formData.segment || '',
+        resource_type: formData.resource_type || '',
+        team_size: formData.team_size ? parseInt(formData.team_size, 10) : null,
+        frequency_primary: formData.frequency_primary || '',
+        description: formData.description || '',
+        probability_of_detection: (formData.probability_of_detection === '' || formData.probability_of_detection === null) ? null : parseInt(formData.probability_of_detection, 10),
+        debrief_narrative: formData.debrief_narrative || '',
+        team_id: formData.team_id || null,
+        is_orphaned: formData.is_orphaned || false,
+        priority: formData.priority || null,
+        transportation: formData.transportation || null,
+        time_allocated: formData.time_allocated || null,
+        hazards: formData.hazards || null,
+        prepared_by: formData.prepared_by || null,
+        sartopo_id: formData.sartopo_id || null
+      };
+
       if (formData.assignment_id && updateAssignment) {
-        await updateAssignment(formData.assignment_id, formData);
+        await updateAssignment(formData.assignment_id, payload);
         setSuccessMessage('Assignment updated');
       } else if (createAssignment) {
-        await createAssignment(formData);
+        await createAssignment(payload);
         setSuccessMessage('Assignment created');
       }
       setShowAssignmentForm(false);
@@ -470,12 +500,12 @@ const PlanningDashboard = ({
       if (updateResponder) {
         // Cleanse payload to prevent PostgREST errors with invalid columns
         const { 
-          name, agency, identifier, cell_phone, 
+          name, agency, identifier, cell_phone, responder_type,
           access_level, status, special_skills 
         } = formData;
 
         await updateResponder(formData.responder_id, {
-          name, agency, identifier, cell_phone, 
+          name, agency, identifier, cell_phone, responder_type,
           access_level, status, special_skills
         });
 
@@ -641,6 +671,17 @@ const PlanningDashboard = ({
                   {responder.special_skills && (
                     <div className="responder-skills-badge">{responder.special_skills}</div>
                   )}
+
+                  <div className="team-actions" style={{ marginTop: '8px', display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                    <button 
+                      className="btn btn-secondary btn-sm" 
+                      onClick={(e) => { e.stopPropagation(); handleCheckOutResponder(responder); }}
+                      disabled={responder.status?.toLowerCase() !== 'staged'}
+                      style={{ color: '#dc2626' }}
+                    >
+                      Check Out
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -715,12 +756,13 @@ const PlanningDashboard = ({
                     </div>
                   )}
 
-                  <div className="team-actions" style={{ marginTop: '4px', display: 'flex', gap: '8px' }}>
-                    <button className="btn btn-secondary btn-sm" onClick={(e) => { e.stopPropagation(); openEditTeamForm(team); }}>Edit</button>
+                  <div className="team-actions" style={{ marginTop: '4px', display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
                     <button 
                       className="btn btn-secondary btn-sm" 
                       onClick={(e) => { e.stopPropagation(); handleReleaseTeam(team); }}
+                      disabled={team.status === 'Deployed'}
                       style={{ color: '#dc2626' }}
+                      title={team.status === 'Deployed' ? "Cannot disband team while deployed" : "Release team members to staging"}
                     >
                       Disband
                     </button>
@@ -780,7 +822,7 @@ const PlanningDashboard = ({
                     <div className="assignment-name clickable-name" style={{ marginRight: '4px' }}>{assignment.title}</div>
                     {assignment.resource_type && <div className="team-type" style={{ background: '#f1f5f9', color: '#475569' }}>{assignment.resource_type}</div>}
                     <span style={{ fontSize: '11px', color: '#64748b' }}>Size: {assignment.team_size}</span>
-                    <div className={`assignment-status ${assignment.status.toLowerCase()}`}>
+                    <div className={`assignment-status ${assignment.status.toLowerCase()}`} style={{ marginLeft: 'auto' }}>
                       {assignment.status}
                     </div>
                   </div>
@@ -793,8 +835,7 @@ const PlanningDashboard = ({
                     </div>
                   )}
 
-                  <div className="team-actions" style={{ marginTop: '6px', display: 'flex', gap: '8px' }}>
-                    <button className="btn btn-secondary btn-sm" onClick={(e) => { e.stopPropagation(); openEditAssignmentForm(assignment); }}>Edit</button>
+                  <div className="team-actions" style={{ marginTop: '6px', display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
                     <button 
                       className="btn btn-secondary btn-sm" 
                       onClick={(e) => { e.stopPropagation(); handleDeleteAssignment(assignment); }}

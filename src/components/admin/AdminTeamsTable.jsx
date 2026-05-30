@@ -72,8 +72,16 @@ const AdminTeamsTable = ({
                       <td style={{ textAlign: 'right' }}>
                         <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
                           <button onClick={() => handleEditTeam(team)} className="btn btn-secondary btn-sm" style={{ fontSize: '16px' }}>Edit</button>
-                          {team.status !== 'Disbanded' && ( // Only show if not already disbanded
-                            <button onClick={() => handleDisbandTeam(team.team_id, team.team_name_number, team.type)} className="btn btn-secondary btn-sm" style={{ color: '#f59e0b', fontSize: '16px' }}>Disband</button>
+                          {team.status !== 'Disbanded' && (
+                            <button 
+                              onClick={() => handleDisbandTeam(team.team_id, team.team_name_number, team.type)} 
+                              className="btn btn-secondary btn-sm" 
+                              disabled={team.status === 'Deployed'}
+                              style={{ color: '#f59e0b', fontSize: '16px' }}
+                              title={team.status === 'Deployed' ? "Cannot disband while deployed" : ""}
+                            >
+                              Disband
+                            </button>
                           )}
                           <button onClick={() => handleDeleteTeam(team.team_id, team.team_name_number, team.type)} className="btn btn-secondary btn-sm" style={{ color: '#dc2626', fontSize: '16px' }}>Delete</button>
                         </div>

@@ -489,4 +489,31 @@ describe('SARTopoDataPage', () => {
     });
     vi.unstubAllEnvs();
   });
+
+  it('records a detailed audit log entry when assignments are synced', async () => {
+    const mockData = { 
+      features: [{ 
+        type: 'Feature', id: 'f1', 
+        properties: { name: 'Audit Task', class: 'Assignment' } 
+      }] 
+    };
+    vi.mocked(useIncident).mockReturnValue({ 
+      isActive: true, incidentId: 'inc-123', responderName: 'Steve', 
+      incidentData: { opPeriodId: 'op-123' } 
+    });
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      headers: { get: () => 'application/json' },
+      json: vi.fn().mockResolvedValue(mockData)
+    });
+
+    render(<SARTopoDataPage />);
+    fireEvent.click(await screen.findByText('Download from SARTopo'));
+
+    await waitFor(() => {
+      expect(supabase.from).toHaveBeenCalledWith('action_logs');
+      const logCall = vi.mocked(fromMock.insert).mock.calls.find(c => c[0].action?.includes('Synced'));
+      expect(logCall[0]).toEqual(expect.objectContaining({ user_name: 'Steve' }));
+    });
+  });
 });
