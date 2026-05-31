@@ -4,7 +4,7 @@ import { vi, describe, it, expect, afterEach, beforeEach } from 'vitest';
 import { BrowserRouter } from 'react-router-dom';
 import AdminPage from './AdminPage';
 import { useIncident } from '../context/IncidentContext';
-import { usePlanningDashboard } from '../hooks/usePlanningDashboard';
+import { useAdminData } from '../hooks/useAdminData';
 import { supabase } from '../lib/supabase'; // Import the actual supabase object to mock it
 
 const mockNavigate = vi.fn();
@@ -19,8 +19,8 @@ vi.mock('../context/IncidentContext', () => ({
   useIncident: vi.fn(),
 }));
 
-vi.mock('../hooks/usePlanningDashboard', () => ({
-  usePlanningDashboard: vi.fn(),
+vi.mock('../hooks/useAdminData', () => ({
+  useAdminData: vi.fn(),
 }));
 
 vi.mock('../lib/supabase', () => ({
@@ -72,8 +72,15 @@ describe('AdminPage Authentication Gate', () => {
       sartopoRefreshInterval: 30000,
       setSartopoRefreshInterval: vi.fn(),
     });
-    vi.mocked(usePlanningDashboard).mockReturnValue({
-      recordAction: vi.fn(),
+    vi.mocked(useAdminData).mockReturnValue({
+      users: [],
+      incidents: [],
+      responders: [],
+      teams: [],
+      assignments: [],
+      loading: false,
+      refresh: vi.fn(),
+      refreshAll: vi.fn(),
     });
   });
 
@@ -118,11 +125,16 @@ describe('AdminPage Authentication Gate', () => {
       operational_periods: [{ op_number: 1, op_period_id: 'op1', start_datetime: new Date().toISOString() }]
     };
     const mockUser = { email: 'user@example.com', username: 'SystemUser', access_level: 'responder', name: 'Test User' };
-    
-    supabase.from.mockImplementation((table) => {
-      if (table === 'incidents') return globalThis.createSupabaseQueryMock([mockIncident]);
-      if (table === 'users') return globalThis.createSupabaseQueryMock([mockUser]);
-      return globalThis.createSupabaseQueryMock([]);
+
+    vi.mocked(useAdminData).mockReturnValue({
+      users: [mockUser],
+      incidents: [mockIncident],
+      responders: [],
+      teams: [],
+      assignments: [],
+      loading: false,
+      refresh: vi.fn(),
+      refreshAll: vi.fn(),
     });
 
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
@@ -148,9 +160,16 @@ describe('AdminPage Authentication Gate', () => {
       sartopoRefreshInterval: 30000,
       setSartopoRefreshInterval: vi.fn(),
     });
-    supabase.from.mockImplementation((table) => {
-      if (table === 'responders') return globalThis.createSupabaseQueryMock([{ responder_id: 'r1', name: 'Res 1', status: 'Staged' }]);
-      return globalThis.createSupabaseQueryMock([]);
+
+    vi.mocked(useAdminData).mockReturnValue({
+      users: [],
+      incidents: [],
+      responders: [{ responder_id: 'r1', name: 'Res 1', status: 'Staged' }],
+      teams: [],
+      assignments: [],
+      loading: false,
+      refresh: vi.fn(),
+      refreshAll: vi.fn(),
     });
 
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
@@ -190,11 +209,16 @@ describe('AdminPage Authentication Gate', () => {
       setSartopoRefreshInterval: vi.fn(),
     });
 
-    supabase.from.mockImplementation((table) => {
-      if (table === 'users') return globalThis.createSupabaseQueryMock([mockUserToEdit]); // Initial fetch
-      // Return an empty query mock for other tables (like 'incidents' in AdminLogin) 
-      // to prevent "undefined" errors during component mounting.
-      return globalThis.createSupabaseQueryMock([]);
+
+    vi.mocked(useAdminData).mockReturnValue({
+      users: [mockUserToEdit],
+      incidents: [],
+      responders: [],
+      teams: [],
+      assignments: [],
+      loading: false,
+      refresh: vi.fn(),
+      refreshAll: vi.fn(),
     });
 
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
@@ -242,36 +266,30 @@ describe('AdminPage Authentication Gate', () => {
         }
       }
     };
-    const mockMember = { responder_id: 'r1' };
-    const mockRecordAction = vi.fn();
     
-    supabase.from.mockImplementation((table) => {
-      if (table === 'teams') return globalThis.createSupabaseQueryMock([mockTeam]);
-      if (table === 'team_responders') return globalThis.createSupabaseQueryMock([mockMember]);
-      // For other tables, return a generic mock that resolves to empty data
-      return globalThis.createSupabaseQueryMock([]);
-    });
-
-    // Override recordAction mock specifically for this test
-    vi.mocked(usePlanningDashboard).mockReturnValue({
-      ...vi.mocked(usePlanningDashboard)(),
-      recordAction: mockRecordAction
+    // Mock useAdminData to provide the team record for the find() lookup in handleDisbandTeam
+    vi.mocked(useAdminData).mockReturnValue({
+      users: [],
+      incidents: [],
+      responders: [],
+      teams: [mockTeam],
+      assignments: [],
+      loading: false,
+      refresh: vi.fn(),
+      refreshAll: vi.fn(),
     });
 
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
 
-    // Team Management is expanded by default. Wait for the mocked data to render.
-    await screen.findByText('Team Alpha');
-
-    const disbandBtn = await screen.findByRole('button', { name: /Disband/i }); // Use findByRole for robustness
+    const disbandBtn = await screen.findByRole('button', { name: /Disband/i });
     fireEvent.click(disbandBtn);
 
     expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('Disband team "Team Alpha"'));
-    expect(supabase.from).toHaveBeenCalledWith('teams'); // Verify primary status update
     
-    await waitFor(() => expect(mockRecordAction).toHaveBeenCalledWith(
-      `Admin disbanded team "${mockTeam.team_name_number}" (ID: ${mockTeam.team_id}, Type: ${mockTeam.type}). Fields modified: status="Disbanded", last_par_check=null. Automated trigger: All members released to "Staged".`
-    ));
+    await waitFor(() => {
+      expect(supabase.from).toHaveBeenCalledWith('teams');
+      expect(supabase.from).toHaveBeenCalledWith('action_logs');
+    });
   });
 
   it('prompts for confirmation before deleting an incident and performs deletion', async () => {
@@ -301,14 +319,22 @@ describe('AdminPage Authentication Gate', () => {
     };
 
     const mockDelete = vi.fn().mockReturnThis();
-    supabase.from.mockImplementation((table) => {
-      if (table === 'incidents') {
-        const mock = globalThis.createSupabaseQueryMock([mockIncident]);
-        mock.delete = mockDelete;
-        mock.eq = vi.fn().mockResolvedValue({ error: null });
-        return mock;
-      }
-      return globalThis.createSupabaseQueryMock([]);
+
+    vi.mocked(useAdminData).mockReturnValue({
+      users: [],
+      incidents: [mockIncident],
+      responders: [],
+      teams: [],
+      assignments: [],
+      loading: false,
+      refresh: vi.fn(),
+      refreshAll: vi.fn(),
+    });
+
+    supabase.from.mockImplementation(() => {
+      const mock = globalThis.createSupabaseQueryMock([]);
+      mock.delete = mockDelete;
+      return mock;
     });
 
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
@@ -338,10 +364,11 @@ describe('AdminPage Authentication Gate', () => {
     });
     
     supabase.rpc.mockResolvedValue({ error: null });
-    supabase.from.mockImplementation((table) => ({
-      select: vi.fn().mockReturnThis(),
-      order: vi.fn().mockResolvedValue({ data: [], error: null })
-    }));
+    supabase.from.mockImplementation(() => {
+      const mock = globalThis.createSupabaseQueryMock([]);
+      mock.maybeSingle = vi.fn().mockReturnThis();
+      return mock;
+    });
 
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
     
@@ -396,9 +423,16 @@ describe('AdminPage Authentication Gate', () => {
       setSartopoRefreshInterval: vi.fn(),
     });
     supabase.rpc.mockResolvedValue({ error: null });
-    supabase.from.mockImplementation((table) => {
-      if (table === 'users') return globalThis.createSupabaseQueryMock([mockUserToEdit]);
-      return globalThis.createSupabaseQueryMock([]);
+
+    vi.mocked(useAdminData).mockReturnValue({
+      users: [mockUserToEdit],
+      incidents: [],
+      responders: [],
+      teams: [],
+      assignments: [],
+      loading: false,
+      refresh: vi.fn(),
+      refreshAll: vi.fn(),
     });
 
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
@@ -430,18 +464,23 @@ describe('AdminPage Authentication Gate', () => {
     window.prompt = vi.fn().mockReturnValue('newpassword');
 
     supabase.rpc.mockResolvedValue({ error: null });
-    supabase.from.mockImplementation((table) => ({
-      select: vi.fn().mockReturnThis(),
-      order: vi.fn().mockReturnThis(), // Ensure order is chained before then
-      then: (cb) => Promise.resolve({ data: table === 'users' ? [{ email: 'existing@user.com', username: 'ExistingUser' }] : [], error: null }).then(cb)
-    }));
+    vi.mocked(useAdminData).mockReturnValue({
+      users: [{ email: 'existing@user.com', username: 'ExistingUser' }],
+      incidents: [],
+      responders: [],
+      teams: [],
+      assignments: [],
+      loading: false,
+      refresh: vi.fn(),
+      refreshAll: vi.fn(),
+    });
 
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
 
     // Expand section to access the admin list and buttons
     // System Users section is expanded by default
 
-    await screen.findByText('ExistingUser');
+    await screen.findByText((content) => content.includes('ExistingUser'));
     fireEvent.click(screen.getByRole('button', { name: /Password/i }));
 
     await waitFor(() => {
@@ -472,22 +511,25 @@ describe('AdminPage Authentication Gate', () => {
 
     const mockResponder = { responder_id: 'res-123', name: 'Test Responder', status: 'Staged', checkin_datetime: new Date().toISOString(), checkout_datetime: null };
     
-    const mockUpdate = vi.fn().mockReturnThis();
-    const mockEq = vi.fn().mockResolvedValue({ error: null });
+    vi.mocked(useAdminData).mockReturnValue({
+      users: [],
+      incidents: [],
+      responders: [mockResponder],
+      teams: [],
+      assignments: [],
+      loading: false,
+      refresh: vi.fn(),
+      refreshAll: vi.fn(),
+    });
 
-    supabase.from.mockImplementation((table) => {
-      const query = {
-        select: vi.fn().mockReturnThis(),
-        order: vi.fn().mockReturnThis(),
-        update: mockUpdate,
-        eq: mockEq,
-        delete: vi.fn().mockReturnThis(),
-        then: (onFulfilled) => {
-          const data = table === 'responders' ? [mockResponder] : [];
-          return Promise.resolve({ data, error: null }).then(onFulfilled);
-        }
-      };
-      return query;
+    const mockUpdate = vi.fn().mockReturnThis();
+    const mockEq = vi.fn().mockReturnThis();
+
+    supabase.from.mockImplementation(() => {
+      const mock = globalThis.createSupabaseQueryMock([]);
+      mock.update = mockUpdate;
+      mock.eq = mockEq;
+      return mock;
     });
 
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
@@ -522,31 +564,28 @@ describe('AdminPage Authentication Gate', () => {
     });
     window.confirm = vi.fn().mockReturnValue(true);
 
-    // Mock finding 1 active assignment and 1 responder
-    supabase.from.mockImplementation((table) => {
-      let data = [];
-      if (table === 'incidents') {
-        data = [{ 
-          incident_id: 'inc-123', 
-          name: 'Active Incident', 
-          number: '1', 
-          start_datetime: new Date().toISOString() 
-        }];
-      }
-      if (table === 'operational_periods') data = { op_period_id: 'op-1' };
-      if (table === 'assignments') data = [{ assignment_id: 'a1', status: 'Deployed' }];
-      if (table === 'responders') data = [{ responder_id: 'r1', status: 'Staged' }];
-      
-      return {
-        select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        is: vi.fn().mockReturnThis(),
-        in: vi.fn().mockReturnThis(),
-        update: vi.fn().mockReturnThis(),
-        order: vi.fn().mockReturnThis(),
-        maybeSingle: vi.fn().mockResolvedValue({ data, error: null }),
-        then: (onFulfilled) => Promise.resolve({ data, error: null }).then(onFulfilled)
-      };
+    const mockIncident = { 
+      incident_id: 'inc-123', 
+      name: 'Active Incident', 
+      number: '1', 
+      start_datetime: new Date().toISOString() 
+    };
+
+    vi.mocked(useAdminData).mockReturnValue({
+      users: [],
+      incidents: [mockIncident],
+      responders: [{ responder_id: 'r1', status: 'Staged' }],
+      teams: [],
+      assignments: [{ assignment_id: 'a1', status: 'Deployed' }],
+      loading: false,
+      refresh: vi.fn(),
+      refreshAll: vi.fn(),
+    });
+
+    supabase.from.mockImplementation(() => {
+      const mock = globalThis.createSupabaseQueryMock([]);
+      mock.maybeSingle = vi.fn().mockResolvedValue({ data: { op_period_id: 'op-1' }, error: null });
+      return mock;
     });
 
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
@@ -555,9 +594,12 @@ describe('AdminPage Authentication Gate', () => {
     const endBtn = await screen.findByRole('button', { name: /End Incident/i });
     fireEvent.click(endBtn);
 
-    expect(supabase.from).toHaveBeenCalledWith('assignments');
-    expect(supabase.from).toHaveBeenCalledWith('teams');
-    expect(supabase.from).toHaveBeenCalledWith('incidents');
+    await waitFor(() => {
+      expect(supabase.from).toHaveBeenCalledWith('assignments');
+      expect(supabase.from).toHaveBeenCalledWith('responders');
+      expect(supabase.from).toHaveBeenCalledWith('incidents');
+      expect(supabase.from).toHaveBeenCalledWith('action_logs');
+    });
   });
 
   it('successfully signs out the administrator and redirects to check-in', async () => {
@@ -602,14 +644,17 @@ describe('AdminPage Authentication Gate', () => {
     });
     window.confirm = vi.fn().mockReturnValue(true);
     const mockAsn = { assignment_id: 'a1', title: 'Task to Delete', status: 'Planned' };
-    
-    supabase.from.mockImplementation((table) => ({
-      select: vi.fn().mockReturnThis(),
-      order: vi.fn().mockReturnThis(),
-      delete: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockResolvedValue({ error: null }),
-      then: (cb) => Promise.resolve({ data: table === 'assignments' ? [mockAsn] : [], error: null }).then(cb)
-    }));
+
+    vi.mocked(useAdminData).mockReturnValue({
+      users: [],
+      incidents: [],
+      responders: [],
+      teams: [],
+      assignments: [mockAsn],
+      loading: false,
+      refresh: vi.fn(),
+      refreshAll: vi.fn(),
+    });
 
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
     // Assignment Management is expanded by default
@@ -637,13 +682,16 @@ describe('AdminPage Authentication Gate', () => {
     window.confirm = vi.fn().mockReturnValue(true);
     const mockRes = { responder_id: 'r1', name: 'Delete Me', status: 'Staged', checkin_datetime: new Date().toISOString(), agency: 'SAR', identifier: 'K9-1' };
 
-    supabase.from.mockImplementation((table) => ({
-      select: vi.fn().mockReturnThis(),
-      order: vi.fn().mockReturnThis(),
-      delete: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockResolvedValue({ error: null }),
-      then: (cb) => Promise.resolve({ data: table === 'responders' ? [mockRes] : [], error: null }).then(cb)
-    }));
+    vi.mocked(useAdminData).mockReturnValue({
+      users: [],
+      incidents: [],
+      responders: [mockRes],
+      teams: [],
+      assignments: [],
+      loading: false,
+      refresh: vi.fn(),
+      refreshAll: vi.fn(),
+    });
 
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
     // Responder Management is expanded by default
@@ -675,12 +723,19 @@ describe('AdminPage Authentication Gate', () => {
       { email: 'user2@example.com', username: 'User2' }
     ];
 
+
+    vi.mocked(useAdminData).mockReturnValue({
+      users: mockUsers,
+      incidents: [],
+      responders: [],
+      teams: [],
+      assignments: [],
+      loading: false,
+      refresh: vi.fn(),
+      refreshAll: vi.fn(),
+    });
+
     supabase.rpc.mockResolvedValue({ error: null });
-    supabase.from.mockImplementation((table) => ({
-      select: vi.fn().mockReturnThis(),
-      order: vi.fn().mockReturnThis(), // Ensure order is chained before then
-      then: (cb) => Promise.resolve({ data: table === 'users' ? mockUsers : [], error: null }).then(cb)
-    }));
 
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
     // System Users is expanded by default
@@ -837,10 +892,16 @@ describe('AdminPage Authentication Gate', () => {
       start_datetime: new Date().toISOString(),
       operational_periods: [{ op_number: 1, op_period_id: 'op1' }]
     };
-    supabase.from.mockImplementation((table) => {
-      if (table === 'incidents') return globalThis.createSupabaseQueryMock([mockIncident]);
-      if (table === 'users') return globalThis.createSupabaseQueryMock([{ email: 'admin@test.com' }]);
-      return globalThis.createSupabaseQueryMock([]);
+
+    vi.mocked(useAdminData).mockReturnValue({
+      users: [{ email: 'admin@test.com' }],
+      incidents: [mockIncident],
+      responders: [],
+      teams: [],
+      assignments: [],
+      loading: false,
+      refresh: vi.fn(),
+      refreshAll: vi.fn(),
     });
     
     supabase.auth.getSession.mockResolvedValue({ data: { session: { user: { email: 'admin@test.com' } } } });

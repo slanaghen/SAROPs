@@ -114,12 +114,19 @@ const OperationsTable = ({
         <tbody>
           {rows.length === 0 ? (
             <tr><td colSpan={parInterval > 0 ? 12 : 11} className="empty-row">No matching records found.</td></tr>
-          ) : rows.map(row => (
-            <tr key={row.id} className={
-              (row.assignmentStatus === 'Deployed' && row.hasBoth) ? 'row-deployed' :
-              (row.assignmentStatus === 'Assigned' && row.hasBoth) ? 'row-assigned' :
-              (row.assignmentStatus === 'Completed' && row.hasBoth) ? 'row-complete' : ''
-            } style={row.isParOverdue ? { backgroundColor: '#fff7ed', borderLeft: '4px solid #f97316' } : {}}>
+          ) : rows.map(row => {
+            const isHighPriorityPending = row.assignmentPriority === 'High' && row.assignmentStatus === 'Assigned';
+            
+            const rowClass = [
+              (row.assignmentStatus === 'Deployed' && row.hasBoth) ? 'row-deployed' : '',
+              (row.assignmentStatus === 'Assigned' && row.hasBoth) ? 'row-assigned' : '',
+              (row.assignmentStatus === 'Completed' && row.hasBoth) ? 'row-complete' : '',
+              row.isParOverdue ? 'row-pulse-overdue' : '',
+              (!row.isParOverdue && isHighPriorityPending) ? 'row-glow-priority' : ''
+            ].filter(Boolean).join(' ');
+
+            return (
+              <tr key={row.id} className={rowClass}>
               <td 
                 style={{ textAlign: 'center' }}
                 onDragOver={(e) => onDragOver(e, row.id, 'assignment')}
@@ -256,7 +263,8 @@ const OperationsTable = ({
                 </select>
               </td>
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
     </div>

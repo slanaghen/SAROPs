@@ -6,9 +6,14 @@
   --color-text-main: #111827;
   --color-text-muted: #64748b;
   --color-border: #e5e7eb;
+  --color-card: #ffffff;
   --color-primary: #2563eb;
   --color-primary-dark: #1e40af;
   
+  /* Operational Scale */
+  --btn-height: 38px;
+  --btn-font-size: 11px;
+
   /* Typography */
   --text-xs: 11px;
   --text-sm: 13px;
@@ -20,6 +25,47 @@
   --space-sm: 8px;
   --space-md: 16px;
   --space-lg: 24px;
+}
+
+.outdoor-mode {
+  --color-bg: #000000;
+  --color-text-main: #ffffff;
+  --color-text-muted: #cbd5e1;
+  --color-border: #ffffff;
+  --color-card: #000000;
+  --text-base: 18px;
+  --text-sm: 16px;
+  --text-xs: 14px;
+  --btn-height: 52px;
+  --btn-font-size: 16px;
+}
+
+/* Operational Attention Animations */
+@keyframes pulse-overdue {
+  0% { border-left: 4px solid #dc2626; background-color: #fff7ed; }
+  50% { border-left: 10px solid #ef4444; background-color: #ffedd5; }
+  100% { border-left: 4px solid #dc2626; background-color: #fff7ed; }
+}
+
+@keyframes glow-priority {
+  0% { box-shadow: inset 4px 0 0 #2563eb; background-color: #f0f9ff; }
+  50% { box-shadow: inset 8px 0 0 #3b82f6; background-color: #e0f2fe; }
+  100% { box-shadow: inset 4px 0 0 #2563eb; background-color: #f0f9ff; }
+}
+
+.row-pulse-overdue {
+  animation: pulse-overdue 2s infinite ease-in-out;
+  position: relative;
+  z-index: 1;
+}
+
+.row-glow-priority {
+  animation: glow-priority 3s infinite ease-in-out;
+  position: relative;
+}
+
+.row-glow-priority td {
+  border-bottom: 1px solid #bfdbfe;
 }
 
 /* Ensure all form elements inherit the global font family */
@@ -74,10 +120,11 @@ body, html, #root {
 }
 
 article {
-  background: white;
+  background: var(--color-card);
   border-radius: 12px;
   padding: var(--space-md);
-  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.08);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.1);
+  border: 1px solid var(--color-border);
 }
 
 /* Menu Ribbon Styling */
@@ -369,9 +416,9 @@ article {
 .section-card, .modal, .team-card, .assignment-card {
   padding: var(--space-sm) var(--space-md) !important;
   margin-bottom: var(--space-sm) !important;
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-border) !important;
   border-radius: 8px;
-  background: white;
+  background: var(--color-card) !important;
 }
 
 .detail-row {

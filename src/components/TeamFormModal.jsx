@@ -44,6 +44,7 @@ const TeamFormModal = ({
 
   // Resolve the Staff team ID for centralized communications
   useEffect(() => {
+    if (!isOpen) return;
     const fetchStaffTeamId = async () => {
       if (!incidentData?.opPeriodId) return;
       const { data } = await supabase
@@ -69,7 +70,7 @@ const TeamFormModal = ({
       if (data) setAllTeams(data);
     };
     fetchAllTeams();
-  }, [incidentData?.opPeriodId]);
+  }, [incidentData?.opPeriodId, isOpen]);
 
   const isStaffTeam = teamForm.type === 'Staff';
   const messagingChannelId = (isStaffTeam && selectedRecipientId) ? selectedRecipientId : teamForm.team_id;

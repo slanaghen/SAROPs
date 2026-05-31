@@ -108,10 +108,26 @@ const IncidentEditPage = () => {
   } = useIncident();
   const [isLocalSaved, setIsLocalSaved] = useState(false);
 
-  // Load existing data if an incident is already active
+  const fromAdmin = location.state?.fromAdmin;
+  const targetIncident = location.state?.targetIncident;
+
+  const existingId = useMemo(() => {
+    return targetIncident?.incident_id || (isActive ? contextIncidentId : null);
+  }, [targetIncident, isActive, contextIncidentId]);
+
+  const targetOpId = useMemo(() => {
+    if (targetIncident) {
+      const latestOp = [...(targetIncident.operational_periods || [])].sort((a, b) => (b.op_number || 0) - (a.op_number || 0))[0];
+      return latestOp?.op_period_id;
+    }
+    return isActive ? incidentData?.opPeriodId : null;
+  }, [targetIncident, isActive, incidentData?.opPeriodId]);
+
+  // Load existing data from state (if passed from Admin) or from context (if active)
   useEffect(() => {
     const loadExistingData = async () => {
-      if (!isActive || !contextIncidentId || !incidentData?.opPeriodId) return;
+      const incId = targetIncident?.incident_id || (isActive ? contextIncidentId : null);
+      if (!incId || !targetOpId) return;
 
       setIsLocalSaved(true);
       
@@ -120,7 +136,7 @@ const IncidentEditPage = () => {
         const { data: incData, error: incError } = await supabase
           .from('incidents')
           .select('*')
-          .eq('incident_id', contextIncidentId)
+          .eq('incident_id', incId)
           .maybeSingle();
 
         if (incError) throw incError;
@@ -141,7 +157,7 @@ const IncidentEditPage = () => {
         const { data: opData, error: opError } = await supabase
           .from('operational_periods')
           .select('*')
-          .eq('op_period_id', incidentData.opPeriodId)
+          .eq('op_period_id', targetOpId)
           .maybeSingle();
 
         if (opError) throw opError;
@@ -163,7 +179,7 @@ const IncidentEditPage = () => {
     };
 
     loadExistingData();
-  }, [isActive, contextIncidentId, incidentData?.opPeriodId]);
+  }, [isActive, contextIncidentId, incidentData?.opPeriodId, targetIncident, targetOpId]);
 
   // Client-side validation for SARTopo ID
   useEffect(() => {
@@ -371,7 +387,7 @@ const IncidentEditPage = () => {
       const parsedPar = parseInt(operationalPeriod.par_check_interval, 10);
       const finalParInterval = isNaN(parsedPar) ? 60 : parsedPar;
 
-      if (isActive && contextIncidentId) {
+      if (existingId) {
         // 1. Update Incident in Supabase
         const { error: incError } = await supabase
           .from('incidents')
@@ -383,7 +399,7 @@ const IncidentEditPage = () => {
             start_datetime: incident.start_datetime,
             notes: incident.notes
           })
-          .eq('incident_id', contextIncidentId);
+          .eq('incident_id', existingId);
         console.debug('[IncidentEdit] Update incident response:', { error: incError });
 
         if (incError) throw incError;
@@ -398,20 +414,23 @@ const IncidentEditPage = () => {
             situational_awareness_narrative: operationalPeriod.situational_awareness_narrative,
             par_check_interval: finalParInterval
           })
-          .eq('op_period_id', incidentData?.opPeriodId);
+          .eq('op_period_id', targetOpId);
         console.debug('[IncidentEdit] Update op_period response:', { error: opError });
 
         if (opError) throw opError;
-        opPeriodId = incidentData?.opPeriodId;
+        opPeriodId = targetOpId;
 
-        startIncident(
-          newIncidentId, 
-          incident.name, 
-          operationalPeriod.op_number, 
-          incidentData?.opPeriodId,
-          incident.sartopo_id,
-          finalParInterval
-        );
+        // Only update global context if we are editing the currently active incident
+        if (isActive && existingId === contextIncidentId) {
+          startIncident(
+            newIncidentId, 
+            incident.name, 
+            operationalPeriod.op_number, 
+            incidentData?.opPeriodId,
+            incident.sartopo_id,
+            finalParInterval
+          );
+        }
       } else {
         // 1. Create Incident in Supabase
         const { error: incError } = await supabase
@@ -545,7 +564,11 @@ const IncidentEditPage = () => {
           return; // Stop navigation if session setup failed
         }
       }
-      navigate('/operations');
+      if (fromAdmin) {
+        navigate('/admin');
+      } else {
+        navigate('/operations');
+      }
     } else {
       setIsSubmitting(false);
       setIsSaving(false); // Reset if save failed
@@ -702,7 +725,7 @@ const IncidentEditPage = () => {
                 />
               </label>
 
-              {isActive && (
+              {existingId && (
                 <label>
                   End Date / Time
                   <input
@@ -773,7 +796,7 @@ const IncidentEditPage = () => {
                 />
               </label>
 
-              {isActive && (
+              {existingId && (
                 <label>
                   OP End Date / Time
                   <input
@@ -806,8 +829,8 @@ const IncidentEditPage = () => {
         </div>
 
         <div className="form-actions" style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-          <button type="submit" className="btn btn-primary" disabled={isSaving || (isActive && !isDirty)}>
-            {isSaving ? 'Saving...' : (isActive ? 'Update Incident Information' : 'Start Incident Tracking')}
+          <button type="submit" className="btn btn-primary" disabled={isSaving || (existingId && !isDirty)}>
+            {isSaving ? 'Saving...' : (existingId ? 'Update Incident Information' : 'Start Incident Tracking')}
           </button>
           {isActive && (
             <button

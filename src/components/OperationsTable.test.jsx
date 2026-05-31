@@ -100,7 +100,8 @@ describe('OperationsTable', () => {
     render(<OperationsTable {...defaultProps} rows={overdueRows} />);
     
     const row = screen.getByText('Alpha Assignment').closest('tr');
-    expect(row).toHaveStyle({ backgroundColor: '#fff7ed' });
+    // Styling is now handled via the row-pulse-overdue animation class rather than inline styles
+    expect(row).toHaveClass('row-pulse-overdue');
     expect(screen.getByText('75m ago')).toHaveClass('status-indicator incomplete');
   });
 

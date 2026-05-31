@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useIncident } from '../context/IncidentContext';
@@ -12,10 +12,9 @@ import {
   SARTOPO_REFRESH_INTERVAL
 } from '../components/operationalConstants';
 import AdminUserFormModal from '../components/admin/AdminUserFormModal';
-import AdminResponderFormModal from '../components/admin/AdminResponderFormModal';
-import AdminTeamFormModal from '../components/admin/AdminTeamFormModal';
-import AdminAssignmentFormModal from '../components/admin/AdminAssignmentFormModal';
-import AdminIncidentFormModal from '../components/admin/AdminIncidentFormModal';
+import ResponderFormModal from '../components/ResponderFormModal';
+import TeamFormModal from '../components/TeamFormModal';
+import AssignmentFormModal from '../components/AssignmentFormModal';
 import Login from '../pages/LoginPage';
 import AdminUsersTable from '../components/admin/AdminUsersTable';
 import AdminRespondersTable from '../components/admin/AdminRespondersTable';
@@ -42,7 +41,15 @@ const AdminPage = () => {
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [isRespondersExpanded, setIsRespondersExpanded] = useState(true);
-  const { recordAction } = usePlanningDashboard(supabase, incidentId);
+
+  const recordAction = useCallback(async (action) => {
+    if (!incidentId) return;
+    await supabase.from('action_logs').insert({
+      incident_id: incidentId,
+      action,
+      user_name: responderName || 'Administration'
+    });
+  }, [incidentId, responderName]);
 
   const [opRefresh, setOpRefresh] = useState(OPERATIONS_REFRESH_INTERVAL / 1000);
   const [resRefresh, setResRefresh] = useState(RESPONDER_REFRESH_INTERVAL / 1000);
@@ -77,8 +84,23 @@ const AdminPage = () => {
   const [editingTeam, setEditingTeam] = useState(null);
   const [showAssignmentModal, setShowAssignmentModal] = useState(false);
   const [editingAssignment, setEditingAssignment] = useState(null);
-  const [showIncidentModal, setShowIncidentModal] = useState(false);
-  const [editingIncident, setEditingIncident] = useState(null);
+
+  /**
+   * Determines if a non-disbanded Staff team already exists for the operational period
+   * being edited. This ensures only one Command Staff team exists per mission slice.
+   */
+  const commandStaffExists = useMemo(() => {
+    const targetOpId = editingTeam?.op_period_id;
+    if (targetOpId) {
+      return (allTeams || []).some(t => 
+        t.op_period_id === targetOpId && 
+        t.type === 'Staff' && 
+        t.status !== 'Disbanded' &&
+        t.team_id !== editingTeam.team_id
+      );
+    }
+    return (allTeams || []).some(t => t.type === 'Staff' && t.status !== 'Disbanded');
+  }, [allTeams, editingTeam]);
 
   // Authentication Gate: Redirect to dedicated login page if not authenticated
   useEffect(() => {
@@ -220,7 +242,11 @@ const AdminPage = () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("No active session found. Please refresh.");
 
-      const myProfile = users.find(u => u.email === session.user.email);
+      // Fix: session.user.email is null for anonymous logins. Use localStorage fallback.
+      const userEmail = session.user.email || localStorage.getItem('sarops_user_email');
+      if (!userEmail) throw new Error("Could not find your system user identity. Please log in again.");
+
+      const myProfile = users.find(u => u.email?.toLowerCase() === userEmail.toLowerCase());
       if (!myProfile) throw new Error("Could not find your system user profile in the active users list.");
 
       const selectedInc = allIncidents.find(i => i.incident_id === selectedActivationId);
@@ -332,6 +358,7 @@ const AdminPage = () => {
           p_phone: formData.cell_phone,
           p_type: formData.responder_type,
           p_skills: formData.special_skills,
+          p_outdoor_mode: formData.outdoor_mode,
         });
         if (updateError) throw updateError;
         setSuccess(`User ${formData.email} updated successfully.`);
@@ -347,6 +374,7 @@ const AdminPage = () => {
           p_phone: formData.cell_phone,
           p_type: formData.responder_type,
           p_skills: formData.special_skills,
+          p_outdoor_mode: formData.outdoor_mode,
         });
         if (insertError) throw insertError;
         setSuccess(`User ${formData.email} added successfully.`);
@@ -406,6 +434,27 @@ const AdminPage = () => {
     }
   };
 
+  const openEditTeamForm = async (team) => {
+    if (!team) return;
+    setLoading(true);
+    try {
+      // Fetch current membership and roles to populate the unified composition table
+      const { data: members } = await supabase
+        .from('team_responders')
+        .select('responder_id, role')
+        .eq('team_id', team.team_id);
+      
+      setEditingTeam({
+        ...team,
+        current_responders: members || [],
+        responder_ids: members?.map(m => m.responder_id) || []
+      });
+      setShowTeamModal(true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSaveTeam = async (formData) => {
     setLoading(true);
     setError(null);
@@ -413,6 +462,7 @@ const AdminPage = () => {
     setShowTeamModal(false);
 
     try {
+      const teamId = formData.team_id;
       const payload = {
         team_name_number: formData.team_name_number,
         sartopo_color_hex: formData.sartopo_color_hex,
@@ -422,23 +472,60 @@ const AdminPage = () => {
         equipment: formData.equipment,
       };
 
-      if (formData.team_id) {
+      if (teamId) {
+        // 1. Update core team metadata
         const { error: updateError } = await supabase
           .from('teams')
           .update(payload)
-          .eq('team_id', formData.team_id);
+          .eq('team_id', teamId);
         if (updateError) throw updateError;
-        setSuccess(`Team ${formData.team_name_number} updated successfully.`);
+
+        // 2. Reconcile responder attachments (Add/Remove/Update roles)
+        const finalIds = formData.responder_ids || [];
+        const roles = formData.responder_roles || {};
+        const originalIds = editingTeam?.current_responders?.map(r => r.responder_id) || [];
+        
+        const toAdd = finalIds.filter(id => !originalIds.includes(id));
+        const toRemove = originalIds.filter(id => !finalIds.includes(id));
+        const existing = finalIds.filter(id => originalIds.includes(id));
+
+        await Promise.all([
+          ...toAdd.map(id => supabase.from('team_responders').insert({ team_id: teamId, responder_id: id, role: roles[id] || '' })),
+          ...existing.map(id => supabase.from('team_responders').update({ role: roles[id] || '' }).eq('team_id', teamId).eq('responder_id', id)),
+          ...toRemove.map(id => supabase.from('team_responders').delete().eq('team_id', teamId).eq('responder_id', id))
+        ]);
+
+        setSuccess(`Team ${formData.team_name_number} updated.`);
       } else {
-        // Find current OP ID from context or database
+        // Adding new team to the current active incident context
         const { data: opData } = await supabase
           .from('operational_periods')
           .select('op_period_id')
           .eq('incident_id', incidentId)
           .order('created_at', { ascending: false }).limit(1).maybeSingle();
           
-        const { error: insertError } = await supabase.from('teams').insert({ ...payload, team_id: uuidv4(), op_period_id: opData?.op_period_id });
+        const newTeamId = uuidv4();
+        const { error: insertError } = await supabase.from('teams').insert({ 
+          ...payload, 
+          team_id: newTeamId, 
+          op_period_id: opData?.op_period_id 
+        });
+
         if (insertError) throw insertError;
+
+        // Process initial membership assignments
+        const finalIds = formData.responder_ids || [];
+        const roles = formData.responder_roles || {};
+        if (finalIds.length > 0) {
+           await Promise.all(finalIds.map(id => 
+             supabase.from('team_responders').insert({ 
+               team_id: newTeamId, 
+               responder_id: id, 
+               role: roles[id] || '' 
+             })
+           ));
+        }
+
         setSuccess(`Team ${formData.team_name_number} created.`);
       }
       await refreshDashboardData();
@@ -891,10 +978,10 @@ const AdminPage = () => {
               <button 
                 className="btn btn-primary" 
                 onClick={handleActivateSession} 
-                disabled={loading || !selectedActivationId}
+                disabled={loading || fetching || !selectedActivationId}
                 style={{ height: '38px', fontSize: '16px' }}
               >
-                {loading ? 'Activating...' : 'Activate Session'}
+                {loading ? 'Activating...' : (fetching ? 'Loading Data...' : 'Activate Session')}
               </button>
             </div>
           </>
@@ -993,14 +1080,12 @@ const AdminPage = () => {
 
       <AdminTeamsTable
         allTeams={allTeams}
+        allIncidents={allIncidents}
         isTeamsExpanded={isTeamsExpanded}
         setIsTeamsExpanded={setIsTeamsExpanded}
         handleDisbandTeam={handleDisbandTeam}
         handleDeleteTeam={handleDeleteTeam}
-        handleEditTeam={(team) => {
-          setEditingTeam(team);
-          setShowTeamModal(true);
-        }}
+        handleEditTeam={openEditTeamForm}
         handleNewTeam={() => {
           setEditingTeam(null);
           setShowTeamModal(true);
@@ -1051,39 +1136,33 @@ const AdminPage = () => {
         success={success}
       />
 
-      <AdminResponderFormModal
+      <ResponderFormModal
         isOpen={showResponderModal}
         onClose={() => setShowResponderModal(false)}
         onSave={handleSaveResponder}
-        initialData={editingResponder}
+        onCheckOut={(data) => handleCheckOutResponder(data.responder_id)}
+        initialData={editingResponder || {}}
         loading={loading}
         error={error}
+        isAdminMode={true}
       />
 
-      <AdminTeamFormModal
+      <TeamFormModal
         isOpen={showTeamModal}
         onClose={() => setShowTeamModal(false)}
         onSave={handleSaveTeam}
-        initialData={editingTeam}
+        initialData={editingTeam || {}}
         loading={loading}
         error={error}
-        responders={allResponders} // Pass all responders for leader selection
+        responders={allResponders}
+        commandStaffExists={commandStaffExists}
       />
 
-      <AdminAssignmentFormModal
+      <AssignmentFormModal
         isOpen={showAssignmentModal}
         onClose={() => setShowAssignmentModal(false)}
         onSave={handleSaveAssignment}
-        initialData={editingAssignment}
-        loading={loading}
-        error={error}
-      />
-
-      <AdminIncidentFormModal
-        isOpen={showIncidentModal}
-        onClose={() => setShowIncidentModal(false)}
-        onSave={handleSaveIncident}
-        initialData={editingIncident}
+        initialData={editingAssignment || {}}
         loading={loading}
         error={error}
       />

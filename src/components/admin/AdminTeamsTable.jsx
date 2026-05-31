@@ -2,6 +2,7 @@ import React from 'react';
 
 const AdminTeamsTable = ({
   allTeams = [],
+  allIncidents = [],
   isTeamsExpanded,
   setIsTeamsExpanded,
   handleDisbandTeam,
@@ -50,8 +51,12 @@ const AdminTeamsTable = ({
                 </tr>
               ) : (
                 allTeams.map(team => {
-                  const incident = team.operational_periods?.incidents;
-                  const opNum = team.operational_periods?.op_number;
+                  const opPeriod = Array.isArray(team.operational_periods) ? team.operational_periods[0] : team.operational_periods;
+                  const targetIncId = opPeriod?.incident_id || team.incident_id;
+                  const incident = targetIncId 
+                    ? allIncidents.find(inc => inc.incident_id === targetIncId)
+                    : null;
+                  const opNum = opPeriod?.op_number;
                   const isDisbanded = team.status === 'Disbanded';
 
                   return (

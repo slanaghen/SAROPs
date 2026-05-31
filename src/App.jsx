@@ -10,6 +10,7 @@ import './styles.css';
 function App() {
   const [offline, setOffline] = useState(!navigator.onLine);
   const [user, setUser] = useState(null);
+  const [outdoorMode, setOutdoorMode] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
@@ -19,6 +20,14 @@ function App() {
     supabase.auth.getSession().then((response) => {
       const session = response?.data?.session;
       setUser(session?.user ?? null);
+      
+      if (session?.user?.email) {
+        supabase.from('users')
+          .select('outdoor_mode')
+          .eq('email', session.user.email)
+          .maybeSingle()
+          .then(({data}) => data && setOutdoorMode(data.outdoor_mode));
+      }
     });
 
     // Listen for auth changes (login/logout)
@@ -175,7 +184,7 @@ function App() {
   }, [isActive, isAdmin, accessLevel, location.pathname, navigate]);
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${outdoorMode ? 'outdoor-mode' : ''}`}>
       <div className="incident-banner">
         <div className="banner-left">
           <div className="banner-logo-container">

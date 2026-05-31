@@ -89,14 +89,6 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
 
   const commandStaffExists = useMemo(() => (teams || []).some(t => t.type === 'Staff'), [teams]);
 
-
-  const getRawUuid = (rowId) => {
-    if (!rowId) return null;
-    if (rowId.startsWith('asn-')) return rowId.slice(4);
-    if (rowId.startsWith('team-')) return rowId.slice(5);
-    return rowId;
-  };
-
   const teamById = useMemo(() => {
     const lookup = {};
     (teams || []).forEach(t => {
@@ -104,6 +96,22 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     });
     return lookup;
   }, [teams]);
+
+  const leaderById = useMemo(() => {
+    const lookup = {};
+    (responders || []).forEach(r => {
+      if (r?.responder_id) lookup[r.responder_id] = r.name;
+    });
+    return lookup;
+  }, [responders]);
+
+  const leaderIdentifierById = useMemo(() => {
+    const lookup = {};
+    (responders || []).forEach(r => {
+      if (r?.responder_id) lookup[r.responder_id] = r.identifier;
+    });
+    return lookup;
+  }, [responders]);
 
   const assignmentById = useMemo(() => {
     const lookup = {};
@@ -113,13 +121,22 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     return lookup;
   }, [assignments]);
 
+  const getRawUuid = (rowId) => {
+    if (!rowId) return null;
+    if (rowId.startsWith('asn-')) return rowId.slice(4);
+    if (rowId.startsWith('team-')) return rowId.slice(5);
+    return rowId;
+  };
+
   const rows = useMemo(() => {
-    // Assignment rows now benefit from pre-joined metadata in the dashboard_assignments view
     const assignmentRows = (assignments || []).map(asnItem => {
+      // Restore client-side join for robustness against raw table fetches or RLS join blocks
+      const matchingTeam = asnItem.team_id ? teamById[asnItem.team_id] : null;
+      
       return {
         id: `asn-${asnItem.assignment_id}`,
-        isParOverdue: checkIsParOverdue(asnItem, parInterval, currentTime),
-        timeSincePar: asnItem.team_id ? formatTimeSince(asnItem.last_par_check, asnItem.created_at, currentTime) : '',
+        isParOverdue: checkIsParOverdue(matchingTeam || asnItem, parInterval, currentTime),
+        timeSincePar: (matchingTeam || asnItem.team_id) ? formatTimeSince(matchingTeam?.last_par_check || asnItem.last_par_check || matchingTeam?.created_at || asnItem.created_at, currentTime) : '',
         tacChannel: asnItem.frequency_primary || '—',
         assignmentId: asnItem.assignment_id,
         assignmentName: asnItem.title,
@@ -127,14 +144,14 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
         assignmentPriority: asnItem.priority || '—',
         assignmentType: asnItem.resource_type || '—',
         assignmentStatus: asnItem.status,
-        teamName: asnItem.team_name || '',
-        teamType: asnItem.team_type || '',
-        teamLeader: asnItem.leader_name || '',
-        leaderIdentifier: asnItem.leader_identifier || '—',
-        teamSize: asnItem.team_size || 0,
-        leaderId: asnItem.leader_responder_id || null,
-        teamStatus: asnItem.team_status || '',
-        hasBoth: !!asnItem.team_id,
+        teamName: matchingTeam?.team_name_number || asnItem.team_name || '',
+        teamType: matchingTeam?.type || asnItem.team_type || '',
+        teamLeader: matchingTeam?.leader_name || asnItem.leader_name || leaderById[matchingTeam?.leader_responder_id || asnItem.leader_responder_id] || '',
+        leaderIdentifier: matchingTeam?.leader_identifier || asnItem.leader_identifier || leaderIdentifierById[matchingTeam?.leader_responder_id || asnItem.leader_responder_id] || '—',
+        teamSize: matchingTeam?.member_count || asnItem.member_count || matchingTeam?.current_responders?.length || 0,
+        leaderId: matchingTeam?.leader_responder_id || asnItem.leader_responder_id || null,
+        teamStatus: matchingTeam?.status || asnItem.team_status || '',
+        hasBoth: !!(asnItem.team_id || matchingTeam),
         teamId: asnItem.team_id,
       };
     });
@@ -146,21 +163,21 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     const teamOnlyRows = (teams || []).filter(tItem => !assignmentTeamSet.has(tItem.team_id)).map(tItem => ({
       id: `team-${tItem.team_id}`,
       isParOverdue: checkIsParOverdue(tItem, parInterval, currentTime),
-      timeSincePar: formatTimeSince(tItem.last_par_check, tItem.created_at, currentTime),
+      timeSincePar: formatTimeSince(tItem.last_par_check || tItem.created_at, currentTime),
       tacChannel: '', assignmentId: '', assignmentName: '', assignmentPriority: '', assignmentType: '', assignmentStatus: '',
       teamName: tItem.team_name_number, teamType: tItem.type, teamStatus: tItem.status,
-      teamLeader: tItem.leader_name || 'Unknown',
-      leaderIdentifier: tItem.leader_identifier || '—',
-      teamSize: tItem.member_count || 0,
+      teamLeader: tItem.leader_name || leaderById[tItem.leader_responder_id] || 'Unknown',
+      leaderIdentifier: tItem.leader_identifier || leaderIdentifierById[tItem.leader_responder_id] || '—',
+      teamSize: tItem.member_count || tItem.current_responders?.length || 0,
       leaderId: tItem.leader_responder_id || null,
       hasBoth: false, teamId: tItem.team_id,
     }));
 
     let result = [...assignmentRows, ...teamOnlyRows];
     if (viewMode === 'Operations') {
-      result = result.filter(r => (r.teamStatus === 'Assigned' || r.teamStatus === 'Deployed' || r.assignmentStatus === 'Completed' || r.assignmentStatus === 'Incomplete') && r.teamType !== 'Staff');
+      result = result.filter(r => r.teamType === 'Staff' || (r.teamStatus === 'Assigned' || r.teamStatus === 'Deployed' || r.assignmentStatus === 'Completed' || r.assignmentStatus === 'Incomplete'));
     } else if (viewMode === 'Planning') {
-      result = result.filter(r => !['Completed', 'Incomplete'].includes(r.assignmentStatus) && (r.assignmentStatus === 'Planned' || r.teamStatus === 'Staged') && r.teamType !== 'Staff');
+      result = result.filter(r => r.teamType === 'Staff' || (!['Completed', 'Incomplete'].includes(r.assignmentStatus) && (r.assignmentStatus === 'Planned' || r.teamStatus === 'Staged')));
     }
 
     const aTerm = assignmentFilter.toLowerCase().trim();
@@ -205,7 +222,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       return sortConfig.direction === 'asc' ? comparison : -comparison;
     });
     return result; // currentTime is a dependency for checkIsParOverdue and formatTimeSince
-  }, [assignments, teams, assignmentFilter, teamFilter, sortConfig, viewMode, parInterval, currentTime]);
+  }, [assignments, teams, teamById, leaderById, leaderIdentifierById, assignmentFilter, teamFilter, sortConfig, viewMode, parInterval, currentTime]);
 
   // Keep a live clock for timer displays and overdue calculations
   useEffect(() => {

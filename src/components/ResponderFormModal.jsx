@@ -17,13 +17,14 @@ const ResponderFormModal = ({
   onCheckOut,
   initialData = {},
   loading = false,
-  error = null
+  error = null,
+  isAdminMode = false
 }) => {
-  const [formData, setFormData] = useState(initialData);
+  const [formData, setFormData] = useState(initialData || {});
 
   useEffect(() => {
-    setFormData(initialData);
-  }, [initialData]);
+    setFormData(initialData || {});
+  }, [initialData, isOpen]);
 
   const handleInputChange = (e) => {
     const target = e.target;
@@ -56,7 +57,7 @@ const ResponderFormModal = ({
     <BaseModal
       isOpen={isOpen}
       onClose={onClose}
-      title="Edit Responder"
+      title={formData?.responder_id ? "Edit Responder" : "Add New Responder"}
       loading={loading}
       actions={
         <>
@@ -115,13 +116,13 @@ const ResponderFormModal = ({
               name="access_level"
               value={formData.access_level || 'responder'}
               onChange={handleInputChange}
-              disabled={true}
+              disabled={!isAdminMode}
             >
               {ACCESS_LEVELS.map(level => (
                 <option key={level} value={level}>{level.charAt(0).toUpperCase() + level.slice(1)}</option>
               ))}
             </select>
-            <small className="form-hint" style={{ fontSize: '10px', display: 'block', marginTop: '4px' }}>Access levels can only be modified in the Administration panel.</small>
+            {!isAdminMode && <small className="form-hint" style={{ fontSize: '10px', display: 'block', marginTop: '4px' }}>Access levels can only be modified in the Administration panel.</small>}
           </div>
 
           <div className="form-row">

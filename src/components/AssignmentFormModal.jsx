@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import BaseModal from './BaseModal';
 import { RESOURCE_TYPES } from '../constants/operationalConstants';
 import { normalizeResourceTypeName } from '../utils/dataNormalization';
 
@@ -13,36 +14,63 @@ const AssignmentFormModal = ({
   loading = false,
   error = null
 }) => {
-  const [assignmentForm, setAssignmentForm] = useState({
-    ...initialData,
-    resource_type: normalizeResourceTypeName(initialData.resource_type)
-  });
+  const [formData, setFormData] = useState(initialData || {});
 
   useEffect(() => {
-    setAssignmentForm({
+    setFormData({
       ...initialData,
-      resource_type: normalizeResourceTypeName(initialData.resource_type)
+      resource_type: normalizeResourceTypeName(initialData?.resource_type)
     });
-  }, [initialData]);
+  }, [initialData, isOpen]);
 
-  if (!isOpen) return null;
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
+  };
 
   return (
-    <div className="modal-backdrop">
-      <div className="modal">
-        <h3>{assignmentForm.assignment_id ? 'Edit Assignment' : 'New Assignment'}</h3>
-        
-        {error && <div className="alert alert-error">{error}</div>}
+    <BaseModal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={formData.assignment_id ? 'Edit Assignment' : 'New Assignment'}
+      loading={loading}
+      actions={
+        <button className="btn btn-primary" onClick={() => onSave(formData)} disabled={loading}>
+          {loading ? 'Saving...' : 'Save Assignment'}
+        </button>
+      }
+    >
+      {error && <div className="alert alert-error" style={{ marginBottom: '16px' }}>{error}</div>}
 
+      <div className="modal-scroll-wrapper" style={{ maxHeight: '65vh', overflowY: 'auto', paddingRight: '8px' }}>
         <div className="form-row">
           <label htmlFor="asn_name">Assignment Title</label>
           <input
             id="asn_name"
+            name="title"
             type="text"
-            value={assignmentForm.title || ''}
-            onChange={e => setAssignmentForm({ ...assignmentForm, title: e.target.value })}
+            value={formData.title || ''}
+            onChange={handleInputChange}
            placeholder="e.g., AA, AB, Sector 1"
+           required
           />
+        </div>
+
+        <div className="form-row">
+          <label htmlFor="asn_status">Status</label>
+          <select 
+            id="asn_status" 
+            name="status" 
+            value={formData.status || 'Planned'} 
+            onChange={handleInputChange}
+            required
+          >
+            <option value="Planned">Planned</option>
+            <option value="Assigned">Assigned</option>
+            <option value="Deployed">Deployed</option>
+            <option value="Completed">Completed</option>
+            <option value="Incomplete">Incomplete</option>
+          </select>
         </div>
 
         <div style={{ display: 'flex', gap: '16px', marginBottom: '16px', alignItems: 'flex-start' }}>
@@ -50,9 +78,10 @@ const AssignmentFormModal = ({
             <label htmlFor="asn_division">Segment</label>
             <input
               id="asn_division"
+              name="segment"
               type="text"
-              value={assignmentForm.segment || ''}
-              onChange={e => setAssignmentForm({ ...assignmentForm, segment: e.target.value })}
+              value={formData.segment || ''}
+              onChange={handleInputChange}
               placeholder="e.g., A, B, C"
               style={{ width: '100%', boxSizing: 'border-box' }}
             />
@@ -62,9 +91,10 @@ const AssignmentFormModal = ({
             <label htmlFor="asn_size">Team Size</label>
             <input
               id="asn_size"
+              name="team_size"
               type="number"
-              value={assignmentForm.team_size || ''}
-              onChange={e => setAssignmentForm({ ...assignmentForm, team_size: e.target.value })}
+              value={formData.team_size || ''}
+              onChange={handleInputChange}
               placeholder="e.g., 2"
               style={{ width: '100%', boxSizing: 'border-box' }}
             />
@@ -74,8 +104,9 @@ const AssignmentFormModal = ({
             <label htmlFor="asn_type">Resource Type</label>
             <select
               id="asn_type"
-              value={assignmentForm.resource_type || ''}
-              onChange={e => setAssignmentForm({ ...assignmentForm, resource_type: e.target.value })}
+              name="resource_type"
+              value={formData.resource_type || ''}
+              onChange={handleInputChange}
               style={{ width: '100%', boxSizing: 'border-box' }}
             >
               <option value="">— Select Type —</option>
@@ -87,22 +118,24 @@ const AssignmentFormModal = ({
             <label htmlFor="asn_tac">TAC Channel</label>
             <input
               id="asn_tac"
+              name="frequency_primary"
               type="text"
-              value={assignmentForm.frequency_primary || ''}
-              onChange={e => setAssignmentForm({ ...assignmentForm, frequency_primary: e.target.value })}
+              value={formData.frequency_primary || ''}
+              onChange={handleInputChange}
               placeholder="e.g., TAC 1, 155.450"
               style={{ width: '100%', boxSizing: 'border-box' }}
             />
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0 12px' }}>
           <div className="form-row">
             <label htmlFor="asn_priority">Priority</label>
             <select
               id="asn_priority"
-              value={assignmentForm.priority || ''}
-              onChange={e => setAssignmentForm({ ...assignmentForm, priority: e.target.value })}
+              name="priority"
+              value={formData.priority || ''}
+              onChange={handleInputChange}
             >
               <option value="">— Select Priority —</option>
               <option value="High">High</option>
@@ -110,60 +143,97 @@ const AssignmentFormModal = ({
               <option value="Low">Low</option>
             </select>
           </div>
-          <div className="form-row">
-            <label htmlFor="asn_hazards">Hazards</label>
-            <input id="asn_hazards" type="text" value={assignmentForm.hazards || ''} onChange={e => setAssignmentForm({ ...assignmentForm, hazards: e.target.value })} />
-          </div>
+
           <div className="form-row">
             <label htmlFor="asn_pod">POD (%) / Probability</label>
             <input
               id="asn_pod"
+              name="probability_of_detection"
               type="number"
               min="0"
               max="100"
-              value={assignmentForm.probability_of_detection || ''}
-              onChange={e => setAssignmentForm({ ...assignmentForm, probability_of_detection: e.target.value })}
+              value={formData.probability_of_detection || ''}
+              onChange={handleInputChange}
               placeholder="0-100"
               style={{ width: '100%', boxSizing: 'border-box' }}
             />
           </div>
+
+          <div className="form-row">
+            <label htmlFor="asn_time">Time Allocated</label>
+            <input 
+              id="asn_time" 
+              name="time_allocated"
+              type="text" 
+              value={formData.time_allocated || ''} 
+              onChange={handleInputChange} 
+              placeholder="e.g. 4 hours"
+            />
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '12px' }}>
+          <div className="form-row">
+            <label htmlFor="asn_transport">Transportation</label>
+            <input 
+              id="asn_transport" 
+              name="transportation"
+              type="text" 
+              value={formData.transportation || ''} 
+              onChange={handleInputChange} 
+              placeholder="e.g. Foot, ATV, Heli"
+            />
+          </div>
+          <div className="form-row">
+            <label htmlFor="asn_hazards">Hazards</label>
+            <input 
+              id="asn_hazards" 
+              name="hazards"
+              type="text" 
+              value={formData.hazards || ''} 
+              onChange={handleInputChange} 
+            />
+          </div>
+        </div>
+
+        <div className="form-row">
+          <label htmlFor="asn_prepared">Prepared By</label>
+          <input 
+            id="asn_prepared" 
+            name="prepared_by"
+            type="text" 
+            value={formData.prepared_by || ''} 
+            onChange={handleInputChange} 
+          />
         </div>
 
         <div className="form-row">
           <label htmlFor="asn_narrative">Description</label>
           <textarea
             id="asn_narrative"
-            value={assignmentForm.description || ''}
-            onChange={e => setAssignmentForm({ ...assignmentForm, description: e.target.value.slice(0, 500) })}
+            name="description"
+            value={formData.description || ''}
+            onChange={e => handleInputChange({ target: { name: 'description', value: e.target.value.slice(0, 500) }})}
             placeholder="Assignment narrative"
             style={{ minHeight: '80px' }}
           />
-          <small className="form-hint" style={{ textAlign: 'right' }}>{(assignmentForm.description || '').length}/500</small>
+          <small className="form-hint" style={{ textAlign: 'right' }}>{(formData.description || '').length}/500</small>
         </div>
 
         <div className="form-row">
           <label htmlFor="asn_debrief">Debrief Narrative</label>
           <textarea
             id="asn_debrief"
-            value={assignmentForm.debrief_narrative || ''}
-            onChange={e => setAssignmentForm({ ...assignmentForm, debrief_narrative: e.target.value.slice(0, 1000) })}
+            name="debrief_narrative"
+            value={formData.debrief_narrative || ''}
+            onChange={e => handleInputChange({ target: { name: 'debrief_narrative', value: e.target.value.slice(0, 1000) }})}
             placeholder="Search results and findings..."
             style={{ minHeight: '80px' }}
           />
-          <small className="form-hint" style={{ textAlign: 'right' }}>{(assignmentForm.debrief_narrative || '').length}/1000</small>
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-        </div>
-
-        <div className="modal-actions">
-          <button className="btn btn-primary" onClick={() => onSave(assignmentForm)} disabled={loading}>
-            {loading ? 'Saving...' : 'Save Assignment'}
-          </button>
-          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <small className="form-hint" style={{ textAlign: 'right' }}>{(formData.debrief_narrative || '').length}/1000</small>
         </div>
       </div>
-    </div>
+    </BaseModal>
   );
 };
 

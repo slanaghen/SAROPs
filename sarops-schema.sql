@@ -277,6 +277,7 @@ CREATE TABLE users (
   cell_phone TEXT,
   responder_type responder_type,
   special_skills TEXT,
+  outdoor_mode BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 -- ============================================================================
@@ -335,7 +336,7 @@ SELECT
       FROM team_responders tr
       JOIN responders r ON tr.responder_id = r.responder_id
       WHERE tr.team_id = t.team_id
-    ) AS current_responders,
+    ),
     '[]'::json
   ) AS current_responders
 FROM teams t
@@ -349,12 +350,13 @@ SELECT
   t.team_name_number AS team_name,
   t.status AS team_status,
   t.type AS team_type,
-  r.name AS leader_name,
-  r.identifier AS leader_identifier,
+  t.leader_name,
+  t.leader_identifier,
+  t.leader_responder_id,
+  t.member_count,
   t.last_par_check
 FROM assignments a
-LEFT JOIN teams t ON a.team_id = t.team_id
-LEFT JOIN responders r ON t.leader_responder_id = r.responder_id;
+LEFT JOIN team_current_responders t ON a.team_id = t.team_id;
 
 -- View: incident_summary
 -- Summary view for incident dashboard
@@ -394,14 +396,14 @@ BEGIN
     -- Create the Staff team and capture the ID
     INSERT INTO teams (op_period_id, team_name_number, sartopo_color_hex, type, status, last_par_check)
     VALUES (NEW.op_period_id, 'Staff', '#0000FF', 'Staff', 'Deployed', CURRENT_TIMESTAMP)
-    ON CONFLICT DO NOTHING
+    ON CONFLICT (op_period_id) WHERE type = 'Staff' AND status != 'Disbanded'
+    DO UPDATE SET updated_at = CURRENT_TIMESTAMP
     RETURNING team_id INTO _team_id;
 
     -- Automatically create a "Command Staff" assignment and link it to the staff team
-    IF _team_id IS NOT NULL THEN
-        INSERT INTO assignments (op_period_id, title, resource_type, status, team_id)
-        VALUES (NEW.op_period_id, 'Command Staff', 'Staff', 'Deployed', _team_id);
-    END IF;
+    INSERT INTO assignments (op_period_id, title, resource_type, status, team_id)
+    VALUES (NEW.op_period_id, 'Command Staff', 'Staff', 'Deployed', _team_id)
+    ON CONFLICT (op_period_id, sartopo_id) DO UPDATE SET team_id = EXCLUDED.team_id;
 
     RETURN NEW;
 END;
@@ -1068,7 +1070,7 @@ CREATE POLICY "Admins/Staff can manage all team messages" ON team_messages
 -- Policies for users
 -- Allow staff/admins to view the list of system users
 CREATE POLICY "Allow all authenticated to view user list" ON users
-  FOR SELECT TO authenticated USING (check_is_operational_staff());
+  FOR SELECT TO authenticated USING (TRUE);
 
 -- Secure RPCs for managing users
 -- These functions use SECURITY DEFINER to bypass RLS and ensure 
@@ -1088,12 +1090,13 @@ CREATE OR REPLACE FUNCTION admin_add_user(
   p_identifier TEXT DEFAULT NULL,
   p_phone TEXT DEFAULT NULL,
   p_type TEXT DEFAULT NULL,
-  p_skills TEXT DEFAULT NULL
+  p_skills TEXT DEFAULT NULL,
+  p_outdoor_mode BOOLEAN DEFAULT FALSE
 )
 RETURNS VOID AS $outer_func$
 BEGIN
-  -- Normalize email for lookup to prevent mismatch due to casing or whitespace
-  IF EXISTS (SELECT 1 FROM users WHERE email = LOWER(TRIM(p_email))) THEN
+  -- Perform case-insensitive lookup to ensure existing users are identified for UPDATE
+  IF EXISTS (SELECT 1 FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM(p_email))) THEN
     UPDATE users SET
       username = p_username,
       password = CASE
@@ -1107,17 +1110,18 @@ BEGIN
       identifier = p_identifier,
       cell_phone = p_phone,
       responder_type = p_type::responder_type,
-      special_skills = p_skills
-    WHERE email = LOWER(TRIM(p_email));
+      special_skills = p_skills,
+      outdoor_mode = p_outdoor_mode
+    WHERE LOWER(TRIM(email)) = LOWER(TRIM(p_email));
   ELSE
     -- For new users, a password is required.
     INSERT INTO users (
       email, username, password, access_level,
-      name, agency, identifier, cell_phone, responder_type, special_skills
+      name, agency, identifier, cell_phone, responder_type, special_skills, outdoor_mode
     )
     VALUES (
       LOWER(TRIM(p_email)), p_username, crypt(p_password, gen_salt('bf')), p_access_level::access_level,
-      p_name, p_agency, p_identifier, p_phone, p_type::responder_type, p_skills
+      p_name, p_agency, p_identifier, p_phone, p_type::responder_type, p_skills, p_outdoor_mode
     );
   END IF;
 END;
@@ -1174,6 +1178,8 @@ BEGIN
                     %s,
                     %s,
                     %s,
+                    %s,
+                    %s,
                     %s
                  FROM users',
                  CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='username') THEN 'username' ELSE 'email' END,
@@ -1184,6 +1190,7 @@ BEGIN
                  CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='cell_phone') THEN 'cell_phone' ELSE 'NULL' END,
                  CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='responder_type') THEN 'responder_type::TEXT' ELSE '''SAR''' END,
                  CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='special_skills') THEN 'special_skills' ELSE 'NULL' END,
+                 CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='outdoor_mode') THEN 'outdoor_mode' ELSE 'FALSE' END,
                  CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='created_at') THEN 'created_at' ELSE 'CURRENT_TIMESTAMP' END
         );
     END IF;
@@ -1383,6 +1390,7 @@ BEGIN
       cell_phone TEXT,
       responder_type responder_type,
       special_skills TEXT,
+      outdoor_mode BOOLEAN DEFAULT FALSE,
       created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
     );';
 
@@ -1446,12 +1454,13 @@ BEGIN
       t.team_name_number AS team_name,
       t.status AS team_status,
       t.type AS team_type,
-      r.name AS leader_name,
-      r.identifier AS leader_identifier,
+      t.leader_name,
+      t.leader_identifier,
+      t.leader_responder_id,
+      t.member_count,
       t.last_par_check
     FROM assignments a
-    LEFT JOIN teams t ON a.team_id = t.team_id
-    LEFT JOIN responders r ON t.leader_responder_id = r.responder_id;';
+    LEFT JOIN team_current_responders t ON a.team_id = t.team_id;';
 
     EXECUTE 'CREATE OR REPLACE VIEW incident_summary AS
     SELECT
@@ -1482,13 +1491,13 @@ BEGIN
     BEGIN
         INSERT INTO teams (op_period_id, team_name_number, sartopo_color_hex, type, status, last_par_check)
         VALUES (NEW.op_period_id, ''Staff'', ''#0000FF'', ''Staff'', ''Deployed'', CURRENT_TIMESTAMP)
-        ON CONFLICT DO NOTHING
+        ON CONFLICT (op_period_id) WHERE type = ''Staff'' AND status != ''Disbanded''
+        DO UPDATE SET updated_at = CURRENT_TIMESTAMP
         RETURNING team_id INTO _team_id;
 
-        IF _team_id IS NOT NULL THEN
-            INSERT INTO assignments (op_period_id, title, resource_type, status, team_id)
-            VALUES (NEW.op_period_id, ''Command Staff'', ''Staff'', ''Deployed'', _team_id);
-        END IF;
+        INSERT INTO assignments (op_period_id, title, resource_type, status, team_id)
+        VALUES (NEW.op_period_id, ''Command Staff'', ''Staff'', ''Deployed'', _team_id)
+        ON CONFLICT (op_period_id, sartopo_id) DO UPDATE SET team_id = EXCLUDED.team_id;
 
         RETURN NEW;
     END;
@@ -2070,17 +2079,18 @@ BEGIN
       p_identifier TEXT DEFAULT NULL,
       p_phone TEXT DEFAULT NULL,
       p_type TEXT DEFAULT NULL,
-      p_skills TEXT DEFAULT NULL
+      p_skills TEXT DEFAULT NULL,
+      p_outdoor_mode BOOLEAN DEFAULT FALSE
     )
     RETURNS VOID AS $func$
     BEGIN
-  -- Normalize email for lookup to prevent mismatch due to casing or whitespace
-  IF EXISTS (SELECT 1 FROM users WHERE email = LOWER(TRIM(p_email))) THEN
+  -- Perform case-insensitive lookup to ensure existing users are identified for UPDATE
+  IF EXISTS (SELECT 1 FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM(p_email))) THEN
         UPDATE users SET
           username = p_username,
           password = CASE
         -- Only update password if a non-empty string is provided
-        WHEN p_password IS NOT NULL AND TRIM(p_password) <> '' THEN crypt(p_password, gen_salt('bf'))
+        WHEN p_password IS NOT NULL AND TRIM(p_password) <> '''' THEN crypt(p_password, gen_salt(''bf''))
             ELSE password
           END,
           access_level = p_access_level::access_level,
@@ -2089,18 +2099,19 @@ BEGIN
           identifier = p_identifier,
           cell_phone = p_phone,
           responder_type = p_type::responder_type,
-          special_skills = p_skills
-    WHERE email = LOWER(TRIM(p_email));
+          special_skills = p_skills,
+          outdoor_mode = p_outdoor_mode
+    WHERE LOWER(TRIM(email)) = LOWER(TRIM(p_email));
       ELSE
     -- For new users, a password is required. If p_password is null, 
     -- this will correctly trigger the not-null constraint violation.
         INSERT INTO users (
           email, username, password, access_level,
-          name, agency, identifier, cell_phone, responder_type, special_skills
+          name, agency, identifier, cell_phone, responder_type, special_skills, outdoor_mode
         )
         VALUES (
-      LOWER(TRIM(p_email)), p_username, crypt(p_password, gen_salt('bf')), p_access_level::access_level,
-          p_name, p_agency, p_identifier, p_phone, p_type::responder_type, p_skills
+          LOWER(TRIM(p_email)), p_username, crypt(p_password, gen_salt(''bf'')), p_access_level::access_level,
+          p_name, p_agency, p_identifier, p_phone, p_type::responder_type, p_skills, p_outdoor_mode
         );
       END IF;
     END;
@@ -2124,14 +2135,14 @@ BEGIN
 
     -- Restore users from backup
     IF EXISTS (SELECT FROM pg_class WHERE relname = 'users_temp_backup') THEN
-        EXECUTE 'INSERT INTO users (email, username, password, access_level, name, agency, identifier, cell_phone, responder_type, special_skills, created_at)
-        SELECT email, COALESCE(username, email), password, access_level_text::access_level, name, agency, identifier, cell_phone, responder_type_text::responder_type, special_skills, created_at 
+        EXECUTE 'INSERT INTO users (email, username, password, access_level, name, agency, identifier, cell_phone, responder_type, special_skills, outdoor_mode, created_at)
+        SELECT email, COALESCE(username, email), password, access_level_text::access_level, name, agency, identifier, cell_phone, responder_type_text::responder_type, special_skills, outdoor_mode, created_at 
         FROM users_temp_backup ON CONFLICT (email) DO NOTHING';
         EXECUTE 'DROP TABLE users_temp_backup';
     END IF;
 
     -- Re-apply grants inside the re-initialization block to ensure API access persists
-    EXECUTE 'GRANT EXECUTE ON FUNCTION admin_add_user(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated;';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION admin_add_user(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, BOOLEAN) TO authenticated;';
     EXECUTE 'GRANT EXECUTE ON FUNCTION admin_remove_user(TEXT) TO authenticated;';
     EXECUTE 'GRANT EXECUTE ON FUNCTION admin_update_password(TEXT, TEXT) TO authenticated;';
     EXECUTE 'GRANT EXECUTE ON FUNCTION verify_user_login(TEXT, TEXT) TO anon, authenticated;';
@@ -2141,7 +2152,7 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Grant execute permissions to ensure functions are visible to the API
-GRANT EXECUTE ON FUNCTION admin_add_user(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION admin_add_user(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, BOOLEAN) TO authenticated;
 GRANT EXECUTE ON FUNCTION admin_remove_user TO authenticated;
 GRANT EXECUTE ON FUNCTION admin_update_password TO authenticated;
 GRANT EXECUTE ON FUNCTION verify_user_login TO anon, authenticated;
@@ -2162,7 +2173,7 @@ VALUES (
   'SL-001', 
   '303-555-1234', 
   'SAR', 
-  'Leadership, Communication'
+  'Leadership, Good looking'
 ) ON CONFLICT (email) DO NOTHING;
 INSERT INTO users (email, username, password, access_level, name, agency, identifier, cell_phone, responder_type, special_skills) 
 VALUES (
