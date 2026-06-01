@@ -121,7 +121,6 @@ const OperationsTable = ({
               (row.assignmentStatus === 'Deployed' && row.hasBoth) ? 'row-deployed' : '',
               (row.assignmentStatus === 'Assigned' && row.hasBoth) ? 'row-assigned' : '',
               (row.assignmentStatus === 'Completed' && row.hasBoth) ? 'row-complete' : '',
-              row.isParOverdue ? 'row-pulse-overdue' : '',
               (!row.isParOverdue && isHighPriorityPending) ? 'row-glow-priority' : ''
             ].filter(Boolean).join(' ');
 
@@ -200,13 +199,11 @@ const OperationsTable = ({
                 <td style={{ textAlign: 'center' }}>
                   {row.teamId && (row.isParOverdue ? (
                     <span 
-                      className="status-indicator incomplete" 
+                      className="status-indicator incomplete chip-overdue-gradient" 
                       onClick={() => onResetPar(row.teamId, row.teamName)}
                       title="Click to reset PAR"
                       style={{ 
                         gap: '4px',
-                        backgroundColor: '#dc2626', 
-                        color: 'white', 
                         whiteSpace: 'nowrap',
                         cursor: 'pointer'
                       }}

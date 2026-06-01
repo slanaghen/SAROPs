@@ -177,7 +177,8 @@ describe('OperationsDashboardPage Logic', () => {
 
     await waitFor(() => {
       const overdueChip = screen.getByText(/2h 0m ago/i).closest('span');
-      expect(overdueChip).toHaveStyle({ backgroundColor: '#dc2626' }); // Red background
+      // Styling is now handled via the chip-overdue-gradient animation class
+      expect(overdueChip).toHaveClass('chip-overdue-gradient');
       expect(overdueChip.querySelector('svg')).toBeInTheDocument(); // Clock icon
     });
   });

@@ -223,14 +223,15 @@ const IncidentEditPage = () => {
   }, [incident.sartopo_id]);
 
   // Helper to sync SARTopo data (logic mirrored from SARTopoDataPage)
-  const syncSartopoData = async (config, opId) => {
-    if (!config.id || !opId) return;
+  const syncSartopoData = async (config, opId, incId) => {
+    if (!config.id || !opId || !incId) return;
     setIsSyncingSartopo(true);
     setSartopoSyncErrorMessage(null); // Clear previous sync error
     
     try {
       // Align with SARTopoDataPage: use /since/0 for a complete map snapshot
       const fetchUrl = `/sartopo-api/api/v1/map/${config.id}/since/0${config.query}`;
+      console.log(`[SARTopo] Background sync downloading from: ${fetchUrl}`);
       const response = await fetch(fetchUrl);
       
       if (!response.ok) {
@@ -252,6 +253,10 @@ const IncidentEditPage = () => {
       }
       
       const data = await response.json();
+
+      // Build and persist base map of SARTopo data to DB (uses /since/0 for a complete snapshot)
+      await supabase.from('incidents').update({ sartopo_map_data: data }).eq('incident_id', incId);
+
       const fetchedFeatures = data?.result?.state?.features || data?.features || [];
       
       if (fetchedFeatures.length > 0) {
@@ -316,6 +321,9 @@ const IncidentEditPage = () => {
         sharing: "URL"
       };
 
+      console.debug(`[SARTopo] Creating new collaborative map at: ${url}`);
+      console.debug(`[SARTopo] Creation Payload:`, payload);
+
       const response = await fetch(url, {
         method: 'POST',
         headers: {
@@ -346,11 +354,11 @@ const IncidentEditPage = () => {
     const opId = incidentData?.opPeriodId;
     
     // Only attempt sync if Map ID is reasonably valid (at least 4 chars) and no validation message
-    if (isActive && sartopoConfig.id && sartopoConfig.id.length >= 4 && !sartopoIdValidationMessage && opId && incident.sartopo_id !== initialIncident.sartopo_id) {
-      const timer = setTimeout(() => syncSartopoData(sartopoConfig, opId), 1200);
+    if (isActive && sartopoConfig.id && sartopoConfig.id.length >= 4 && !sartopoIdValidationMessage && opId && incident.sartopo_id !== initialIncident.sartopo_id && existingId) {
+      const timer = setTimeout(() => syncSartopoData(sartopoConfig, opId, existingId), 1200);
       return () => clearTimeout(timer);
     }
-  }, [sartopoConfig, isActive, incidentData?.opPeriodId, initialIncident.sartopo_id, sartopoIdValidationMessage]);
+  }, [sartopoConfig, isActive, incidentData?.opPeriodId, initialIncident.sartopo_id, sartopoIdValidationMessage, existingId]);
 
   // Detect if any changes have been made to the form
   const isDirty = useMemo(() => {
@@ -506,8 +514,10 @@ const IncidentEditPage = () => {
     const savedOpId = await saveData(false, true); // Keep isSaving true until navigation handles it, clean state
     if (savedOpId) {
       // Trigger background sync if a Map ID was provided during initial creation
-      if (!wasActive && sartopoConfig.id) {
-        syncSartopoData(sartopoConfig, savedOpId);
+      // Build initial base map persistence upon successful save if Map ID is present
+      const finalIncId = incident.number.trim();
+      if (sartopoConfig.id) {
+        syncSartopoData(sartopoConfig, savedOpId, finalIncId);
       }
 
       // Auto check-in the creator if they provided details on the previous check-in page

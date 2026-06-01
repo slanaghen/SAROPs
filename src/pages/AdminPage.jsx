@@ -4,7 +4,6 @@ import { supabase } from '../lib/supabase';
 import { useIncident } from '../context/IncidentContext';
 import { v4 as uuidv4 } from 'uuid';
 import '../styles/IncidentEditPage.css'; // Reusing form styles for consistency
-import { usePlanningDashboard } from '../hooks/usePlanningDashboard'; // Import usePlanningDashboard
 import { useAdminData } from '../hooks/useAdminData';
 import { 
   OPERATIONS_REFRESH_INTERVAL,
@@ -42,11 +41,11 @@ const AdminPage = () => {
   const [success, setSuccess] = useState(null);
   const [isRespondersExpanded, setIsRespondersExpanded] = useState(true);
 
-  const recordAction = useCallback(async (action) => {
+  const recordAction = useCallback(async (actionText) => {
     if (!incidentId) return;
     await supabase.from('action_logs').insert({
       incident_id: incidentId,
-      action,
+      action: actionText,
       user_name: responderName || 'Administration'
     });
   }, [incidentId, responderName]);
@@ -67,7 +66,7 @@ const AdminPage = () => {
 
   // Sync activation dropdown with current context
   useEffect(() => {
-    if (incidentId) setSelectedActivationId(incidentId);
+    setSelectedActivationId(incidentId || '');
   }, [incidentId]);
 
   const [isTeamsExpanded, setIsTeamsExpanded] = useState(true);
@@ -162,67 +161,57 @@ const AdminPage = () => {
     }
   };
 
-  /**
-   * DANGER: Triggers a full database schema reset.
-   * This calls the 'reinitialize_database' RPC function which should contain
-   * the content of sarops-schema.sql.
-   */
-  const handleReinitializeDatabase = async () => {
-    const confirmMsg = "DANGER: This will completely wipe the database and re-initialize the schema. ALL DATA WILL BE PERMANENTLY LOST. Continue?";
-    if (!window.confirm(confirmMsg)) return;
-
-    setLoading(true);
-    setError(null);
-    setSuccess(null);
-
-    try {
-      const { error: resetError } = await supabase.rpc('reinitialize_database');
-      if (resetError) throw resetError;
-
-      await recordAction?.('Admin triggered full database re-initialization (Schema Reset).');
-      setSuccess('Database successfully re-initialized.');
-      // Since data is wiped, clear the current session and redirect
-      logout();
-      navigate('/checkin');
-    } catch (err) {
-      setError('Failed to re-initialize database: ' + err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  /**
-   * Clears the current operational session context without signing the administrator out of the system.
-   * This allows the banner to return to the system identity and hides incident-specific tools.
-   */
-  const handleDeactivateSession = async () => {
+  const handleLeaveIncident = async () => {
     if (responderId && responderStatus !== 'CheckedOut') {
       setLoading(true);
       try {
-        // Perform a clean operational checkout for the current session
-        await supabase.from('teams').update({ leader_responder_id: null }).eq('leader_responder_id', responderId);
-        await supabase.from('responders')
-          .update({ status: 'CheckedOut', checkout_datetime: new Date().toISOString() })
-          .eq('responder_id', responderId);
+        // Attempt clean operational checkout in the database
+        try {
+          await supabase.from('teams').update({ leader_responder_id: null }).eq('leader_responder_id', responderId);
+          await supabase.from('responders')
+            .update({ status: 'CheckedOut', checkout_datetime: new Date().toISOString() })
+            .eq('responder_id', responderId);
+        } catch (dbErr) {
+          console.warn('Operational check-out database update failed:', dbErr);
+        }
         
-        if (clearIncident) clearIncident();
-
         await supabase.from('action_logs').insert({
           incident_id: incidentId,
-          action: `Admin deactivated their operational session and checked out: ${responderName}`,
+          action: `Admin left their operational session and checked out: ${responderName}`,
           user_name: responderName
         });
-
-        setSuccess("Operational session deactivated. The banner now reflects your system identity.");
       } catch (err) {
         console.error('Failed to deactivate session:', err);
         setError("Deactivation encountered an error. Context has been reset locally.");
-        if (clearIncident) clearIncident();
-      } finally {
-        setLoading(false);
       }
-    } else if (clearIncident) {
-      clearIncident();
+    }
+
+    // Unconditionally clear global operational context and local UI state
+    try {
+      // Restore system user identity to the banner by re-syncing from profile
+      const userEmail = localStorage.getItem('sarops_user_email');
+      const myProfile = users.find(u => u.email?.toLowerCase() === (userEmail || '').toLowerCase());
+      if (myProfile) {
+        if (setResponderName) setResponderName(myProfile.name || myProfile.username);
+        if (setAccessLevel) setAccessLevel(myProfile.access_level);
+      }
+
+      // Nullify incident context to trigger UI transition to activation dropdown
+      if (clearIncident) clearIncident();
+      if (setResponderId) setResponderId(null);
+      if (setResponderStatus) setResponderStatus('CheckedOut');
+
+      // Reset local activation selection for the dropdown
+      setSelectedActivationId('');
+
+      // Refresh Supabase session to clear operational JWT claims (incident_id)
+      await supabase.auth.refreshSession();
+      
+      setSuccess("Successfully left incident. You can now select a new context.");
+    } catch (localErr) {
+      console.error('Failed to clear local context:', localErr);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -253,9 +242,36 @@ const AdminPage = () => {
       if (!selectedInc) throw new Error("Selected incident not found.");
 
       // Since useAdminData now pre-sorts nested resources, we can simply take the first record
-      const latestOp = selectedInc.operational_periods?.[0];
+      let latestOp = selectedInc.operational_periods?.[0];
 
-      if (!latestOp) throw new Error("Selected incident has no operational periods.");
+      if (!latestOp) {
+        console.debug('[Admin] Operational period missing in local state. Checking database...');
+        const { data: existingOp } = await supabase
+          .from('operational_periods')
+          .select('*')
+          .eq('incident_id', selectedActivationId)
+          .order('op_number', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        
+        if (existingOp) {
+          latestOp = existingOp;
+        } else {
+          console.info('[Admin] No operational periods found for incident. Creating default OP 1...');
+          const { data: newOp, error: createError } = await supabase
+            .from('operational_periods')
+            .insert({
+              incident_id: selectedActivationId,
+              op_number: 1,
+              start_datetime: selectedInc.start_datetime || new Date().toISOString(),
+              situation_narrative: 'Initial operational period created via session activation.'
+            })
+            .select()
+            .single();
+          if (createError) throw new Error(`Could not initialize operational period: ${createError.message}`);
+          latestOp = newOp;
+        }
+      }
 
       // Perform the secure check-in to establish operational identity
       const { data: responderRecord, error: checkinError } = await supabase
@@ -281,7 +297,7 @@ const AdminPage = () => {
         setResponderId(finalResponder.responder_id);
         setResponderName(finalResponder.name);
         setResponderStatus(finalResponder.status);
-        setAccessLevel(finalResponder.access_level);
+        if (setAccessLevel) setAccessLevel(finalResponder.access_level);
       }
 
       // Refresh Supabase session to apply new JWT claims (access_level and incident_id)
@@ -359,6 +375,7 @@ const AdminPage = () => {
           p_type: formData.responder_type,
           p_skills: formData.special_skills,
           p_outdoor_mode: formData.outdoor_mode,
+          p_display_density: formData.display_density,
         });
         if (updateError) throw updateError;
         setSuccess(`User ${formData.email} updated successfully.`);
@@ -375,6 +392,7 @@ const AdminPage = () => {
           p_type: formData.responder_type,
           p_skills: formData.special_skills,
           p_outdoor_mode: formData.outdoor_mode,
+          p_display_density: formData.display_density,
         });
         if (insertError) throw insertError;
         setSuccess(`User ${formData.email} added successfully.`);
@@ -803,41 +821,6 @@ const AdminPage = () => {
     }
   };
 
-  const handleSaveIncident = async (formData) => {
-    setLoading(true);
-    setError(null);
-    setSuccess(null);
-    setShowIncidentModal(false);
-    try {
-      const payload = {
-        name: formData.name,
-        number: formData.number,
-        sartopo_id: formData.sartopo_id || null,
-        notes: formData.notes,
-        start_datetime: formData.start_datetime,
-      };
-
-      if (formData.incident_id) {
-        const { error: updateError } = await supabase.from('incidents').update(payload).eq('incident_id', formData.incident_id);
-        if (updateError) throw updateError;
-        setSuccess(`Incident ${formData.name} updated successfully.`);
-      } else {
-        const inc_id = formData.number || uuidv4();
-        const { error: insertError } = await supabase.from('incidents').insert({ ...payload, incident_id: inc_id });
-        if (insertError) throw insertError;
-        // Create default OP 1
-        await supabase.from('operational_periods').insert({ op_period_id: uuidv4(), incident_id: inc_id, op_number: 1, start_datetime: formData.start_datetime, situation_narrative: 'Incident started.' });
-        setSuccess(`Incident ${formData.name} created successfully.`);
-      }
-      await fetchTable('incidents');
-    } catch (err) {
-      setError(err.message || 'Failed to save incident.');
-    } finally {
-      setLoading(false);
-      setEditingIncident(null);
-    }
-  };
-
   const handleDeleteIncident = async (id, name) => { // Added name
     const message = 'Permanently delete this incident? This will remove all associated operational periods, assignments, teams, responders, and logs. This action cannot be undone.';
     if (!window.confirm(message)) return;
@@ -949,9 +932,9 @@ const AdminPage = () => {
               </p>
             </div>
             <div style={{ display: 'flex', gap: '12px' }}>
-              <button className="btn btn-primary btn-sm" onClick={() => navigate('/operations')} style={{ fontSize: '16px' }}>Go to Operations</button>
-              <button className="btn btn-primary btn-sm" onClick={() => navigate('/planning')} style={{ fontSize: '16px' }}>Go to Planning</button>
-              <button className="btn btn-secondary btn-sm" style={{ color: '#dc2626', borderColor: '#fecaca', fontSize: '16px' }} onClick={handleDeactivateSession}>Deactivate Session</button>
+              <button className="btn btn-primary btn-sm" onClick={() => navigate('/operations')}>Go to Operations</button>
+              <button className="btn btn-primary btn-sm" onClick={() => navigate('/planning')}>Go to Planning</button>
+              <button className="btn btn-secondary btn-sm" style={{ color: '#dc2626', borderColor: '#fecaca' }} onClick={handleLeaveIncident}>Leave Incident</button>
             </div>
           </div>
         ) : (
@@ -965,7 +948,6 @@ const AdminPage = () => {
                 <select 
                   value={selectedActivationId} 
                   onChange={(e) => setSelectedActivationId(e.target.value)}
-                  style={{ fontSize: '16px' }}
                 >
                   <option value="">— Select an active incident —</option>
                   {allIncidents.filter(inc => !inc.end_datetime).map(inc => (
@@ -979,9 +961,8 @@ const AdminPage = () => {
                 className="btn btn-primary" 
                 onClick={handleActivateSession} 
                 disabled={loading || fetching || !selectedActivationId}
-                style={{ height: '38px', fontSize: '16px' }}
               >
-                {loading ? 'Activating...' : (fetching ? 'Loading Data...' : 'Activate Session')}
+                {loading ? 'Joining...' : (fetching ? 'Loading Data...' : 'Join Incident')}
               </button>
             </div>
           </>
@@ -999,7 +980,6 @@ const AdminPage = () => {
               value={opRefresh} 
               onChange={(e) => setOpRefresh(parseInt(e.target.value, 10) || 0)}
               min="5"
-              style={{ fontSize: '16px' }}
             />
           </label>
           <label style={{ flex: 1, minWidth: '150px', marginBottom: 0 }}>
@@ -1009,7 +989,6 @@ const AdminPage = () => {
               value={resRefresh} 
               onChange={(e) => setResRefresh(parseInt(e.target.value, 10) || 0)}
               min="5"
-              style={{ fontSize: '16px' }}
             />
           </label>
           <label style={{ flex: 1, minWidth: '150px', marginBottom: 0 }}>
@@ -1019,10 +998,9 @@ const AdminPage = () => {
               value={sartopoRefresh} 
               onChange={(e) => setSartopoRefresh(parseInt(e.target.value, 10) || 0)}
               min="5"
-              style={{ fontSize: '16px' }}
             />
           </label>
-          <button className="btn btn-primary" onClick={handleApplySettings} disabled={!isSettingsDirty} style={{ height: '38px', fontSize: '16px' }}>
+          <button className="btn btn-primary" onClick={handleApplySettings} disabled={!isSettingsDirty}>
             Apply
           </button>
         </div>
@@ -1036,17 +1014,8 @@ const AdminPage = () => {
             onClick={handleSeedData} 
             className="btn btn-secondary" 
             disabled={loading} 
-            style={{ height: '38px', fontSize: '16px' }}
           >
             {loading ? 'Seeding...' : 'Seed Data'}
-          </button>
-          <button 
-            onClick={handleReinitializeDatabase} 
-            className="btn btn-secondary" 
-            disabled={loading} 
-            style={{ height: '38px', color: '#dc2626', borderColor: '#fecaca', fontSize: '16px' }}
-          >
-            {loading ? 'Resetting...' : 'Re-initialize Database'}
           </button>
         </div>
       </div>
@@ -1064,6 +1033,7 @@ const AdminPage = () => {
 
       <AdminRespondersTable
         allResponders={allResponders}
+        allIncidents={allIncidents}
         isRespondersExpanded={isRespondersExpanded}
         setIsRespondersExpanded={setIsRespondersExpanded}
         handleCheckOutResponder={handleCheckOutResponder}
@@ -1114,18 +1084,11 @@ const AdminPage = () => {
         setIsIncidentsExpanded={setIsIncidentsExpanded}
         handleEndIncident={handleEndIncident}
         handleDeleteIncident={handleDeleteIncident}
-        handleEditIncident={(incident) => {
-          setEditingIncident(incident);
-          setShowIncidentModal(true);
-        }}
-        handleNewIncident={() => {
-          setEditingIncident(null);
-          setShowIncidentModal(true);
-        }}
+        handleEditIncident={(inc) => navigate('/incident', { state: { targetIncident: inc, fromAdmin: true } })}
+        handleNewIncident={() => navigate('/incident', { state: { fromAdmin: true } })}
         currentIncidentId={incidentId}
       />
 
-      {/* Modals for Editing */}
       <AdminUserFormModal
         isOpen={showUserModal}
         onClose={() => setShowUserModal(false)}
@@ -1166,6 +1129,7 @@ const AdminPage = () => {
         loading={loading}
         error={error}
       />
+
     </div>
   );
 };

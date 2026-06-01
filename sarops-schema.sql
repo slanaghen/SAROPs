@@ -65,6 +65,12 @@ CREATE TYPE responder_type AS ENUM (
   'Medical'
 );
 
+DROP TYPE IF EXISTS display_density CASCADE;
+CREATE TYPE display_density AS ENUM (
+  'compact',
+  'comfortable'
+);
+
 DROP TYPE IF EXISTS access_level CASCADE;
 CREATE TYPE access_level AS ENUM (
   'responder',
@@ -97,6 +103,7 @@ CREATE TABLE incidents (
   name TEXT NOT NULL,
   number TEXT NOT NULL,
   sartopo_id TEXT,
+  sartopo_map_data JSONB,
   notes TEXT,
   start_datetime TIMESTAMP WITH TIME ZONE NOT NULL,
   end_datetime TIMESTAMP WITH TIME ZONE,
@@ -278,6 +285,7 @@ CREATE TABLE users (
   responder_type responder_type,
   special_skills TEXT,
   outdoor_mode BOOLEAN DEFAULT FALSE,
+  display_density display_density DEFAULT 'comfortable',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 -- ============================================================================
@@ -322,6 +330,9 @@ SELECT
   r.name AS leader_name,
   r.identifier AS leader_identifier,
   (SELECT COUNT(*) FROM team_responders tr_count WHERE tr_count.team_id = t.team_id) AS member_count,
+  i.name AS incident_name,
+  i.number AS incident_number,
+  i.incident_id,
   COALESCE(
     (
       SELECT json_agg(
@@ -340,7 +351,9 @@ SELECT
     '[]'::json
   ) AS current_responders
 FROM teams t
-LEFT JOIN responders r ON t.leader_responder_id = r.responder_id;
+LEFT JOIN responders r ON t.leader_responder_id = r.responder_id
+JOIN operational_periods op ON t.op_period_id = op.op_period_id
+JOIN incidents i ON op.incident_id = i.incident_id;
 
 -- View: dashboard_assignments
 -- Pre-joins assignments with team and leader metadata for operations oversight
@@ -354,9 +367,14 @@ SELECT
   t.leader_identifier,
   t.leader_responder_id,
   t.member_count,
-  t.last_par_check
+  t.last_par_check,
+  i.name AS incident_name,
+  i.number AS incident_number,
+  i.incident_id
 FROM assignments a
-LEFT JOIN team_current_responders t ON a.team_id = t.team_id;
+LEFT JOIN team_current_responders t ON a.team_id = t.team_id
+JOIN operational_periods op ON a.op_period_id = op.op_period_id
+JOIN incidents i ON op.incident_id = i.incident_id;
 
 -- View: incident_summary
 -- Summary view for incident dashboard
@@ -764,6 +782,27 @@ RETURNS BOOLEAN AS $func$
   );
 $func$ LANGUAGE sql STABLE SECURITY DEFINER;
 
+-- Helper to check if user is a member of a specific team
+CREATE OR REPLACE FUNCTION is_member_of_team(_team_id UUID)
+RETURNS BOOLEAN AS $func$
+  SELECT EXISTS (
+    SELECT 1 FROM team_responders 
+    WHERE team_id = _team_id 
+      AND responder_id = get_my_responder_id()
+  );
+$func$ LANGUAGE sql STABLE SECURITY DEFINER;
+
+-- Helper to check if user is a member of the team assigned to an assignment
+CREATE OR REPLACE FUNCTION is_member_of_assignment(_assignment_id UUID)
+RETURNS BOOLEAN AS $func$
+  SELECT EXISTS (
+    SELECT 1 FROM assignments a
+    JOIN team_responders tr ON a.team_id = tr.team_id
+    WHERE a.assignment_id = _assignment_id 
+      AND tr.responder_id = get_my_responder_id()
+  );
+$func$ LANGUAGE sql STABLE SECURITY DEFINER;
+
 -- Helper to check if user is the leader of the team assigned to an assignment
 CREATE OR REPLACE FUNCTION is_leader_of_assignment(_assignment_id UUID)
 RETURNS BOOLEAN AS $func$
@@ -994,11 +1033,11 @@ CREATE POLICY "Allow authenticated to view active assignments" ON assignments
   FOR SELECT TO authenticated USING (is_active_op_period(op_period_id));
 CREATE POLICY "Admins/Staff can manage all assignments" ON assignments
   FOR ALL TO authenticated USING (check_is_operational_staff()) WITH CHECK (check_is_operational_staff());
--- Allow Team Leaders to update their assigned assignment status
-CREATE POLICY "Allow team leaders to update their assignment" ON assignments
+-- Allow Team Members to update their assigned assignment status
+CREATE POLICY "Allow team members to update their assignment" ON assignments
   FOR UPDATE TO authenticated
-  USING (is_leader_of_assignment(assignment_id) OR check_is_operational_staff())
-  WITH CHECK (team_id IS NULL OR is_leader_of_team(team_id) OR check_is_operational_staff());
+  USING (is_member_of_assignment(assignment_id) OR check_is_operational_staff())
+  WITH CHECK (team_id IS NULL OR is_member_of_team(team_id) OR check_is_operational_staff());
 CREATE POLICY "Allow all authenticated to create assignments in active incidents" ON assignments
   FOR INSERT TO authenticated 
   WITH CHECK (is_active_op_period(op_period_id));
@@ -1079,6 +1118,8 @@ CREATE POLICY "Allow all authenticated to view user list" ON users
 -- Ensure clean replacement for function overloading
 DROP FUNCTION IF EXISTS admin_add_user(TEXT, TEXT, TEXT);
 DROP FUNCTION IF EXISTS admin_add_user(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT);
+DROP FUNCTION IF EXISTS admin_add_user(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, BOOLEAN);
+DROP FUNCTION IF EXISTS admin_add_user(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, BOOLEAN, TEXT);
 
 CREATE OR REPLACE FUNCTION admin_add_user(
   p_email TEXT, 
@@ -1091,7 +1132,8 @@ CREATE OR REPLACE FUNCTION admin_add_user(
   p_phone TEXT DEFAULT NULL,
   p_type TEXT DEFAULT NULL,
   p_skills TEXT DEFAULT NULL,
-  p_outdoor_mode BOOLEAN DEFAULT FALSE
+  p_outdoor_mode BOOLEAN DEFAULT FALSE,
+  p_display_density TEXT DEFAULT 'comfortable'
 )
 RETURNS VOID AS $outer_func$
 BEGIN
@@ -1111,17 +1153,20 @@ BEGIN
       cell_phone = p_phone,
       responder_type = p_type::responder_type,
       special_skills = p_skills,
-      outdoor_mode = p_outdoor_mode
+      outdoor_mode = p_outdoor_mode,
+      display_density = p_display_density::display_density
     WHERE LOWER(TRIM(email)) = LOWER(TRIM(p_email));
   ELSE
     -- For new users, a password is required.
     INSERT INTO users (
       email, username, password, access_level,
-      name, agency, identifier, cell_phone, responder_type, special_skills, outdoor_mode
+      name, agency, identifier, cell_phone, responder_type, special_skills, 
+      outdoor_mode, display_density
     )
     VALUES (
       LOWER(TRIM(p_email)), p_username, crypt(p_password, gen_salt('bf')), p_access_level::access_level,
-      p_name, p_agency, p_identifier, p_phone, p_type::responder_type, p_skills, p_outdoor_mode
+      p_name, p_agency, p_identifier, p_phone, p_type::responder_type, p_skills, 
+      p_outdoor_mode, p_display_density::display_density
     );
   END IF;
 END;
@@ -1161,26 +1206,31 @@ BEGIN
         EXECUTE 'CREATE TEMP TABLE users_temp_backup (
             email TEXT, username TEXT, password TEXT, access_level_text TEXT,
             name TEXT, agency TEXT, identifier TEXT, cell_phone TEXT, 
-            responder_type_text TEXT, special_skills TEXT, created_at TIMESTAMP WITH TIME ZONE
+            responder_type_text TEXT, special_skills TEXT, outdoor_mode BOOLEAN, 
+            display_density_text TEXT, created_at TIMESTAMP WITH TIME ZONE
         )';
         
         -- Populate the backup table using conditional column detection. 
         -- This prevents "column does not exist" errors when resetting from an older or broken schema.
-        EXECUTE format('INSERT INTO users_temp_backup (email, username, password, access_level_text, name, agency, identifier, cell_phone, responder_type_text, special_skills, created_at)
+        EXECUTE format('INSERT INTO users_temp_backup (
+                    email, username, password, access_level_text, name, agency, 
+                    identifier, cell_phone, responder_type_text, special_skills, 
+                    outdoor_mode, display_density_text, created_at
+                 )
                  SELECT 
                     email, 
-                    %s, 
+                    %s, -- Arg 1: username
                     password, 
-                    %s,
-                    %s,
-                    %s,
-                    %s,
-                    %s,
-                    %s,
-                    %s,
-                    %s,
-                    %s,
-                    %s
+                    %s, -- Arg 2: access_level
+                    %s, -- Arg 3: name
+                    %s, -- Arg 4: agency
+                    %s, -- Arg 5: identifier
+                    %s, -- Arg 6: cell_phone
+                    %s, -- Arg 7: responder_type
+                    %s, -- Arg 8: special_skills
+                    %s, -- Arg 9: outdoor_mode
+                    %s, -- Arg 10: display_density
+                    %s  -- Arg 11: created_at
                  FROM users',
                  CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='username') THEN 'username' ELSE 'email' END,
                  CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='access_level') THEN 'access_level::TEXT' ELSE '''responder''' END,
@@ -1191,6 +1241,7 @@ BEGIN
                  CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='responder_type') THEN 'responder_type::TEXT' ELSE '''SAR''' END,
                  CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='special_skills') THEN 'special_skills' ELSE 'NULL' END,
                  CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='outdoor_mode') THEN 'outdoor_mode' ELSE 'FALSE' END,
+                 CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='display_density') THEN 'display_density::TEXT' ELSE '''comfortable''' END,
                  CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='created_at') THEN 'created_at' ELSE 'CURRENT_TIMESTAMP' END
         );
     END IF;
@@ -1213,6 +1264,9 @@ BEGIN
 
     EXECUTE 'DROP TYPE IF EXISTS responder_type CASCADE;';
     EXECUTE 'CREATE TYPE responder_type AS ENUM (''SAR'', ''Fire'', ''Law'', ''Medical'');';
+
+    EXECUTE 'DROP TYPE IF EXISTS display_density CASCADE;';
+    EXECUTE 'CREATE TYPE display_density AS ENUM (''compact'', ''comfortable'');';
 
     EXECUTE 'DROP TYPE IF EXISTS access_level CASCADE;';
     EXECUTE 'CREATE TYPE access_level AS ENUM (''responder'', ''staff'', ''admin'');';
@@ -1237,6 +1291,7 @@ BEGIN
       name TEXT NOT NULL,
       number TEXT NOT NULL,
       sartopo_id TEXT,
+      sartopo_map_data JSONB,
       notes TEXT,
       start_datetime TIMESTAMP WITH TIME ZONE NOT NULL,
       end_datetime TIMESTAMP WITH TIME ZONE,
@@ -1391,6 +1446,7 @@ BEGIN
       responder_type responder_type,
       special_skills TEXT,
       outdoor_mode BOOLEAN DEFAULT FALSE,
+      display_density display_density DEFAULT ''comfortable'',
       created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
     );';
 
@@ -1428,6 +1484,9 @@ BEGIN
       r.name AS leader_name,
       r.identifier AS leader_identifier,
       (SELECT COUNT(*) FROM team_responders tr_count WHERE tr_count.team_id = t.team_id) AS member_count,
+      i.name AS incident_name,
+      i.number AS incident_number,
+      i.incident_id,
       COALESCE(
         (
           SELECT json_agg(
@@ -1446,7 +1505,9 @@ BEGIN
         ''[]''::json
       ) AS current_responders
     FROM teams t
-    LEFT JOIN responders r ON t.leader_responder_id = r.responder_id;';
+    LEFT JOIN responders r ON t.leader_responder_id = r.responder_id
+    JOIN operational_periods op ON t.op_period_id = op.op_period_id
+    JOIN incidents i ON op.incident_id = i.incident_id;';
 
     EXECUTE 'CREATE OR REPLACE VIEW dashboard_assignments AS
     SELECT
@@ -1458,9 +1519,14 @@ BEGIN
       t.leader_identifier,
       t.leader_responder_id,
       t.member_count,
-      t.last_par_check
+      t.last_par_check,
+      i.name AS incident_name,
+      i.number AS incident_number,
+      i.incident_id
     FROM assignments a
-    LEFT JOIN team_current_responders t ON a.team_id = t.team_id;';
+    LEFT JOIN team_current_responders t ON a.team_id = t.team_id
+    JOIN operational_periods op ON a.op_period_id = op.op_period_id
+    JOIN incidents i ON op.incident_id = i.incident_id;';
 
     EXECUTE 'CREATE OR REPLACE VIEW incident_summary AS
     SELECT
@@ -1801,6 +1867,25 @@ BEGIN
       ORDER BY checkin_datetime DESC LIMIT 1;
     $func$ LANGUAGE sql STABLE SECURITY DEFINER;';
 
+    EXECUTE 'CREATE OR REPLACE FUNCTION is_member_of_team(_team_id UUID)
+    RETURNS BOOLEAN AS $func$
+      SELECT EXISTS (
+        SELECT 1 FROM team_responders 
+        WHERE team_id = _team_id 
+          AND responder_id = get_my_responder_id()
+      );
+    $func$ LANGUAGE sql STABLE SECURITY DEFINER;';
+
+    EXECUTE 'CREATE OR REPLACE FUNCTION is_member_of_assignment(_assignment_id UUID)
+    RETURNS BOOLEAN AS $func$
+      SELECT EXISTS (
+        SELECT 1 FROM assignments a
+        JOIN team_responders tr ON a.team_id = tr.team_id
+        WHERE a.assignment_id = _assignment_id 
+          AND tr.responder_id = get_my_responder_id()
+      );
+    $func$ LANGUAGE sql STABLE SECURITY DEFINER;';
+
     EXECUTE 'CREATE OR REPLACE FUNCTION is_leader_of_team(_team_id UUID)
     RETURNS BOOLEAN AS $func$
       SELECT EXISTS (
@@ -1975,10 +2060,10 @@ BEGIN
     EXECUTE 'CREATE POLICY "Allow team members to view their own team" ON teams
       FOR SELECT TO authenticated
       USING (EXISTS (SELECT 1 FROM team_responders tr WHERE tr.team_id = teams.team_id AND tr.responder_id = get_my_responder_id()));';
-    EXECUTE 'CREATE POLICY "Allow team leaders to update their team" ON teams
+    EXECUTE 'CREATE POLICY "Allow team members to update their team" ON teams
       FOR UPDATE TO authenticated
-      USING (is_leader_of_team(team_id) OR check_is_operational_staff())
-      WITH CHECK (is_leader_of_team(team_id) OR check_is_operational_staff());';
+      USING (is_member_of_team(team_id) OR check_is_operational_staff())
+      WITH CHECK (is_member_of_team(team_id) OR check_is_operational_staff());';
     EXECUTE 'CREATE POLICY "Allow all authenticated to create teams in active incidents" ON teams
       FOR INSERT TO authenticated
       WITH CHECK (is_active_op_period(op_period_id));';
@@ -1999,10 +2084,10 @@ BEGIN
       FOR SELECT TO authenticated USING (is_active_op_period(op_period_id));';
     EXECUTE 'CREATE POLICY "Admins/Staff can manage all assignments" ON assignments
       FOR ALL TO authenticated USING (check_is_operational_staff()) WITH CHECK (check_is_operational_staff());';
-    EXECUTE 'CREATE POLICY "Allow team leaders to update their assignment" ON assignments
+    EXECUTE 'CREATE POLICY "Allow team members to update their assignment" ON assignments
       FOR UPDATE TO authenticated
-      USING (is_leader_of_assignment(assignment_id) OR check_is_operational_staff())
-      WITH CHECK (team_id IS NULL OR is_leader_of_team(team_id) OR check_is_operational_staff());';
+      USING (is_member_of_assignment(assignment_id) OR check_is_operational_staff())
+      WITH CHECK (team_id IS NULL OR is_member_of_team(team_id) OR check_is_operational_staff());';
     EXECUTE 'CREATE POLICY "Allow all authenticated to create assignments in active incidents" ON assignments
       FOR INSERT TO authenticated
       WITH CHECK (is_active_op_period(op_period_id));';
@@ -2080,7 +2165,8 @@ BEGIN
       p_phone TEXT DEFAULT NULL,
       p_type TEXT DEFAULT NULL,
       p_skills TEXT DEFAULT NULL,
-      p_outdoor_mode BOOLEAN DEFAULT FALSE
+      p_outdoor_mode BOOLEAN DEFAULT FALSE,
+      p_display_density TEXT DEFAULT ''comfortable''
     )
     RETURNS VOID AS $func$
     BEGIN
@@ -2100,18 +2186,21 @@ BEGIN
           cell_phone = p_phone,
           responder_type = p_type::responder_type,
           special_skills = p_skills,
-          outdoor_mode = p_outdoor_mode
+          outdoor_mode = p_outdoor_mode,
+          display_density = p_display_density::display_density
     WHERE LOWER(TRIM(email)) = LOWER(TRIM(p_email));
       ELSE
     -- For new users, a password is required. If p_password is null, 
     -- this will correctly trigger the not-null constraint violation.
         INSERT INTO users (
           email, username, password, access_level,
-          name, agency, identifier, cell_phone, responder_type, special_skills, outdoor_mode
+          name, agency, identifier, cell_phone, responder_type, special_skills, 
+          outdoor_mode, display_density
         )
         VALUES (
           LOWER(TRIM(p_email)), p_username, crypt(p_password, gen_salt(''bf'')), p_access_level::access_level,
-          p_name, p_agency, p_identifier, p_phone, p_type::responder_type, p_skills, p_outdoor_mode
+          p_name, p_agency, p_identifier, p_phone, p_type::responder_type, p_skills, 
+          p_outdoor_mode, p_display_density::display_density
         );
       END IF;
     END;
@@ -2135,14 +2224,14 @@ BEGIN
 
     -- Restore users from backup
     IF EXISTS (SELECT FROM pg_class WHERE relname = 'users_temp_backup') THEN
-        EXECUTE 'INSERT INTO users (email, username, password, access_level, name, agency, identifier, cell_phone, responder_type, special_skills, outdoor_mode, created_at)
-        SELECT email, COALESCE(username, email), password, access_level_text::access_level, name, agency, identifier, cell_phone, responder_type_text::responder_type, special_skills, outdoor_mode, created_at 
+        EXECUTE 'INSERT INTO users (email, username, password, access_level, name, agency, identifier, cell_phone, responder_type, special_skills, outdoor_mode, display_density, created_at)
+        SELECT email, COALESCE(username, email), password, access_level_text::access_level, name, agency, identifier, cell_phone, responder_type_text::responder_type, special_skills, outdoor_mode, display_density_text::display_density, created_at
         FROM users_temp_backup ON CONFLICT (email) DO NOTHING';
         EXECUTE 'DROP TABLE users_temp_backup';
     END IF;
 
     -- Re-apply grants inside the re-initialization block to ensure API access persists
-    EXECUTE 'GRANT EXECUTE ON FUNCTION admin_add_user(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, BOOLEAN) TO authenticated;';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION admin_add_user(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, BOOLEAN, TEXT) TO authenticated;';
     EXECUTE 'GRANT EXECUTE ON FUNCTION admin_remove_user(TEXT) TO authenticated;';
     EXECUTE 'GRANT EXECUTE ON FUNCTION admin_update_password(TEXT, TEXT) TO authenticated;';
     EXECUTE 'GRANT EXECUTE ON FUNCTION verify_user_login(TEXT, TEXT) TO anon, authenticated;';
@@ -2152,7 +2241,7 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Grant execute permissions to ensure functions are visible to the API
-GRANT EXECUTE ON FUNCTION admin_add_user(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, BOOLEAN) TO authenticated;
+GRANT EXECUTE ON FUNCTION admin_add_user(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, BOOLEAN, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION admin_remove_user TO authenticated;
 GRANT EXECUTE ON FUNCTION admin_update_password TO authenticated;
 GRANT EXECUTE ON FUNCTION verify_user_login TO anon, authenticated;
@@ -2173,7 +2262,7 @@ VALUES (
   'SL-001', 
   '303-555-1234', 
   'SAR', 
-  'Leadership, Good looking'
+  'Leadership, Good looking, Heroic'
 ) ON CONFLICT (email) DO NOTHING;
 INSERT INTO users (email, username, password, access_level, name, agency, identifier, cell_phone, responder_type, special_skills) 
 VALUES (
@@ -2199,5 +2288,5 @@ VALUES (
   'SL-003', 
   '303-555-1234', 
   'SAR', 
-  'Leadership, Communication'
+  'Leadership, Starstudded'
 ) ON CONFLICT (email) DO NOTHING;

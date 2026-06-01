@@ -777,78 +777,6 @@ describe('AdminPage Authentication Gate', () => {
     confirmSpy.mockRestore();
   });
 
-  it('prompts for confirmation and calls reinitialize_database RPC', async () => {
-    const mockLogout = vi.fn();
-    vi.mocked(useIncident).mockReturnValue({
-      isAdmin: true,
-      setIsAdmin: vi.fn(),
-      logout: mockLogout,
-      endIncident: vi.fn(),
-      incidentId: 'inc-123',
-      incidentData: { opPeriodId: 'op-123' },
-      operationsRefreshInterval: 30000,
-      setOperationsRefreshInterval: vi.fn(),
-      responderRefreshInterval: 30000,
-      setResponderRefreshInterval: vi.fn(),
-      sartopoRefreshInterval: 30000,
-      setSartopoRefreshInterval: vi.fn(),
-    });
-    
-    const confirmSpy = vi.fn().mockReturnValue(true);
-    vi.stubGlobal('confirm', confirmSpy);
-    
-    supabase.rpc.mockResolvedValue({ error: null });
-
-    render(<BrowserRouter><AdminPage /></BrowserRouter>);
-    
-    const resetBtn = await screen.findByRole('button', { name: /Re-initialize Database/i });
-    fireEvent.click(resetBtn);
-
-    await waitFor(() => {
-      expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('DANGER'));
-      expect(supabase.rpc).toHaveBeenCalledWith('reinitialize_database');
-      expect(mockLogout).toHaveBeenCalled();
-    });
-  });
-
-  it('disables the Re-initialize Database button while a reset operation is in progress', async () => {
-    vi.mocked(useIncident).mockReturnValue({
-      isAdmin: true,
-      setIsAdmin: vi.fn(),
-      logout: vi.fn(),
-      endIncident: vi.fn(),
-      incidentId: 'inc-123',
-      incidentData: { opPeriodId: 'op-123' },
-      operationsRefreshInterval: 30000,
-      setOperationsRefreshInterval: vi.fn(),
-      responderRefreshInterval: 30000,
-      setResponderRefreshInterval: vi.fn(),
-      sartopoRefreshInterval: 30000,
-      setSartopoRefreshInterval: vi.fn(),
-    });
-    vi.stubGlobal('confirm', vi.fn().mockReturnValue(true));
-    
-    // Use a controlled promise that we can resolve later to avoid hanging the test runner
-    let resolveReset;
-    const resetPromise = new Promise((resolve) => { resolveReset = resolve; });
-    supabase.rpc.mockReturnValue(resetPromise);
-
-    render(<BrowserRouter><AdminPage /></BrowserRouter>);
-    
-    const resetBtn = await screen.findByRole('button', { name: /Re-initialize Database/i });
-    fireEvent.click(resetBtn);
-
-    // Re-query the button inside waitFor to handle React potentially 
-    // replacing the element during the state-change re-render.
-    await waitFor(() => {
-      const updatedBtn = screen.getByRole('button', { name: /Resetting/i });
-      expect(updatedBtn).toBeInTheDocument();
-      expect(updatedBtn).toBeDisabled();
-    });
-    
-    resolveReset({ error: null }); // Resolve to allow clean termination
-  });
-
   it('deactivates the operational session context without logging out', async () => {
     const mockClearIncident = vi.fn();
     vi.mocked(useIncident).mockReturnValue({
@@ -865,14 +793,88 @@ describe('AdminPage Authentication Gate', () => {
 
     supabase.from.mockImplementation(() => globalThis.createSupabaseQueryMock([]));
 
-    render(<BrowserRouter><AdminPage /></BrowserRouter>);
+    render(<BrowserRouter><AdminPage /></BrowserRouter>); // Render AdminPage
     
-    const deactivateBtn = await screen.findByRole('button', { name: /Deactivate Session/i });
-    fireEvent.click(deactivateBtn);
+    const leaveBtn = await screen.findByRole('button', { name: /Leave Incident/i });
+    fireEvent.click(leaveBtn);
 
     await waitFor(() => {
       expect(supabase.from).toHaveBeenCalledWith('responders');
       expect(mockClearIncident).toHaveBeenCalled();
+    });
+  });
+
+  it('should allow selecting a new incident after leaving an active one', async () => {
+    const mockClearIncident = vi.fn();
+    const mockSetResponderId = vi.fn();
+    const mockSetResponderStatus = vi.fn();
+    const mockSetResponderName = vi.fn();
+    const mockSetAccessLevel = vi.fn();
+    const mockStartIncident = vi.fn();
+
+    vi.mocked(useIncident).mockReturnValue({
+      isAdmin: true,
+      isActive: true,
+      responderId: 'res-123',
+      responderStatus: 'Staged',
+      clearIncident: mockClearIncident,
+      incidentId: 'inc-active',
+      incidentData: { name: 'Active Session', opPeriodId: 'op-active' },
+      operationsRefreshInterval: 30000,
+      responderRefreshInterval: 30000,
+      sartopoRefreshInterval: 30000,
+      setResponderId: mockSetResponderId,
+      setResponderStatus: mockSetResponderStatus,
+      setResponderName: mockSetResponderName,
+      setAccessLevel: mockSetAccessLevel,
+      startIncident: mockStartIncident,
+    });
+
+    // Mock useAdminData to provide incidents for the dropdown
+    vi.mocked(useAdminData).mockReturnValue({
+      users: [{ email: 'admin@test.com', name: 'Admin User', access_level: 'admin' }],
+      incidents: [{ incident_id: 'inc-new', name: 'New Incident', number: '002', end_datetime: null, operational_periods: [{ op_period_id: 'op-new', op_number: 1 }] }],
+      responders: [], teams: [], assignments: [], loading: false, refresh: vi.fn(), refreshAll: vi.fn(),
+    });
+
+    render(<BrowserRouter><AdminPage /></BrowserRouter>);
+
+    const leaveBtn = await screen.findByRole('button', { name: /Leave Incident/i });
+    fireEvent.click(leaveBtn);
+
+    await waitFor(() => {
+      expect(mockClearIncident).toHaveBeenCalled();
+      expect(screen.queryByText(/Current Active Session/i)).not.toBeInTheDocument();
+      expect(screen.getByLabelText(/Select Incident/i)).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: /New Incident/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Join Incident/i })).toBeDisabled(); // Should be disabled until selected
+    });
+
+    // Select the new incident
+    fireEvent.change(screen.getByLabelText(/Select Incident/i), { target: { value: 'inc-new' } });
+    expect(screen.getByRole('button', { name: /Join Incident/i })).not.toBeDisabled();
+
+    // Mock the rpc call for checkin_responder_securely
+    supabase.rpc.mockResolvedValue({ data: { responder_id: 'res-new', name: 'Admin User', status: 'Staged', access_level: 'admin' }, error: null });
+    supabase.auth.refreshSession.mockResolvedValue({ data: { session: { user: { id: 'auth-uid' } } }, error: null });
+    supabase.from.mockImplementation((table) => {
+      if (table === 'operational_periods') return globalThis.createSupabaseQueryMock({ op_period_id: 'op-new', op_number: 1, par_check_interval: 60 });
+      return globalThis.createSupabaseQueryMock([]);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Join Incident/i }));
+
+    await waitFor(() => {
+      expect(mockStartIncident).toHaveBeenCalledWith(
+        'inc-new',
+        'New Incident',
+        1, // op_number
+        'op-new', // op_period_id
+        undefined, // sartopo_id
+        60 // par_check_interval
+      );
+      expect(screen.getByText(/Session activated for "New Incident"/i)).toBeInTheDocument();
+      expect(mockNavigate).toHaveBeenCalledWith('/operations');
     });
   });
 
@@ -915,7 +917,7 @@ describe('AdminPage Authentication Gate', () => {
 
     const select = await screen.findByLabelText(/Select Incident/i);
     fireEvent.change(select, { target: { value: 'i1' } });
-    fireEvent.click(screen.getByRole('button', { name: /Activate Session/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Join Incident/i }));
 
     await waitFor(() => {
       expect(screen.getByText(/RPC Activation Error/i)).toBeInTheDocument();

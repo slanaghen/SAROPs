@@ -55,6 +55,8 @@ const SettingsPage = () => {
         p_phone: formData.cell_phone,
         p_type: formData.responder_type,
         p_skills: formData.special_skills,
+        p_outdoor_mode: !!formData.outdoor_mode,
+        p_display_density: formData.display_density,
       });
 
       if (updateError) throw updateError;

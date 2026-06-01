@@ -418,7 +418,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
         .select();
 
       if (error) throw error;
-      if (!data || data.length === 0) throw new Error('PAR update blocked: You must be the Team Leader to perform this action.');
+      if (!data || data.length === 0) throw new Error('PAR update blocked: You must be a member of the team to perform this action.');
       
       refreshAllData();
     } catch (err) {
@@ -441,7 +441,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
         .select();
 
       if (updateErr) throw updateErr;
-      if (!data || data.length === 0) throw new Error('Update blocked: You are not authorized to modify this assignment.');
+      if (!data || data.length === 0) throw new Error('Update blocked: You must be a member of the assigned team to modify this assignment.');
       refreshAllData();
     } catch (err) {
       console.error('Error updating mission data:', err);
@@ -469,7 +469,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
         .select();
       
       if (asnError) throw asnError;
-      if (!asnData || asnData.length === 0) throw new Error('Completion blocked: Unauthorized assignment update.');
+      if (!asnData || asnData.length === 0) throw new Error('Completion blocked: You must be a member of the assigned team to complete this assignment.');
       
       // Optimistic update for the global banner
       setResponderStatus('Staged');
@@ -506,7 +506,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
         .select();
       
       if (asnError) throw asnError;
-      if (!asnData || asnData.length === 0) throw new Error('Action blocked: Unauthorized assignment update.');
+      if (!asnData || asnData.length === 0) throw new Error('Action blocked: You must be a member of the assigned team to cancel this assignment.');
       
       setResponderStatus('Staged');
       setCurrentTeamStatus(null);
@@ -813,7 +813,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
             <div style={{ marginTop: '12px', padding: '12px', backgroundColor: '#f1f5f9', borderRadius: '6px' }}>
               <div className="form-row">
                 <label style={{ fontSize: '13px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>POD (Probability of Detection %)</label>
-                {isLeader ? (
+                {team ? (
                   <input 
                     type="number" 
                     value={podValue} 
@@ -829,7 +829,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
 
               <div className="form-row" style={{ marginTop: '12px' }}>
                 <label style={{ fontSize: '13px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Debrief Narrative</label>
-                {isLeader ? (
+                {team ? (
                   <textarea 
                     value={debriefValue} 
                     onChange={e => setDebriefValue(e.target.value)}
@@ -841,7 +841,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
                 )}
               </div>
 
-              {isLeader && (
+              {team && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '12px' }}>
                   <button 
                     className="btn btn-secondary" 

@@ -100,9 +100,10 @@ describe('OperationsTable', () => {
     render(<OperationsTable {...defaultProps} rows={overdueRows} />);
     
     const row = screen.getByText('Alpha Assignment').closest('tr');
-    // Styling is now handled via the row-pulse-overdue animation class rather than inline styles
-    expect(row).toHaveClass('row-pulse-overdue');
-    expect(screen.getByText('75m ago')).toHaveClass('status-indicator incomplete');
+    // Row-level pulsing has been removed in favor of chip-level gradients
+    expect(row).not.toHaveClass('row-pulse-overdue');
+    const overdueChip = screen.getByText('75m ago');
+    expect(overdueChip).toHaveClass('chip-overdue-gradient');
   });
 
   it('triggers onResetPar when clicking the overdue PAR chip', () => {

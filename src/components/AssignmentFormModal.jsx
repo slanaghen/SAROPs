@@ -172,7 +172,7 @@ const AssignmentFormModal = ({
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '12px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
           <div className="form-row">
             <label htmlFor="asn_transport">Transportation</label>
             <input 
@@ -185,24 +185,24 @@ const AssignmentFormModal = ({
             />
           </div>
           <div className="form-row">
-            <label htmlFor="asn_hazards">Hazards</label>
+            <label htmlFor="asn_prepared">Prepared By</label>
             <input 
-              id="asn_hazards" 
-              name="hazards"
+              id="asn_prepared" 
+              name="prepared_by"
               type="text" 
-              value={formData.hazards || ''} 
+              value={formData.prepared_by || ''} 
               onChange={handleInputChange} 
             />
           </div>
         </div>
 
         <div className="form-row">
-          <label htmlFor="asn_prepared">Prepared By</label>
+          <label htmlFor="asn_hazards">Hazards</label>
           <input 
-            id="asn_prepared" 
-            name="prepared_by"
+            id="asn_hazards" 
+            name="hazards"
             type="text" 
-            value={formData.prepared_by || ''} 
+            value={formData.hazards || ''} 
             onChange={handleInputChange} 
           />
         </div>

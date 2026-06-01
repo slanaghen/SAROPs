@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 
 const AdminIncidentsTable = ({
   allIncidents = [],
@@ -10,6 +10,41 @@ const AdminIncidentsTable = ({
   handleDeleteIncident,
   currentIncidentId
 }) => {
+  const [sortConfig, setSortConfig] = useState({ key: 'start_datetime', direction: 'desc' });
+
+  const sortedIncidents = useMemo(() => {
+    let items = [...allIncidents];
+    if (sortConfig.key) {
+      items.sort((a, b) => {
+        let aVal, bVal;
+        
+        if (sortConfig.key === 'latest_op') {
+          aVal = a.operational_periods?.[0]?.op_number || 0;
+          bVal = b.operational_periods?.[0]?.op_number || 0;
+        } else if (sortConfig.key === 'status') {
+          aVal = a.end_datetime ? 1 : 0;
+          bVal = b.end_datetime ? 1 : 0;
+        } else {
+          aVal = (a[sortConfig.key] || '').toString().toLowerCase();
+          bVal = (b[sortConfig.key] || '').toString().toLowerCase();
+        }
+
+        if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
+        if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
+        return 0;
+      });
+    }
+    return items;
+  }, [allIncidents, sortConfig]);
+
+  const requestSort = (key) => {
+    let direction = 'asc';
+    if (sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
+    }
+    setSortConfig({ key, direction });
+  };
+
   return (
     <div className="section-card">
       <div
@@ -35,12 +70,22 @@ const AdminIncidentsTable = ({
           <table className="operations-table" style={{ minWidth: 'auto' }}>
             <thead>
               <tr>
-                <th>Incident</th>
-                <th>Inc #</th>
-                <th>Started</th>
-                <th>Latest OP #</th>
-                <th>OP Start</th>
-                <th>Status</th>
+                <th onClick={() => requestSort('name')} style={{ cursor: 'pointer' }}>
+                  Incident {sortConfig.key === 'name' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+                </th>
+                <th onClick={() => requestSort('number')} style={{ cursor: 'pointer' }}>
+                  Inc # {sortConfig.key === 'number' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+                </th>
+                <th onClick={() => requestSort('start_datetime')} style={{ cursor: 'pointer' }}>
+                  Started {sortConfig.key === 'start_datetime' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+                </th>
+                <th onClick={() => requestSort('latest_op')} style={{ cursor: 'pointer' }}>
+                  Latest OP # {sortConfig.key === 'latest_op' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+                </th>
+                <th style={{ cursor: 'default' }}>OP Start</th>
+                <th onClick={() => requestSort('status')} style={{ cursor: 'pointer' }}>
+                  Status {sortConfig.key === 'status' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+                </th>
                 <th style={{ textAlign: 'right' }}>Actions</th>
               </tr>
             </thead>
@@ -50,7 +95,7 @@ const AdminIncidentsTable = ({
                   <td colSpan="7" className="empty-row">No incidents found in database.</td>
                 </tr>
               ) : (
-                allIncidents.map(inc => {
+                sortedIncidents.map(inc => {
                   const isActive = !inc.end_datetime;
                   const isCurrentlyActiveInSession = inc.incident_id === currentIncidentId;
                   // Leverage pre-sorted operational_periods from the useAdminData join
@@ -60,16 +105,16 @@ const AdminIncidentsTable = ({
 
                   return (
                     <tr key={inc.incident_id} style={isCurrentlyActiveInSession ? { backgroundColor: '#f0f9ff', borderLeft: '4px solid #0ea5e9' } : {}}>
-                      <td style={{ fontSize: '16px', color: isCurrentlyActiveInSession ? '#0369a1' : '#000' }}>
+                      <td style={{ color: isCurrentlyActiveInSession ? '#0369a1' : '#000' }}>
                         <div style={{ fontWeight: 600 }}>{inc.name}</div>
                       </td>
-                      <td style={{ fontSize: '16px', color: isCurrentlyActiveInSession ? '#0369a1' : '#000' }}>#{inc.number}</td>
-                      <td style={{ fontSize: '16px', color: isCurrentlyActiveInSession ? '#0369a1' : '#000' }}>{new Date(inc.start_datetime).toLocaleDateString()}</td>
-                      <td style={{ fontSize: '16px', color: isCurrentlyActiveInSession ? '#0369a1' : '#000' }}>{latestOpNumber}</td>
-                      <td style={{ fontSize: '16px', color: isCurrentlyActiveInSession ? '#0369a1' : '#000' }}>
+                      <td style={{ color: isCurrentlyActiveInSession ? '#0369a1' : '#000' }}>#{inc.number}</td>
+                      <td style={{ color: isCurrentlyActiveInSession ? '#0369a1' : '#000' }}>{new Date(inc.start_datetime).toLocaleDateString()}</td>
+                      <td style={{ color: isCurrentlyActiveInSession ? '#0369a1' : '#000' }}>{latestOpNumber}</td>
+                      <td style={{ color: isCurrentlyActiveInSession ? '#0369a1' : '#000' }}>
                         {latestOpStart && <div>{latestOpStart}</div>}
                       </td>
-                      <td style={{ fontSize: '16px', color: isCurrentlyActiveInSession ? '#0369a1' : '#000' }}>
+                      <td style={{ color: isCurrentlyActiveInSession ? '#0369a1' : '#000' }}>
                         <span className={`status-indicator ${isActive ? 'active' : 'ended'}`}>
                           {isActive ? 'Active' : 'Ended'}
                         </span>
@@ -81,20 +126,20 @@ const AdminIncidentsTable = ({
                               Active Session
                             </span>
                           )}
-                          <button onClick={() => handleEditIncident(inc)} className="btn btn-secondary btn-sm" style={{ fontSize: '16px' }}>Edit</button>
                           {isActive && (
                             <button
                               onClick={() => handleEndIncident(inc.incident_id)}
                               className="btn btn-secondary btn-sm"
-                              style={{ color: '#f59e0b', fontSize: '16px' }}
+                              style={{ color: '#f59e0b' }}
                             >
                               End Incident
                             </button>
                           )}
+                          <button onClick={() => handleEditIncident(inc)} className="btn btn-secondary btn-sm">Edit</button>
                           <button
                             onClick={() => handleDeleteIncident(inc.incident_id, inc.name)}
                             className="btn btn-secondary btn-sm"
-                            style={{ color: '#dc2626', fontSize: '16px' }}
+                            style={{ color: '#dc2626' }}
                           >
                             Delete
                           </button>

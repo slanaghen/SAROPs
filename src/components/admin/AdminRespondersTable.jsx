@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 
 const AdminRespondersTable = ({
   allResponders = [],
+  allIncidents = [],
   isRespondersExpanded,
   setIsRespondersExpanded,
   handleCheckOutResponder,
@@ -9,6 +10,38 @@ const AdminRespondersTable = ({
   handleNewResponder,
   handleDeleteResponder,
 }) => {
+  const [sortConfig, setSortConfig] = useState({ key: 'name', direction: 'asc' });
+
+  const sortedResponders = useMemo(() => {
+    let items = [...allResponders];
+    if (sortConfig.key) {
+      items.sort((a, b) => {
+        let aVal, bVal;
+        
+        if (sortConfig.key === 'incident_number') {
+          aVal = (allIncidents.find(i => i.incident_id === a.incident_id)?.number || '').toLowerCase();
+          bVal = (allIncidents.find(i => i.incident_id === b.incident_id)?.number || '').toLowerCase();
+        } else {
+          aVal = (a[sortConfig.key] || '').toString().toLowerCase();
+          bVal = (b[sortConfig.key] || '').toString().toLowerCase();
+        }
+
+        if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
+        if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
+        return 0;
+      });
+    }
+    return items;
+  }, [allResponders, allIncidents, sortConfig]);
+
+  const requestSort = (key) => {
+    let direction = 'asc';
+    if (sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
+    }
+    setSortConfig({ key, direction });
+  };
+
   return (
     <div className="section-card">
       <div
@@ -35,11 +68,24 @@ const AdminRespondersTable = ({
           <table className="operations-table" style={{ minWidth: 'auto' }}>
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Agency</th>
-                <th>Identifier</th>
-                <th>Check-In Time</th>
-                <th>Status</th>
+                <th onClick={() => requestSort('name')} style={{ cursor: 'pointer' }}>
+                  Name {sortConfig.key === 'name' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+                </th>
+                <th onClick={() => requestSort('agency')} style={{ cursor: 'pointer' }}>
+                  Agency {sortConfig.key === 'agency' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+                </th>
+                <th onClick={() => requestSort('identifier')} style={{ cursor: 'pointer' }}>
+                  Identifier {sortConfig.key === 'identifier' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+                </th>
+                <th onClick={() => requestSort('incident_number')} style={{ cursor: 'pointer' }}>
+                  Inc # {sortConfig.key === 'incident_number' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+                </th>
+                <th onClick={() => requestSort('checkin_datetime')} style={{ cursor: 'pointer' }}>
+                  Check-In Time {sortConfig.key === 'checkin_datetime' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+                </th>
+                <th onClick={() => requestSort('status')} style={{ cursor: 'pointer' }}>
+                  Status {sortConfig.key === 'status' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+                </th>
                 <th style={{ textAlign: 'right' }}>Actions</th>
               </tr>
             </thead>
@@ -49,37 +95,39 @@ const AdminRespondersTable = ({
                   <td colSpan="6" className="empty-row">No responders found in database.</td>
                 </tr>
               ) : (
-                allResponders.map(res => {
+                sortedResponders.map(res => {
                   const isCheckedOut = !!res.checkout_datetime;
+                  const incident = allIncidents.find(i => i.incident_id === res.incident_id);
                   return (
                     <tr key={res.responder_id}>
-                      <td style={{ fontSize: '16px', color: '#000' }}>
+                      <td style={{ color: '#000' }}>
                         <div style={{ fontWeight: 600 }}>{res.name}</div>
                       </td>
-                      <td style={{ fontSize: '16px', color: '#000' }}>{res.agency || '—'}</td>
-                      <td style={{ fontSize: '16px', color: '#000' }}>{res.identifier || '—'}</td>
-                      <td style={{ fontSize: '16px', color: '#000' }}>{new Date(res.checkin_datetime).toLocaleString()}</td>
-                      <td style={{ fontSize: '16px', color: '#000' }}>
+                      <td style={{ color: '#000' }}>{res.agency || '—'}</td>
+                      <td style={{ color: '#000' }}>{res.identifier || '—'}</td>
+                      <td style={{ color: '#000' }}>#{incident?.number || '—'}</td>
+                      <td style={{ color: '#000' }}>{new Date(res.checkin_datetime).toLocaleString()}</td>
+                      <td style={{ color: '#000' }}>
                         <span className={`status-indicator ${(res.status || 'unknown').toLowerCase()}`}>
                           {res.status}
                         </span>
                       </td>
                       <td style={{ textAlign: 'right' }}>
                         <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                          <button onClick={() => handleEditResponder(res)} className="btn btn-secondary btn-sm" style={{ fontSize: '16px' }}>Edit</button>
                           {!isCheckedOut && (
                             <button
                               onClick={() => handleCheckOutResponder(res.responder_id)}
                               className="btn btn-secondary btn-sm"
-                              style={{ color: '#f59e0b', fontSize: '16px' }}
+                              style={{ color: '#f59e0b' }}
                             >
                               Check Out
                             </button>
                           )}
+                          <button onClick={() => handleEditResponder(res)} className="btn btn-secondary btn-sm">Edit</button>
                           <button
                             onClick={() => handleDeleteResponder(res.responder_id, res.name, res.agency)}
                             className="btn btn-secondary btn-sm"
-                            style={{ color: '#dc2626', fontSize: '16px' }}
+                            style={{ color: '#dc2626' }}
                           >
                             Delete
                           </button>
