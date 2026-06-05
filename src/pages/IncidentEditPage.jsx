@@ -1,9 +1,13 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate, useBlocker, useLocation } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { supabase } from '../lib/supabase';
 import { useIncident } from '../context/IncidentContext';
-import { mapSartopoToAssignment } from '../utils/gisUtils';
+import { 
+  getSartopoConfig, 
+  buildSecureSartopoUrl, 
+  downloadAndSyncSartopoData 
+} from '../services/sartopoService';
 import '../styles/IncidentEditPage.css';
 
 const getCurrentLocalDatetime = () => {
@@ -50,6 +54,7 @@ const IncidentEditPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [isSaving, setIsSaving] = useState(false);
+  const [isTransitioning, setIsTransitioning] = useState(false);
   const [isSyncingSartopo, setIsSyncingSartopo] = useState(false);
   const [isCreatingMap, setIsCreatingMap] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false); // Flag specifically to bypass navigation blocker
@@ -192,35 +197,14 @@ const IncidentEditPage = () => {
     setSartopoSyncErrorMessage(null); // Clear sync error when ID changes
   }, [incident.sartopo_id]);
 
-  // Robust SARTopo configuration parser (mirrored from SARTopoDataPage)
-  const sartopoConfig = useMemo(() => {
-    let mapId = incident.sartopo_id?.trim();
-    if (!mapId) return { id: null, query: '' };
+  const sartopoConfig = useMemo(() => getSartopoConfig(incident.sartopo_id), [incident.sartopo_id]);
 
-    let query = '';
-    if (mapId.includes('?')) {
-      const parts = mapId.split('?');
-      mapId = parts[0];
-      query = '?' + parts[1];
-    }
-
-    if (mapId.includes('/')) {
-      mapId = mapId.split('/').pop() || mapId.split('/').slice(-2, -1)[0];
-    }
-
-    // Clean up trailing slashes or question marks before merging
-    if (mapId.endsWith('/')) mapId = mapId.slice(0, -1);
-    if (query === '?') query = '';
-
-    // Inject Sync Key from environment variable if configured and not already present in the Map ID
-    // Note: Variable must be prefixed with VITE_ to be exposed to the client
-    const apiKey = import.meta.env.VITE_SARTOPO_API_KEY?.trim();
-    if (apiKey && !query.includes('k=')) {
-      query = query ? `${query}&k=${apiKey}` : `?k=${apiKey}`;
-    }
-
-    return { id: mapId, query };
-  }, [incident.sartopo_id]);
+  /**
+   * Helper to build a secure SARTopo URL, signing the request if credentials exist.
+   */
+  const buildSecureUrl = useCallback(async (method, path, payload = null) => {
+    return buildSecureSartopoUrl(method, path, sartopoConfig, payload);
+  }, [sartopoConfig]);
 
   // Helper to sync SARTopo data (logic mirrored from SARTopoDataPage)
   const syncSartopoData = async (config, opId, incId) => {
@@ -229,57 +213,14 @@ const IncidentEditPage = () => {
     setSartopoSyncErrorMessage(null); // Clear previous sync error
     
     try {
-      // Align with SARTopoDataPage: use /since/0 for a complete map snapshot
-      const fetchUrl = `/sartopo-api/api/v1/map/${config.id}/since/0${config.query}`;
-      console.log(`[SARTopo] Background sync downloading from: ${fetchUrl}`);
-      const response = await fetch(fetchUrl);
-      
-      if (!response.ok) {
-        const text = await response.text();
-        // If the response is HTML, SARTopo is likely returning an error page (404/403)
-        if (text.includes('<!DOCTYPE html>')) {
-          throw new Error(`SARTopo returned an error page (HTTP ${response.status}). Verify the Map ID is correct and ensure "API Access" is enabled in map settings.`);
-        }
-        throw new Error(`SARTopo API returned ${response.status}: ${response.statusText || 'Unknown error'}`);
-      }
-
-      // Check content type to prevent JSON parsing errors if we received HTML (matching SARTopoDataPage)
-      const contentType = response.headers.get('content-type');
-      if (contentType && !contentType.includes('application/json')) {
-        const text = await response.text();
-        if (text.includes('<!DOCTYPE html>')) {
-          throw new Error('SARTopo returned an HTML page instead of GeoJSON data. This often happens if the Map ID is invalid.');
-        }
-      }
-      
-      const data = await response.json();
-
-      // Build and persist base map of SARTopo data to DB (uses /since/0 for a complete snapshot)
-      await supabase.from('incidents').update({ sartopo_map_data: data }).eq('incident_id', incId);
-
-      const fetchedFeatures = data?.result?.state?.features || data?.features || [];
-      
-      if (fetchedFeatures.length > 0) {
-        // Fetch existing assignments for this OP to enable data reconciliation (merging)
-        const { data: existingAsns } = await supabase
-          .from('assignments')
-          .select('*')
-          .eq('op_period_id', opId);
-
-        const existingMap = new Map(existingAsns?.map(a => [a.sartopo_id, a]) || []);
-
-        const payloads = fetchedFeatures
-          .filter(f => f.properties?.class === 'Assignment')
-          .map(f => {
-            const existing = existingMap.get(f.id);
-            return mapSartopoToAssignment(f, opId, existing);
-          })
-          .filter(Boolean);
-
-        if (payloads.length > 0) {
-          await supabase.from('assignments').upsert(payloads, { onConflict: 'op_period_id,sartopo_id' });
-        }
-      }
+      await downloadAndSyncSartopoData({
+        supabase,
+        incidentId: incId,
+        opPeriodId: opId,
+        sartopoConfig: config,
+        lastFetchTime: 0,
+        userName: responderName || 'Incident Setup'
+      });
       console.log('[IncidentEdit] SARTopo auto-sync complete.');
     } catch (err) {
       console.error('Background SARTopo sync failed:', err);
@@ -294,9 +235,11 @@ const IncidentEditPage = () => {
    * Adheres to the Get-Modify-Push pattern for map initialization.
    */
   const handleCreateMap = async () => {
-    const apiKey = import.meta.env.VITE_SARTOPO_API_KEY?.trim();
-    if (!apiKey) {
-      setSartopoSyncErrorMessage("API Key not configured. Map creation requires VITE_SARTOPO_API_KEY.");
+    const credId = import.meta.env.VITE_SARTOPO_API_CREDENTIAL_ID || (typeof process !== 'undefined' ? process.env.VITE_SARTOPO_API_CREDENTIAL_ID : undefined);
+    const secret = import.meta.env.VITE_SARTOPO_API_CREDENTIAL_SECRET || (typeof process !== 'undefined' ? process.env.VITE_SARTOPO_API_CREDENTIAL_SECRET : undefined);
+    
+    if (!secret || !credId) {
+      setSartopoSyncErrorMessage("SARTopo API credentials not configured. Map creation requires VITE_SARTOPO_API_CREDENTIAL_ID and VITE_SARTOPO_API_CREDENTIAL_SECRET for signed requests.");
       return;
     }
 
@@ -309,7 +252,6 @@ const IncidentEditPage = () => {
     setSartopoSyncErrorMessage(null);
 
     try {
-      const url = `/sartopo-api/api/v1/acct/${apiKey}/CollaborativeMap`;
       const payload = {
         title: `Mission ${incident.start_datetime.replace('T', ' ')}`,
         mode: "sar",
@@ -321,17 +263,32 @@ const IncidentEditPage = () => {
         sharing: "URL"
       };
 
+      const jsonPayload = JSON.stringify(payload);
+      let url = '';
+      let body = jsonPayload;
+      let headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
+
+      const path = `/api/v1/acct/${credId}/CollaborativeMap`;
+      const { url: signedUrl, authParams } = await buildSecureUrl('POST', path, jsonPayload);
+      
+      url = signedUrl;
+      const form = new URLSearchParams(authParams);
+      form.set('json', jsonPayload);
+      body = form;
+      headers['Content-Type'] = 'application/x-www-form-urlencoded';
+
       console.debug(`[SARTopo] Creating new collaborative map at: ${url}`);
       console.debug(`[SARTopo] Creation Payload:`, payload);
 
       const response = await fetch(url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify(payload)
+        headers,
+        body: body
       });
+
+      if (credId && secret) {
+        console.log(`[SARTopo] Signed POST request completed for map creation. Status: ${response.status}`);
+      }
 
       if (!response.ok) throw new Error(`SARTopo returned HTTP ${response.status}`);
 
@@ -530,6 +487,17 @@ const IncidentEditPage = () => {
         try {
           const { data: { session } } = await supabase.auth.getSession();
           const responderId = uuidv4();
+
+          // Fetch the user's actual system access_level to preserve Admin rights during operational check-in
+          let userAccessLevel = 'responder';
+          if (session?.user?.email) {
+            const { data: userProfile } = await supabase
+              .from('users')
+              .select('access_level')
+              .eq('email', session.user.email)
+              .maybeSingle();
+            if (userProfile) userAccessLevel = userProfile.access_level;
+          }
           
           // 1. Create Responder record
           const { error: respError } = await supabase.from('responders').insert({
@@ -543,7 +511,8 @@ const IncidentEditPage = () => {
             auth_uid: session?.user?.id,
             device_id: `device_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 11)}`,
             checkin_datetime: new Date().toISOString(),
-            status: 'Deployed'
+            status: 'Deployed',
+            access_level: userAccessLevel
           });
 
           if (respError) throw respError;
@@ -564,7 +533,7 @@ const IncidentEditPage = () => {
           if (setResponderId) setResponderId(responderId);
           setResponderName(responderData.name);
           setResponderStatus('Deployed');
-          if (setAccessLevel) setAccessLevel('staff');
+          if (setAccessLevel) setAccessLevel(userAccessLevel);
 
           // Refresh Supabase session to apply new JWT claims (IC role and incident context)
           await supabase.auth.refreshSession();
@@ -582,6 +551,49 @@ const IncidentEditPage = () => {
     } else {
       setIsSubmitting(false);
       setIsSaving(false); // Reset if save failed
+    }
+  };
+
+  const handleStartNextOP = async () => {
+    if (!existingId || !targetOpId) return;
+
+    const nextOpNum = Number(operationalPeriod.op_number) + 1;
+    const confirmMsg = `Start Next Operational Period?\n\n` +
+      `This will:\n` +
+      `- Close the current OP (${operationalPeriod.op_number})\n` +
+      `- Create OP #${nextOpNum}\n` +
+      `- Carry over all active Teams and Assignments\n` +
+      `- Maintain current field deployments\n\n` +
+      `History for the current OP will be preserved. Proceed?`;
+
+    if (!window.confirm(confirmMsg)) return;
+
+    try {
+      setIsTransitioning(true);
+      const { data: newOpId, error: rpcError } = await supabase.rpc('start_next_operational_period', {
+        p_incident_id: existingId,
+        p_current_op_period_id: targetOpId
+      });
+
+      if (rpcError) throw rpcError;
+
+      // Log the event
+      await supabase.from('action_logs').insert({
+        incident_id: existingId,
+        action: `Started next Operational Period (#${nextOpNum}). Resources transitioned.`,
+        user_name: responderName || 'Staff'
+      });
+
+      // Update global context to point to the new OP
+      startIncident(existingId, incident.name, String(nextOpNum), newOpId, incident.sartopo_id, operationalPeriod.par_check_interval);
+
+      // Redirect to operations to see the new state
+      navigate('/operations');
+    } catch (err) {
+      console.error('Error transitioning to next OP:', err);
+      alert('Failed to start next OP: ' + (err.message || 'Database error'));
+    } finally {
+      setIsTransitioning(false);
     }
   };
 
@@ -839,7 +851,18 @@ const IncidentEditPage = () => {
         </div>
 
         <div className="form-actions" style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-          <button type="submit" className="btn btn-primary" disabled={isSaving || (existingId && !isDirty)}>
+          {isActive && existingId === contextIncidentId && (
+            <button 
+              type="button" 
+              className="btn btn-primary" 
+              onClick={handleStartNextOP}
+              disabled={isSaving || isTransitioning}
+              style={{ backgroundColor: '#0369a1', borderColor: '#0369a1' }}
+            >
+              {isTransitioning ? 'Transitioning...' : 'Start Next OP'}
+            </button>
+          )}
+          <button type="submit" className="btn btn-primary" disabled={isSaving || isTransitioning || (existingId && !isDirty)}>
             {isSaving ? 'Saving...' : (existingId ? 'Update Incident Information' : 'Start Incident Tracking')}
           </button>
           {isActive && (

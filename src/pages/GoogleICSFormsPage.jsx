@@ -93,7 +93,7 @@ const contextFields = [
 
 const GoogleICSFormsPage = () => {
   const { incidentData, incidentId, responderId } = useIncident();
-  const [sheetUrl, setSheetUrl] = useState('');
+  const [sheetUrl, setSheetUrl] = useState('https://docs.google.com/spreadsheets/d/1FLyD5OQO-WgkNs3i68ziUseHUiOxlLr6/edit');
   const [namedRanges, setNamedRanges] = useState([]);
   const [loading, setLoading] = useState(false);
   const [transferring, setTransferring] = useState(false);

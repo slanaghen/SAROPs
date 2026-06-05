@@ -116,7 +116,10 @@ const Login = ({ onLoginSuccess }) => {
 
       const { error: otpError } = await supabase.auth.signInWithOtp({ 
         email: emailVal,
-        options: { shouldCreateUser: true }
+        options: { 
+          shouldCreateUser: true,
+          emailRedirectTo: `${window.location.origin}/login`
+        }
       });
       if (otpError) throw otpError;
       setView('verify');
@@ -135,7 +138,7 @@ const Login = ({ onLoginSuccess }) => {
       const { error: verifyError } = await supabase.auth.verifyOtp({
         email: email.trim().toLowerCase(),
         token: otpToken,
-        type: 'signup'
+        type: 'email'
       });
       if (verifyError) throw verifyError;
 
@@ -168,9 +171,9 @@ const Login = ({ onLoginSuccess }) => {
           {view === 'login' ? 'SAROPs Login' : (view === 'register' ? 'Register Account' : 'Verify Email')}
         </h1>
         <p className="subtitle">
-          {view === 'login' ? 'Please authenticate to proceed' : 
-           (view === 'register' ? 'Join the mission and setup your responder profile' : 
-           'Enter the 6-digit code sent to your email')}
+          {view === 'login' && 'Please authenticate to proceed'}
+          {view === 'register' && 'Join the mission and setup your responder profile'}
+          {view === 'verify' && 'Check your email for a magic link or enter the 6-digit code below.'}
         </p>
       </div>
 

@@ -40,6 +40,8 @@ describe('GoogleICSFormsPage', () => {
 
   it('renders the input field and disables load when empty', () => {
     render(<GoogleICSFormsPage />);
+    const urlInput = screen.getByPlaceholderText(/docs\.google\.com/i);
+    fireEvent.change(urlInput, { target: { value: '' } });
     const loadButton = screen.getByRole('button', { name: /Load/i });
     expect(loadButton).toBeDisabled();
   });

@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase';
 import PlanningDashboard from '../components/PlanningDashboard';
 import { usePlanningDashboard } from '../hooks/usePlanningDashboard';
 import { useIncident } from '../context/IncidentContext';
+import { v4 as uuidv4 } from 'uuid';
 
 /**
  * PlanningDashboardPage
@@ -16,7 +17,7 @@ import { useIncident } from '../context/IncidentContext';
  */
 
 const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
-  const { incidentData } = useIncident();
+  const { incidentData, incidentId, responderName } = useIncident();
   const operationalPeriodId = propOpId || incidentData?.opPeriodId;
 
   // Use the custom hook to manage dashboard state and operations
@@ -33,8 +34,6 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
     createAssignment,
     updateAssignment,
     deleteAssignment,
-    updateResponder,
-    checkOutResponder,
     updateTeam,
     attachResponderToTeam,
     detachResponderFromTeam,
@@ -65,6 +64,55 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
     }
 
     return `${division}A`; // Wrap around if A-Z are all used
+  };
+
+  /**
+   * Persist a new responder to the database.
+   * Required because the Planning hook focuses on OP-specific resources.
+   */
+  const createResponder = async (responderData) => {
+    if (!incidentId) throw new Error("No active incident context.");
+    
+    const { error } = await supabase.from('responders').insert({
+      ...responderData,
+      responder_id: uuidv4(),
+      incident_id: incidentId,
+      device_id: `dashboard_created_${uuidv4()}`,
+      checkin_datetime: new Date().toISOString(),
+      status: 'Staged'
+    });
+
+    if (error) throw error;
+    await fetchDashboardData();
+  };
+
+  /**
+   * Update an existing responder record.
+   */
+  const updateResponder = async (id, responderData) => {
+    const { error } = await supabase
+      .from('responders')
+      .update(responderData)
+      .eq('responder_id', id);
+
+    if (error) throw error;
+    await fetchDashboardData();
+  };
+
+  /**
+   * Mark a responder as checked out.
+   */
+  const checkOutResponder = async (id, name) => {
+    const { error } = await supabase
+      .from('responders')
+      .update({ 
+        status: 'CheckedOut', 
+        checkout_datetime: new Date().toISOString() 
+      })
+      .eq('responder_id', id);
+
+    if (error) throw error;
+    await fetchDashboardData();
   };
 
   // Load data when component mounts or when operational period changes
@@ -133,6 +181,7 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
             onTeamAssigned={handleTeamAssigned}
             createTeam={createTeam}
             createAssignment={createAssignment}
+            createResponder={createResponder}
             updateAssignment={updateAssignment}
             deleteAssignment={deleteAssignment}
             updateResponder={updateResponder}

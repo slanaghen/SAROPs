@@ -5,6 +5,11 @@ import '../styles.css';
 import { mapSartopoToAssignment, mapAssignmentToSartopo } from '../utils/gisUtils';
 import { normalizeResourceTypeName } from '../utils/dataNormalization';
 import { SARTOPO_REFRESH_INTERVAL } from '../components/operationalConstants';
+import { 
+  getSartopoConfig, 
+  buildSecureSartopoUrl, 
+  downloadAndSyncSartopoData 
+} from '../services/sartopoService';
 
 const SARTopoDataPage = () => {
   const { incidentId, isActive, incidentData, responderName } = useIncident();
@@ -31,43 +36,13 @@ const SARTopoDataPage = () => {
     return saved !== null ? JSON.parse(saved) : false;
   });
 
-  const sartopoConfig = useMemo(() => {
-    let mapId = sartopoId?.trim();
-    if (!mapId) return { id: null, query: '' };
+  const sartopoConfig = useMemo(() => getSartopoConfig(sartopoId), [sartopoId]);
 
-    let query = '';
-    if (mapId.includes('?')) {
-      const parts = mapId.split('?');
-      mapId = parts[0];
-      query = '?' + parts[1];
-    }
-
-    if (mapId.includes('/')) {
-      mapId = mapId.split('/').pop() || mapId.split('/').slice(-2, -1)[0];
-    }
-
-    // Clean up trailing slashes or question marks before merging
-    if (mapId.endsWith('/')) mapId = mapId.slice(0, -1);
-    if (query === '?') query = '';
-
-    // Inject Sync Key from environment variable if configured and not already present in the Map ID
-    // Note: Variable must be prefixed with VITE_ to be exposed to the client
-    const apiKey = import.meta.env.VITE_SARTOPO_API_KEY?.trim();
-    if (apiKey && !query.includes('k=')) {
-      query = query ? `${query}&k=${apiKey}` : `?k=${apiKey}`;
-    }
-
-    return { id: mapId, query };
-  }, [sartopoId]);
-
-  const fetchUrl = useMemo(() => {
-    if (!sartopoConfig.id) return null;
-    return `/sartopo-api/api/v1/map/${sartopoConfig.id}/since/${lastFetchTime}${sartopoConfig.query}`;
-  }, [sartopoConfig, lastFetchTime]);
-
-  const uploadUrl = useMemo(() => {
-    if (!sartopoConfig.id) return null;
-    return `/sartopo-api/api/v1/map/${sartopoConfig.id}/features${sartopoConfig.query}`;
+  /**
+   * Helper to build a secure SARTopo URL, signing the request if credentials exist.
+   */
+  const buildSecureUrl = useCallback(async (method, path, payload = null) => {
+    return buildSecureSartopoUrl(method, path, sartopoConfig, payload);
   }, [sartopoConfig]);
 
   const filteredDownloadFeatures = useMemo(() => {
@@ -120,99 +95,8 @@ const SARTopoDataPage = () => {
     if (isActive) hydrateMapData();
   }, [incidentId, isActive]); // features is omitted to prevent dependency loops
 
-  /**
-   * Reconciles SARTopo features with SAROps assignments.
-   * If a SARTopo assignment is not present in SAROps (based on sartopo_id),
-   * a new SAROps assignment is created.
-   */
-  const syncSartopoAssignments = useCallback(async (providedFeatures = null) => {
-    const featuresToSync = providedFeatures || features?.result?.state?.features || features?.features;
-    if (!featuresToSync?.length || !incidentData?.opPeriodId) return;
-
-    setSyncing(true);
-    try {
-      // 1. Fetch existing assignments for this OP to identify which to update vs create
-      const { data: existingAsns, error: fetchError } = await supabase
-        .from('assignments')
-        .select('*') // Retrieve all columns to allow complete reconciliation during mapping
-        .eq('op_period_id', incidentData.opPeriodId);
-
-      if (fetchError) throw fetchError;
-      
-      const existingMapById = new Map();
-      const existingMapByTitle = new Map();
-      
-      existingAsns?.forEach(a => {
-        if (a.sartopo_id) {
-          existingMapById.set(a.sartopo_id, a);
-        }
-        if (a.title) {
-          existingMapByTitle.set(a.title.trim().toLowerCase(), a);
-        }
-      });
-
-      // 2. Prepare payloads for both new and existing assignments, focusing on SARTopo 'Assignment' objects
-      const syncPayloads = featuresToSync
-        .filter(f => f.id)
-        .filter(f => f.properties?.class === 'Assignment') // Ensure we only sync valid SARTopo assignment objects
-        .filter(f => f.properties?.title || f.properties?.name)
-        .map(f => {
-          const title = f.properties.title || f.properties.name;
-          const normalizedTitle = title?.trim().toLowerCase();
-          // Prevent duplicates by checking SARTopo ID first, then fallback to matching by title for SAROps-originated records
-          const existing = existingMapById.get(f.id) || (normalizedTitle ? existingMapByTitle.get(normalizedTitle) : null);
-
-          // Requirement: If an assignment is linked (has a sartopo_id), allow SARTopo to update its metadata.
-          // Only skip if the assignment originated in SAROps AND has no SARTopo ID yet (unlinked).
-          if (existing?.origin === 'SAROps' && !existing.sartopo_id) {
-            return null;
-          }
-
-          // mapSartopoToAssignment handles id mapping internally if existing is provided
-          return mapSartopoToAssignment(f, incidentData.opPeriodId, existing);
-        })
-        .filter(Boolean); // Filter out items excluded due to SAROps origin
-
-      if (syncPayloads.length === 0) {
-        if (!providedFeatures) alert('No assignments found to sync.');
-        return;
-      }
-
-      // 3. Upsert assignments in Supabase.
-      // Use the natural composite unique key (op_period_id + sartopo_id) to resolve conflicts.
-      // This ensures new features get auto-generated assignment_ids from the DB.
-      const { error: syncError } = await supabase
-        .from('assignments')
-        .upsert(syncPayloads, { onConflict: 'op_period_id,sartopo_id' });
-
-      if (syncError) throw syncError;
-
-      // Log synchronization details for the audit trail
-      const titles = syncPayloads.map(p => p.title).join(', ');
-      await supabase.from('action_logs').insert({
-        incident_id: incidentId,
-        action: `Synced ${syncPayloads.length} assignments from SARTopo: ${titles}`,
-        user_name: responderName || 'SARTopo Sync'
-      });
-      
-      const createdCount = syncPayloads.filter(p => !p.assignment_id).length;
-      const updatedCount = syncPayloads.length - createdCount;
-      
-      if (!providedFeatures) {
-        alert(`Sync complete: ${createdCount} created, ${updatedCount} updated.`);
-      }
-      setSyncedAssignmentNames(syncPayloads.map(p => p.title));
-    } catch (err) {
-      console.error('SARTopo Sync Error:', err);
-      setError(err.message || 'Error syncing assignments.');
-    } finally {
-      setSyncing(false);
-    }
-  }, [features?.features, incidentData?.opPeriodId, incidentId, responderName, setError, setSyncing, setSyncedAssignmentNames]);
-
   const handleFetchFeatures = useCallback(async () => {
-    if (!fetchUrl) {
-      setError('No SARTopo Map ID found for this incident.');
+    if (!sartopoConfig.id) {
       return;
     }
 
@@ -223,69 +107,22 @@ const SARTopoDataPage = () => {
     setError(null);
     if (isInitialFetch) setFeatures(null);
 
-    console.log(`[SARTopo] Downloading features from: ${fetchUrl}`);
-
     try {
-      // Using the Vite proxy configured in vite.config.js to bypass CORS
-      const response = await fetch(fetchUrl);
-      
-      if (!response.ok) {
-        const text = await response.text();
-        // If the response is HTML, SARTopo is likely returning an error page (404/403)
-        if (text.includes('<!DOCTYPE html>')) {
-          throw new Error(`SARTopo returned an error page (HTTP ${response.status}). Verify the Map ID is correct and ensure "API Access" or "Offline Access" is enabled in map settings.`);
-        }
-        throw new Error(`SARTopo returned ${response.status}: ${response.statusText}`);
-      }
+      const result = await downloadAndSyncSartopoData({
+        supabase,
+        incidentId,
+        opPeriodId: incidentData.opPeriodId,
+        sartopoConfig,
+        lastFetchTime,
+        userName: responderName || 'SARTopo Sync'
+      });
 
-      // Check content type to prevent JSON parsing errors if we received HTML
-      const contentType = response.headers.get('content-type');
-      if (contentType && !contentType.includes('application/json')) {
-        const text = await response.text();
-        if (text.includes('<!DOCTYPE html>')) {
-          throw new Error('SARTopo returned an HTML page instead of GeoJSON data. This often happens if the Map ID is invalid.');
-        }
-      }
+      if (!result) return;
+      const { mergedMapData, fetchedAt, syncCount, syncedTitles } = result;
 
-      const data = await response.json();
-      const fetchedFeatures = data?.result?.state?.features || data?.features || [];
-      setLastFetchTime(Date.now());
-      
-      // Merge the new download payload with the existing persisted map state to maintain a full record
-      let mergedSartopoMapData = data; // Default to new data if no existing
-
-      if (incidentId) {
-        // 1. Fetch existing sartopo_map_data from the incident record
-        const { data: existingIncident, error: fetchIncidentError } = await supabase
-          .from('incidents')
-          .select('sartopo_map_data')
-          .eq('incident_id', incidentId)
-          .maybeSingle();
-
-        if (fetchIncidentError) {
-          console.error('[SARTopo] Error fetching existing incident data for merge:', fetchIncidentError);
-          // Continue with just the new data if fetching old fails
-        } else {
-          const baseState = existingIncident?.sartopo_map_data;
-          const baseFeatures = baseState?.result?.state?.features || baseState?.features || [];
-          
-          const existingFeaturesMap = new Map(baseFeatures.map(f => [f.id, f]));
-
-          // Merge new features into existing (overwrite if exists, add if new)
-          fetchedFeatures.forEach(newFeature => {
-            if (newFeature.id) existingFeaturesMap.set(newFeature.id, newFeature);
-          });
-
-          mergedSartopoMapData = { type: "FeatureCollection", features: Array.from(existingFeaturesMap.values()) };
-        }
-
-        // 2. Persist the MERGED JSON payload to the incident record
-        const { error: persistError } = await supabase.from('incidents').update({ sartopo_map_data: mergedSartopoMapData }).eq('incident_id', incidentId);
-        if (persistError) console.error('[SARTopo] Merged payload persistence failed:', persistError);
-      }
-
-      // Update local state with the merged data
-      setFeatures(mergedSartopoMapData);
+      setFeatures(mergedMapData);
+      setLastFetchTime(fetchedAt);
+      setSyncedAssignmentNames(syncedTitles);
 
       let existingSaropsAsns = [];
       // Safely fetch existing SAROps assignments to determine 'New'/'Updated' status for display
@@ -302,37 +139,28 @@ const SARTopoDataPage = () => {
       const existingSaropsMap = new Map(
         existingSaropsAsns?.map(a => [a.sartopo_id, { id: a.assignment_id, origin: a.origin }]) || []
       );
-      const existingSaropsTitleMap = new Map(
-        existingSaropsAsns?.filter(a => a.title).map(a => [a.title.trim().toLowerCase(), { id: a.assignment_id, origin: a.origin }]) || []
-      );
+      const existingTitleMap = new Map(existingSaropsAsns?.filter(a => a.title).map(a => [a.title.trim().toLowerCase(), a]) || []);
 
       // Prepare display list for SARTopo Assignments div
-      const allMergedFeatures = mergedSartopoMapData?.result?.state?.features || mergedSartopoMapData?.features || [];
-      const displayList = allMergedFeatures
+      const displayList = mergedMapData.features
         .filter(f => f.properties?.class === 'Assignment')
         .map(f => {
           const title = (f.properties?.title || f.properties?.name)?.trim().toLowerCase();
-          const match = existingSaropsMap.get(f.id) || (title && existingSaropsTitleMap.has(title) ? existingSaropsTitleMap.get(title) : null);
-          
-          // Only include objects which were originally created in SARTopo for the download preview
+          const match = existingSaropsMap.get(f.id) || (title ? existingTitleMap.get(title) : null);
           if (match?.origin === 'SAROps') return null;
-          
           return { ...f, syncStatus: match ? 'Updated' : 'New' };
         })
         .filter(Boolean);
-      setSartopoAssignmentDisplayList(displayList);
 
-      // Requirement: Automatically sync new assignments when features are fetched
-      if (incidentData?.opPeriodId && fetchedFeatures.length > 0) {
-        await syncSartopoAssignments(fetchedFeatures);
-      }
+      setSartopoAssignmentDisplayList(displayList);
+      if (!isInitialFetch && syncCount > 0) alert(`Sync complete: ${syncCount} assignments updated.`);
     } catch (err) {
       console.error('Fetch error:', err);
       setError(err.message || 'Error fetching SARTopo data.');
     } finally {
       setLoading(false);
     }
-  }, [fetchUrl, incidentData?.opPeriodId, lastFetchTime, syncSartopoAssignments, incidentId]);
+  }, [sartopoConfig, lastFetchTime, incidentData?.opPeriodId, incidentId, responderName]);
 
   const generateUploadGeoJSON = useCallback(async () => { // Renamed function
     if (!incidentData?.opPeriodId) return;
@@ -381,7 +209,8 @@ const SARTopoDataPage = () => {
         // Fallback: If DB record is empty, perform a live full-state fetch to "build" the base map
         if (!retrievedData && sartopoConfig.id) {
           console.info('[SARTopo] DB base map empty. Performing live full-state fetch to build base record...');
-          const buildUrl = `/sartopo-api/api/v1/map/${sartopoConfig.id}/since/0${sartopoConfig.query}`;
+          const path = `/api/v1/map/${sartopoConfig.id}/since/0`;
+          const { url: buildUrl } = await buildSecureUrl('GET', path);
           console.log(`[SARTopo] Building base map from: ${buildUrl}`);
           const liveRes = await fetch(buildUrl);
           if (liveRes.ok) {
@@ -442,7 +271,7 @@ const SARTopoDataPage = () => {
     } finally {
       setIsGeneratingUpload(false);
     }
-  }, [incidentData?.opPeriodId, lastUploadTime, setSyncedAssignmentNames, features, incidentId, uploadUrl]);
+  }, [incidentData?.opPeriodId, lastUploadTime, setSyncedAssignmentNames, incidentId, sartopoConfig.id, buildSecureUrl]);
   
   // Ref to hold the latest fetcher to avoid dependency loops with the refresh function
   const fetcherRef = useRef(handleFetchFeatures);
@@ -452,7 +281,7 @@ const SARTopoDataPage = () => {
 
   // Automate fetching: trigger when ID is set, then every 60s
   useEffect(() => {
-    if (!sartopoId || !fetchUrl || !isAutoRefreshEnabled) return;
+    if (!sartopoId || !isAutoRefreshEnabled) return;
 
     // Execute initial fetch immediately if we haven't fetched yet in this session.
     // This prevents the loop caused by lastFetchTime updating and recreating handleFetchFeatures.
@@ -466,7 +295,7 @@ const SARTopoDataPage = () => {
     }, SARTOPO_REFRESH_INTERVAL || 30000);
 
     return () => clearInterval(interval);
-  }, [sartopoId, !!fetchUrl, SARTOPO_REFRESH_INTERVAL, lastFetchTime === 0, isAutoRefreshEnabled]);
+  }, [sartopoId, SARTOPO_REFRESH_INTERVAL, lastFetchTime === 0, isAutoRefreshEnabled]);
 
   useEffect(() => {
     localStorage.setItem('sarops_sartopo_sync_enabled', JSON.stringify(isAutoRefreshEnabled));
@@ -487,23 +316,26 @@ const SARTopoDataPage = () => {
     
     try {
       const { id: mapId } = sartopoConfig;
-      const apiKey = import.meta.env.VITE_SARTOPO_API_KEY?.trim() || '';
 
-      // Step 1: GET Map State - Pull the entire current state to prevent destructive overwrites
-      // Use /since/0 for consistency with the download logic and to avoid 404s on the features endpoint
-      const mapStateUrl = `/sartopo-api/api/v1/map/${mapId}/since/0${sartopoConfig.query}`;
-      console.log(`[SARTopo] Upload sequence started. Initializing reconciliation via: ${mapStateUrl}`);
-      const currentMapRes = await fetch(mapStateUrl);
-      if (!currentMapRes.ok) throw new Error('Failed to fetch current SARTopo map state for safe reconciliation.');
-      
-      const currentMapData = await currentMapRes.json();
+      // Step 1: Reconciliation Baseline - Use the PERSISTED SARTopo map data from the database.
+      // This ensures we do not perform a live download during upload, preserving local SAROps changes.
+      const { data: incData, error: dbError } = await supabase
+        .from('incidents')
+        .select('sartopo_map_data')
+        .eq('incident_id', incidentId)
+        .maybeSingle();
+
+      if (dbError) throw dbError;
+
+      const currentMapData = incData?.sartopo_map_data;
       const fetchedFeatures = currentMapData?.result?.state?.features || currentMapData?.features || [];
-      
-      // Persist this full state to the database and local state to keep reconciliation fresh
-      setFeatures(currentMapData);
-      if (incidentId) {
-        await supabase.from('incidents').update({ sartopo_map_data: currentMapData }).eq('incident_id', incidentId);
+
+      if (fetchedFeatures.length === 0) {
+        throw new Error('Reconciliation baseline is missing from the database. Please click "Download from SARTopo" first.');
       }
+
+      // Update local state to keep UI in sync with the baseline we are using
+      setFeatures(currentMapData);
 
       const sartopoFeatureLookup = new Map(fetchedFeatures.map(f => [f.id, f]));
       const updatedSartopoFeatures = [...fetchedFeatures]; // Work copy to accumulate property updates
@@ -548,21 +380,27 @@ const SARTopoDataPage = () => {
           properties: mapAssignmentToSartopo(asn, existingSartopoFeature.properties)
         };
 
-        // Step 3: POST Payload - Specific Resource Endpoint (Assignment)
         const featureId = asn.sartopo_id;
-        const uploadEndpoint = `/sartopo-api/api/v1/map/${mapId}/Assignment/${featureId}${sartopoConfig.query}`;
+        const featurePath = `/api/v1/map/${mapId}/Assignment/${featureId}`;
+        const jsonPayload = JSON.stringify(payload);
         
-        console.log(`[SARTopo] Uploading assignment "${asn.title}" to: ${uploadEndpoint}`);
+        // CalTopo signed POSTs require application/x-www-form-urlencoded with 'json' key
+        const formBody = new URLSearchParams();
+        formBody.append('json', jsonPayload);
+
+        const uploadEndpoint = await buildSecureUrl('POST', featurePath, jsonPayload);
+        
+        console.log(`[SARTopo] Uploading assignment "${asn.title}" to: ${uploadEndpoint.url}`);
         console.log(`[SARTopo] Payload:`, payload);
 
         try {
-          const response = await fetch(uploadEndpoint, {
+          const response = await fetch(uploadEndpoint.url, {
             method: 'POST',
             headers: {
-              'Content-Type': 'application/json',
+              'Content-Type': 'application/x-www-form-urlencoded',
               'Accept': 'application/json'
             },
-            body: JSON.stringify(payload),
+            body: formBody,
           });
 
           console.log(`[SARTopo] Received response status for "${asn.title}": ${response.status}`);
@@ -570,8 +408,8 @@ const SARTopoDataPage = () => {
           if (!response.ok) {
             const errorText = await response.text();
             if (response.status === 401) {
-              const hasEnvKey = !!import.meta.env.VITE_SARTOPO_API_KEY;
-              const msg = `401 Unauthorized: SARTopo requires a Sync Key to authorize writes. ${!hasEnvKey ? 'VITE_SARTOPO_API_KEY is not configured in your .env file. ' : ''}Ensure your Map ID includes a "?k=" parameter or configure the global API key.`;
+              const hasEnvKey = !!apiKey;
+              const msg = `401 Unauthorized: SARTopo requires a Sync Key to authorize writes. ${!hasEnvKey ? 'VITE_SARTOPO_API_CREDENTIAL_SECRET is not configured in your .env file. ' : ''}Ensure your Map ID includes a "?k=" or "?readCode=" parameter, or verify your global Sync Key has write access.`;
               throw new Error(msg);
             }
             throw new Error(`SARTopo API returned ${response.status}: ${errorText}`);
@@ -621,7 +459,7 @@ const SARTopoDataPage = () => {
     } finally {
       setIsUploading(false);
     }
-  }, [sartopoId, sartopoConfig, incidentData?.opPeriodId, generateUploadGeoJSON, incidentId]);
+  }, [sartopoId, sartopoConfig, incidentData?.opPeriodId, buildSecureUrl, incidentId]);
 
   if (!isActive) {
     return (

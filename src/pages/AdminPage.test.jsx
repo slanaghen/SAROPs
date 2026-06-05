@@ -38,6 +38,7 @@ vi.mock('../lib/supabase', () => ({
       getSession: vi.fn().mockResolvedValue({ data: { session: null } }),
       signInAnonymously: vi.fn().mockResolvedValue({ data: { user: { id: 'test-anon-user' } }, error: null }),
       signOut: vi.fn().mockResolvedValue({ error: null }),
+      refreshSession: vi.fn().mockResolvedValue({ data: { session: {} }, error: null }),
     },
     channel: vi.fn().mockReturnThis(),
     on: vi.fn().mockReturnThis(),
@@ -55,7 +56,11 @@ describe('AdminPage Authentication Gate', () => {
     vi.clearAllMocks();
     // Re-establish default mock implementations that are lost when implementations are overridden in individual tests.
     supabase.from.mockImplementation(() => globalThis.createSupabaseQueryMock([]));
-    supabase.rpc.mockImplementation(() => globalThis.createSupabaseQueryMock(null));
+    supabase.rpc.mockImplementation(() => {
+      const mock = globalThis.createSupabaseQueryMock(null);
+      mock.maybeSingle = vi.fn().mockResolvedValue({ data: null, error: null });
+      return mock;
+    });
     vi.useRealTimers();
     // Set default mock for useIncident for tests that don't override it
     vi.mocked(useIncident).mockReturnValue({
@@ -805,21 +810,25 @@ describe('AdminPage Authentication Gate', () => {
   });
 
   it('should allow selecting a new incident after leaving an active one', async () => {
-    const mockClearIncident = vi.fn();
+    let isActive = true;
+    const mockClearIncident = vi.fn(() => { isActive = false; });
+    const mockSetIsAdmin = vi.fn();
     const mockSetResponderId = vi.fn();
     const mockSetResponderStatus = vi.fn();
     const mockSetResponderName = vi.fn();
     const mockSetAccessLevel = vi.fn();
     const mockStartIncident = vi.fn();
 
-    vi.mocked(useIncident).mockReturnValue({
+    vi.mocked(useIncident).mockImplementation(() => ({
       isAdmin: true,
-      isActive: true,
+      setIsAdmin: mockSetIsAdmin,
+      logout: vi.fn(),
+      isActive: isActive,
       responderId: 'res-123',
       responderStatus: 'Staged',
       clearIncident: mockClearIncident,
-      incidentId: 'inc-active',
-      incidentData: { name: 'Active Session', opPeriodId: 'op-active' },
+      incidentId: isActive ? 'inc-active' : null,
+      incidentData: isActive ? { name: 'Active Session', opPeriodId: 'op-active' } : null,
       operationsRefreshInterval: 30000,
       responderRefreshInterval: 30000,
       sartopoRefreshInterval: 30000,
@@ -828,14 +837,25 @@ describe('AdminPage Authentication Gate', () => {
       setResponderName: mockSetResponderName,
       setAccessLevel: mockSetAccessLevel,
       startIncident: mockStartIncident,
-    });
+    }));
 
     // Mock useAdminData to provide incidents for the dropdown
     vi.mocked(useAdminData).mockReturnValue({
       users: [{ email: 'admin@test.com', name: 'Admin User', access_level: 'admin' }],
-      incidents: [{ incident_id: 'inc-new', name: 'New Incident', number: '002', end_datetime: null, operational_periods: [{ op_period_id: 'op-new', op_number: 1 }] }],
+      incidents: [{ 
+        incident_id: 'inc-new', 
+        name: 'New Incident', 
+        number: '002', 
+        end_datetime: null, 
+        operational_periods: [{ 
+          op_period_id: 'op-new', 
+          op_number: 1,
+          par_check_interval: 60
+        }] 
+      }],
       responders: [], teams: [], assignments: [], loading: false, refresh: vi.fn(), refreshAll: vi.fn(),
     });
+    localStorage.setItem('sarops_user_email', 'admin@test.com');
 
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
 
@@ -855,7 +875,13 @@ describe('AdminPage Authentication Gate', () => {
     expect(screen.getByRole('button', { name: /Join Incident/i })).not.toBeDisabled();
 
     // Mock the rpc call for checkin_responder_securely
-    supabase.rpc.mockResolvedValue({ data: { responder_id: 'res-new', name: 'Admin User', status: 'Staged', access_level: 'admin' }, error: null });
+    supabase.auth.getSession.mockResolvedValue({ data: { session: { user: { id: 'auth-uid', email: 'admin@test.com' } } }, error: null });
+    supabase.rpc.mockImplementation(() => ({
+      maybeSingle: vi.fn().mockResolvedValue({ 
+        data: { responder_id: 'res-new', name: 'Admin User', status: 'Staged', access_level: 'admin' }, 
+        error: null 
+      })
+    }));
     supabase.auth.refreshSession.mockResolvedValue({ data: { session: { user: { id: 'auth-uid' } } }, error: null });
     supabase.from.mockImplementation((table) => {
       if (table === 'operational_periods') return globalThis.createSupabaseQueryMock({ op_period_id: 'op-new', op_number: 1, par_check_interval: 60 });

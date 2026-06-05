@@ -284,7 +284,6 @@ CREATE TABLE users (
   cell_phone TEXT,
   responder_type responder_type,
   special_skills TEXT,
-  outdoor_mode BOOLEAN DEFAULT FALSE,
   display_density display_density DEFAULT 'comfortable',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -324,7 +323,7 @@ CREATE INDEX idx_team_messages_composite ON team_messages(team_id, created_at);
 
 -- View: team_current_responders
 -- Denormalized view of teams with their current responders for dashboard use
-CREATE OR REPLACE VIEW team_current_responders AS
+CREATE OR REPLACE VIEW team_current_responders WITH (security_invoker = on) AS
 SELECT
   t.*,
   r.name AS leader_name,
@@ -357,7 +356,7 @@ JOIN incidents i ON op.incident_id = i.incident_id;
 
 -- View: dashboard_assignments
 -- Pre-joins assignments with team and leader metadata for operations oversight
-CREATE OR REPLACE VIEW dashboard_assignments AS
+CREATE OR REPLACE VIEW dashboard_assignments WITH (security_invoker = on) AS
 SELECT
   a.*,
   t.team_name_number AS team_name,
@@ -378,7 +377,7 @@ JOIN incidents i ON op.incident_id = i.incident_id;
 
 -- View: incident_summary
 -- Summary view for incident dashboard
-CREATE OR REPLACE VIEW incident_summary AS
+CREATE OR REPLACE VIEW incident_summary WITH (security_invoker = on) AS
 SELECT
   i.incident_id,
   i.name,
@@ -490,7 +489,7 @@ BEGIN
 
   RETURN NULL;
 END;
-$func$ LANGUAGE plpgsql;
+$func$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Function to update responder statuses when a Staff team status changes to Assigned
 -- Function to update responder statuses and assignment status when a team status changes
@@ -630,8 +629,13 @@ RETURNS TRIGGER AS $func$
 DECLARE
     _target_team_status team_status;
 BEGIN
-    -- Only sync if team_id is present and status changed
-    IF NEW.team_id IS NOT NULL AND (TG_OP = 'INSERT' OR OLD.status IS DISTINCT FROM NEW.status) THEN
+    -- Requirement: If a team is unlinked, it returns to Staged.
+    IF TG_OP = 'UPDATE' AND OLD.team_id IS NOT NULL AND NEW.team_id IS NULL THEN
+        UPDATE teams SET status = 'Staged'::team_status WHERE team_id = OLD.team_id AND status != 'Disbanded';
+    END IF;
+
+    -- If a team is linked (NEW), sync its status to the assignment's state.
+    IF NEW.team_id IS NOT NULL AND (TG_OP = 'INSERT' OR OLD.status IS DISTINCT FROM NEW.status OR OLD.team_id IS DISTINCT FROM NEW.team_id) THEN
         _target_team_status := CASE
             WHEN NEW.status = 'Planned' THEN 'Staged'::team_status
             WHEN NEW.status = 'Assigned' THEN 'Assigned'::team_status
@@ -883,6 +887,88 @@ BEGIN
 END;
 $func$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
 
+-- RPC to start the next operational period for an incident.
+-- Closes the current period and carries over active teams and assignments.
+CREATE OR REPLACE FUNCTION start_next_operational_period(p_incident_id TEXT, p_current_op_period_id UUID)
+RETURNS UUID AS $$
+DECLARE
+    _new_op_period_id UUID := gen_random_uuid();
+    _current_op_number INTEGER;
+    _team_id_map JSONB := '{}'::jsonb;
+    _old_team RECORD;
+    _new_team_id UUID;
+    _old_asn RECORD;
+    _new_staff_team_id UUID;
+BEGIN
+    -- 1. Get current OP info
+    SELECT op_number INTO _current_op_number
+    FROM operational_periods
+    WHERE op_period_id = p_current_op_period_id;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Current operational period not found.';
+    END IF;
+
+    -- 2. Create the new OP
+    -- Trigger 'ensure_staff_team_on_new_op' will auto-create Staff Team and Command Staff Assignment
+    INSERT INTO operational_periods (op_period_id, incident_id, op_number, start_datetime)
+    VALUES (_new_op_period_id, p_incident_id, _current_op_number + 1, CURRENT_TIMESTAMP);
+
+    -- 3. Close the old OP
+    UPDATE operational_periods
+    SET end_datetime = CURRENT_TIMESTAMP
+    WHERE op_period_id = p_current_op_period_id;
+
+    -- 4. Find the auto-created Staff team in the new OP (for merging later)
+    SELECT team_id INTO _new_staff_team_id
+    FROM teams
+    WHERE op_period_id = _new_op_period_id AND type = 'Staff' AND status != 'Disbanded'
+    LIMIT 1;
+
+    -- 5. Transition Teams
+    FOR _old_team IN (
+        SELECT * FROM teams 
+        WHERE op_period_id = p_current_op_period_id 
+          AND status != 'Disbanded'
+    ) LOOP
+        IF _old_team.type = 'Staff' AND _new_staff_team_id IS NOT NULL THEN
+            UPDATE teams SET
+                leader_responder_id = _old_team.leader_responder_id,
+                equipment = _old_team.equipment,
+                sartopo_color_hex = _old_team.sartopo_color_hex
+            WHERE team_id = _new_staff_team_id;
+            _new_team_id := _new_staff_team_id;
+        ELSE
+            _new_team_id := gen_random_uuid();
+            INSERT INTO teams (team_id, op_period_id, team_name_number, sartopo_color_hex, type, status, leader_responder_id, equipment, last_par_check)
+            VALUES (_new_team_id, _new_op_period_id, _old_team.team_name_number, _old_team.sartopo_color_hex, _old_team.type, _old_team.status, _old_team.leader_responder_id, _old_team.equipment, _old_team.last_par_check);
+        END IF;
+
+        _team_id_map := _team_id_map || jsonb_build_object(_old_team.team_id::TEXT, _new_team_id::TEXT);
+        INSERT INTO team_responders (team_id, responder_id, role)
+        SELECT _new_team_id, responder_id, role FROM team_responders WHERE team_id = _old_team.team_id ON CONFLICT DO NOTHING;
+    END LOOP;
+
+    -- 6. Transition Assignments
+    FOR _old_asn IN (
+        SELECT * FROM assignments 
+        WHERE op_period_id = p_current_op_period_id 
+          AND status NOT IN ('Completed', 'Incomplete')
+    ) LOOP
+        IF _old_asn.title = 'Command Staff' THEN
+            UPDATE assignments SET 
+                status = _old_asn.status, segment = _old_asn.segment, resource_type = _old_asn.resource_type, team_size = _old_asn.team_size, frequency_primary = _old_asn.frequency_primary, description = _old_asn.description, debrief_narrative = _old_asn.debrief_narrative, probability_of_detection = _old_asn.probability_of_detection, priority = _old_asn.priority, transportation = _old_asn.transportation, time_allocated = _old_asn.time_allocated, hazards = _old_asn.hazards, prepared_by = _old_asn.prepared_by, team_id = _new_staff_team_id, origin = _old_asn.origin
+            WHERE op_period_id = _new_op_period_id AND title = 'Command Staff';
+        ELSE
+            INSERT INTO assignments (op_period_id, sartopo_id, status, segment, resource_type, team_size, frequency_primary, description, debrief_narrative, probability_of_detection, priority, transportation, time_allocated, hazards, prepared_by, title, is_orphaned, team_id, origin)
+            VALUES (_new_op_period_id, _old_asn.sartopo_id, _old_asn.status, _old_asn.segment, _old_asn.resource_type, _old_asn.team_size, _old_asn.frequency_primary, _old_asn.description, _old_asn.debrief_narrative, _old_asn.probability_of_detection, _old_asn.priority, _old_asn.transportation, _old_asn.time_allocated, _old_asn.hazards, _old_asn.prepared_by, _old_asn.title, _old_asn.is_orphaned, (_team_id_map->>(_old_asn.team_id::TEXT))::UUID, _old_asn.origin);
+        END IF;
+    END LOOP;
+
+    RETURN _new_op_period_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
 -- RPC for User Login
 CREATE OR REPLACE FUNCTION verify_user_login(p_email TEXT, p_password TEXT)
 RETURNS SETOF users AS $func$
@@ -1118,8 +1204,8 @@ CREATE POLICY "Allow all authenticated to view user list" ON users
 -- Ensure clean replacement for function overloading
 DROP FUNCTION IF EXISTS admin_add_user(TEXT, TEXT, TEXT);
 DROP FUNCTION IF EXISTS admin_add_user(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT);
-DROP FUNCTION IF EXISTS admin_add_user(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, BOOLEAN);
-DROP FUNCTION IF EXISTS admin_add_user(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, BOOLEAN, TEXT);
+DROP FUNCTION IF EXISTS admin_add_user(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT);
+
 
 CREATE OR REPLACE FUNCTION admin_add_user(
   p_email TEXT, 
@@ -1132,7 +1218,6 @@ CREATE OR REPLACE FUNCTION admin_add_user(
   p_phone TEXT DEFAULT NULL,
   p_type TEXT DEFAULT NULL,
   p_skills TEXT DEFAULT NULL,
-  p_outdoor_mode BOOLEAN DEFAULT FALSE,
   p_display_density TEXT DEFAULT 'comfortable'
 )
 RETURNS VOID AS $outer_func$
@@ -1153,7 +1238,6 @@ BEGIN
       cell_phone = p_phone,
       responder_type = p_type::responder_type,
       special_skills = p_skills,
-      outdoor_mode = p_outdoor_mode,
       display_density = p_display_density::display_density
     WHERE LOWER(TRIM(email)) = LOWER(TRIM(p_email));
   ELSE
@@ -1161,12 +1245,12 @@ BEGIN
     INSERT INTO users (
       email, username, password, access_level,
       name, agency, identifier, cell_phone, responder_type, special_skills, 
-      outdoor_mode, display_density
+      display_density
     )
     VALUES (
       LOWER(TRIM(p_email)), p_username, crypt(p_password, gen_salt('bf')), p_access_level::access_level,
       p_name, p_agency, p_identifier, p_phone, p_type::responder_type, p_skills, 
-      p_outdoor_mode, p_display_density::display_density
+      p_display_density::display_density
     );
   END IF;
 END;
@@ -1206,7 +1290,7 @@ BEGIN
         EXECUTE 'CREATE TEMP TABLE users_temp_backup (
             email TEXT, username TEXT, password TEXT, access_level_text TEXT,
             name TEXT, agency TEXT, identifier TEXT, cell_phone TEXT, 
-            responder_type_text TEXT, special_skills TEXT, outdoor_mode BOOLEAN, 
+            responder_type_text TEXT, special_skills TEXT, 
             display_density_text TEXT, created_at TIMESTAMP WITH TIME ZONE
         )';
         
@@ -1215,7 +1299,7 @@ BEGIN
         EXECUTE format('INSERT INTO users_temp_backup (
                     email, username, password, access_level_text, name, agency, 
                     identifier, cell_phone, responder_type_text, special_skills, 
-                    outdoor_mode, display_density_text, created_at
+                    display_density_text, created_at
                  )
                  SELECT 
                     email, 
@@ -1228,9 +1312,8 @@ BEGIN
                     %s, -- Arg 6: cell_phone
                     %s, -- Arg 7: responder_type
                     %s, -- Arg 8: special_skills
-                    %s, -- Arg 9: outdoor_mode
-                    %s, -- Arg 10: display_density
-                    %s  -- Arg 11: created_at
+                    %s, -- Arg 9: display_density
+                    %s  -- Arg 10: created_at
                  FROM users',
                  CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='username') THEN 'username' ELSE 'email' END,
                  CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='access_level') THEN 'access_level::TEXT' ELSE '''responder''' END,
@@ -1240,7 +1323,6 @@ BEGIN
                  CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='cell_phone') THEN 'cell_phone' ELSE 'NULL' END,
                  CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='responder_type') THEN 'responder_type::TEXT' ELSE '''SAR''' END,
                  CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='special_skills') THEN 'special_skills' ELSE 'NULL' END,
-                 CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='outdoor_mode') THEN 'outdoor_mode' ELSE 'FALSE' END,
                  CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='display_density') THEN 'display_density::TEXT' ELSE '''comfortable''' END,
                  CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='created_at') THEN 'created_at' ELSE 'CURRENT_TIMESTAMP' END
         );
@@ -1445,7 +1527,6 @@ BEGIN
       cell_phone TEXT,
       responder_type responder_type,
       special_skills TEXT,
-      outdoor_mode BOOLEAN DEFAULT FALSE,
       display_density display_density DEFAULT ''comfortable'',
       created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
     );';
@@ -1478,7 +1559,7 @@ BEGIN
     EXECUTE 'CREATE INDEX idx_team_messages_composite ON team_messages(team_id, created_at);';
 
     -- VIEWS
-    EXECUTE 'CREATE OR REPLACE VIEW team_current_responders AS
+    EXECUTE 'CREATE OR REPLACE VIEW team_current_responders WITH (security_invoker = on) AS
     SELECT
       t.*,
       r.name AS leader_name,
@@ -1509,7 +1590,7 @@ BEGIN
     JOIN operational_periods op ON t.op_period_id = op.op_period_id
     JOIN incidents i ON op.incident_id = i.incident_id;';
 
-    EXECUTE 'CREATE OR REPLACE VIEW dashboard_assignments AS
+    EXECUTE 'CREATE OR REPLACE VIEW dashboard_assignments WITH (security_invoker = on) AS
     SELECT
       a.*,
       t.team_name_number AS team_name,
@@ -1528,7 +1609,7 @@ BEGIN
     JOIN operational_periods op ON a.op_period_id = op.op_period_id
     JOIN incidents i ON op.incident_id = i.incident_id;';
 
-    EXECUTE 'CREATE OR REPLACE VIEW incident_summary AS
+    EXECUTE 'CREATE OR REPLACE VIEW incident_summary WITH (security_invoker = on) AS
     SELECT
       i.incident_id,
       i.name,
@@ -1625,7 +1706,7 @@ BEGIN
 
       RETURN NULL;
     END;
-    $func$ LANGUAGE plpgsql;';
+    $func$ LANGUAGE plpgsql SECURITY DEFINER;';
 
     EXECUTE 'CREATE OR REPLACE FUNCTION auto_assign_first_responder_as_ic()
     RETURNS TRIGGER AS $func$
@@ -1745,7 +1826,11 @@ BEGIN
     DECLARE
         _target_team_status team_status;
     BEGIN
-        IF NEW.team_id IS NOT NULL AND (TG_OP = ''INSERT'' OR OLD.status IS DISTINCT FROM NEW.status) THEN
+        IF TG_OP = ''UPDATE'' AND OLD.team_id IS NOT NULL AND NEW.team_id IS NULL THEN
+            UPDATE teams SET status = ''Staged''::team_status WHERE team_id = OLD.team_id AND status != ''Disbanded'';
+        END IF;
+
+        IF NEW.team_id IS NOT NULL AND (TG_OP = ''INSERT'' OR OLD.status IS DISTINCT FROM NEW.status OR OLD.team_id IS DISTINCT FROM NEW.team_id) THEN
             _target_team_status := CASE
                 WHEN NEW.status = ''Planned'' THEN ''Staged''::team_status
                 WHEN NEW.status = ''Assigned'' THEN ''Assigned''::team_status
@@ -1978,6 +2063,52 @@ BEGIN
     END;
     $func$ LANGUAGE plpgsql SECURITY DEFINER;';
 
+    EXECUTE 'CREATE OR REPLACE FUNCTION start_next_operational_period(p_incident_id TEXT, p_current_op_period_id UUID)
+    RETURNS UUID AS $func$
+    DECLARE
+        _new_op_period_id UUID := gen_random_uuid();
+        _current_op_number INTEGER;
+        _team_id_map JSONB := ''{}''::jsonb;
+        _old_team RECORD;
+        _new_team_id UUID;
+        _old_asn RECORD;
+        _new_staff_team_id UUID;
+    BEGIN
+        SELECT op_number INTO _current_op_number FROM operational_periods WHERE op_period_id = p_current_op_period_id;
+        IF NOT FOUND THEN RAISE EXCEPTION ''Current operational period not found.''; END IF;
+
+        INSERT INTO operational_periods (op_period_id, incident_id, op_number, start_datetime)
+        VALUES (_new_op_period_id, p_incident_id, _current_op_number + 1, CURRENT_TIMESTAMP);
+
+        UPDATE operational_periods SET end_datetime = CURRENT_TIMESTAMP WHERE op_period_id = p_current_op_period_id;
+
+        SELECT team_id INTO _new_staff_team_id FROM teams WHERE op_period_id = _new_op_period_id AND type = ''Staff'' AND status != ''Disbanded'' LIMIT 1;
+
+        FOR _old_team IN (SELECT * FROM teams WHERE op_period_id = p_current_op_period_id AND status != ''Disbanded'') LOOP
+            IF _old_team.type = ''Staff'' AND _new_staff_team_id IS NOT NULL THEN
+                UPDATE teams SET leader_responder_id = _old_team.leader_responder_id, equipment = _old_team.equipment, sartopo_color_hex = _old_team.sartopo_color_hex WHERE team_id = _new_staff_team_id;
+                _new_team_id := _new_staff_team_id;
+            ELSE
+                _new_team_id := gen_random_uuid();
+                INSERT INTO teams (team_id, op_period_id, team_name_number, sartopo_color_hex, type, status, leader_responder_id, equipment, last_par_check)
+                VALUES (_new_team_id, _new_op_period_id, _old_team.team_name_number, _old_team.sartopo_color_hex, _old_team.type, _old_team.status, _old_team.leader_responder_id, _old_team.equipment, _old_team.last_par_check);
+            END IF;
+            _team_id_map := _team_id_map || jsonb_build_object(_old_team.team_id::TEXT, _new_team_id::TEXT);
+            INSERT INTO team_responders (team_id, responder_id, role) SELECT _new_team_id, responder_id, role FROM team_responders WHERE team_id = _old_team.team_id ON CONFLICT DO NOTHING;
+        END LOOP;
+
+        FOR _old_asn IN (SELECT * FROM assignments WHERE op_period_id = p_current_op_period_id AND status NOT IN (''Completed'', ''Incomplete'')) LOOP
+            IF _old_asn.title = ''Command Staff'' THEN
+                UPDATE assignments SET status = _old_asn.status, segment = _old_asn.segment, resource_type = _old_asn.resource_type, team_size = _old_asn.team_size, frequency_primary = _old_asn.frequency_primary, description = _old_asn.description, debrief_narrative = _old_asn.debrief_narrative, probability_of_detection = _old_asn.probability_of_detection, priority = _old_asn.priority, transportation = _old_asn.transportation, time_allocated = _old_asn.time_allocated, hazards = _old_asn.hazards, prepared_by = _old_asn.prepared_by, team_id = _new_staff_team_id, origin = _old_asn.origin WHERE op_period_id = _new_op_period_id AND title = ''Command Staff'';
+            ELSE
+                INSERT INTO assignments (op_period_id, sartopo_id, status, segment, resource_type, team_size, frequency_primary, description, debrief_narrative, probability_of_detection, priority, transportation, time_allocated, hazards, prepared_by, title, is_orphaned, team_id, origin)
+                VALUES (_new_op_period_id, _old_asn.sartopo_id, _old_asn.status, _old_asn.segment, _old_asn.resource_type, _old_asn.team_size, _old_asn.frequency_primary, _old_asn.description, _old_asn.debrief_narrative, _old_asn.probability_of_detection, _old_asn.priority, _old_asn.transportation, _old_asn.time_allocated, _old_asn.hazards, _old_asn.prepared_by, _old_asn.title, _old_asn.is_orphaned, (_team_id_map->>(_old_asn.team_id::TEXT))::UUID, _old_asn.origin);
+            END IF;
+        END LOOP;
+        RETURN _new_op_period_id;
+    END;
+    $func$ LANGUAGE plpgsql SECURITY DEFINER;';
+
     EXECUTE 'CREATE OR REPLACE FUNCTION checkin_responder_securely(
       p_incident_id TEXT,
       p_auth_uid UUID,
@@ -2165,7 +2296,6 @@ BEGIN
       p_phone TEXT DEFAULT NULL,
       p_type TEXT DEFAULT NULL,
       p_skills TEXT DEFAULT NULL,
-      p_outdoor_mode BOOLEAN DEFAULT FALSE,
       p_display_density TEXT DEFAULT ''comfortable''
     )
     RETURNS VOID AS $func$
@@ -2186,7 +2316,6 @@ BEGIN
           cell_phone = p_phone,
           responder_type = p_type::responder_type,
           special_skills = p_skills,
-          outdoor_mode = p_outdoor_mode,
           display_density = p_display_density::display_density
     WHERE LOWER(TRIM(email)) = LOWER(TRIM(p_email));
       ELSE
@@ -2195,12 +2324,12 @@ BEGIN
         INSERT INTO users (
           email, username, password, access_level,
           name, agency, identifier, cell_phone, responder_type, special_skills, 
-          outdoor_mode, display_density
+          display_density
         )
         VALUES (
           LOWER(TRIM(p_email)), p_username, crypt(p_password, gen_salt(''bf'')), p_access_level::access_level,
           p_name, p_agency, p_identifier, p_phone, p_type::responder_type, p_skills, 
-          p_outdoor_mode, p_display_density::display_density
+          p_display_density::display_density
         );
       END IF;
     END;
@@ -2224,28 +2353,30 @@ BEGIN
 
     -- Restore users from backup
     IF EXISTS (SELECT FROM pg_class WHERE relname = 'users_temp_backup') THEN
-        EXECUTE 'INSERT INTO users (email, username, password, access_level, name, agency, identifier, cell_phone, responder_type, special_skills, outdoor_mode, display_density, created_at)
-        SELECT email, COALESCE(username, email), password, access_level_text::access_level, name, agency, identifier, cell_phone, responder_type_text::responder_type, special_skills, outdoor_mode, display_density_text::display_density, created_at
+        EXECUTE 'INSERT INTO users (email, username, password, access_level, name, agency, identifier, cell_phone, responder_type, special_skills, display_density, created_at)
+        SELECT email, COALESCE(username, email), password, access_level_text::access_level, name, agency, identifier, cell_phone, responder_type_text::responder_type, special_skills, display_density_text::display_density, created_at
         FROM users_temp_backup ON CONFLICT (email) DO NOTHING';
         EXECUTE 'DROP TABLE users_temp_backup';
     END IF;
 
     -- Re-apply grants inside the re-initialization block to ensure API access persists
-    EXECUTE 'GRANT EXECUTE ON FUNCTION admin_add_user(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, BOOLEAN, TEXT) TO authenticated;';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION admin_add_user(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated;';
     EXECUTE 'GRANT EXECUTE ON FUNCTION admin_remove_user(TEXT) TO authenticated;';
     EXECUTE 'GRANT EXECUTE ON FUNCTION admin_update_password(TEXT, TEXT) TO authenticated;';
     EXECUTE 'GRANT EXECUTE ON FUNCTION verify_user_login(TEXT, TEXT) TO anon, authenticated;';
     EXECUTE 'GRANT EXECUTE ON FUNCTION checkin_responder_securely(TEXT, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated;';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION start_next_operational_period(TEXT, UUID) TO authenticated;';
     EXECUTE 'GRANT EXECUTE ON FUNCTION reinitialize_database TO authenticated;';
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Grant execute permissions to ensure functions are visible to the API
-GRANT EXECUTE ON FUNCTION admin_add_user(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, BOOLEAN, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION admin_add_user(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION admin_remove_user TO authenticated;
 GRANT EXECUTE ON FUNCTION admin_update_password TO authenticated;
 GRANT EXECUTE ON FUNCTION verify_user_login TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION checkin_responder_securely(TEXT, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION start_next_operational_period(TEXT, UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION reinitialize_database TO authenticated;
 
 -- ============================================================================

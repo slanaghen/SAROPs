@@ -35,19 +35,6 @@
   --space-lg: 24px;
 }
 
-.outdoor-mode {
-  --color-bg: #000000;
-  --color-text-main: #ffffff;
-  --color-text-muted: #cbd5e1;
-  --color-border: #ffffff;
-  --color-card: #000000;
-  --text-base: 18px;
-  --text-sm: 16px;
-  --text-xs: 14px;
-  --btn-height: 52px;
-  --btn-font-size: 16px;
-}
-
 .compact-mode {
   --chip-padding: 2px 8px;
   --chip-font-size: var(--text-xs);

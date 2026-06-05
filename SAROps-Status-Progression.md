@@ -30,8 +30,9 @@ This document details the lifecycle and status transitions for the three primary
 ### Assignment Lifecycle
 1.  **Planned**: The task is defined in the system but no team is assigned.
 2.  **Assigned**: A team has been linked to the task.
-3.  **Deployed**: The assigned team is active in the field.
-4.  **Completed / Incomplete**: The task is finished. This automatically disbands the attached team.
+3.  **Unassigned**: If a team is unlinked from an assignment, the team status returns to `Staged`. This transition automatically triggers the Team -> Responder Sync, reverting member statuses to `Attached`.
+4.  **Deployed**: The assigned team is active in the field.
+5.  **Completed / Incomplete**: The task is finished. This automatically disbands the attached team.
 
 ---
 

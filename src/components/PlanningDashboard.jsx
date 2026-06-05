@@ -28,6 +28,7 @@ const PlanningDashboard = ({
   onTeamAssigned,
   createTeam,
   createAssignment,
+  createResponder,
   updateAssignment,
   deleteAssignment,
   updateTeam,
@@ -294,8 +295,22 @@ const PlanningDashboard = ({
   };
 
   const openEditResponderForm = (responder) => {
-    console.log('📝 Opening Responder Editor for:', responder.name);
-    setResponderForm({ ...responder });
+    if (responder) {
+      console.log('📝 Opening Responder Editor for:', responder.name);
+      setResponderForm({ ...responder });
+    } else {
+      console.log('📝 Opening Responder Editor for New Responder');
+      setResponderForm({
+        name: '',
+        agency: '',
+        identifier: '',
+        cell_phone: '',
+        responder_type: 'SAR',
+        access_level: 'responder',
+        status: 'Staged',
+        special_skills: ''
+      });
+    }
     setShowResponderForm(true);
   };
 
@@ -490,31 +505,35 @@ const PlanningDashboard = ({
   };
 
   const handleSaveResponder = async (formData) => {
-    if (!formData?.responder_id) {
-      setError('Internal Error: Missing responder identifier. Changes cannot be saved.');
-      return;
-    }
-
     try {
       setLoading(true);
-      if (updateResponder) {
-        // Cleanse payload to prevent PostgREST errors with invalid columns
-        const { 
-          name, agency, identifier, cell_phone, responder_type,
-          access_level, status, special_skills 
-        } = formData;
 
+      // Cleanse payload to prevent PostgREST errors with invalid columns
+      const { 
+        name, agency, identifier, cell_phone, responder_type,
+        access_level, status, special_skills 
+      } = formData;
+
+      if (formData.responder_id && updateResponder) {
         await updateResponder(formData.responder_id, {
           name, agency, identifier, cell_phone, responder_type,
           access_level, status, special_skills
         });
-
         setSuccessMessage('Responder updated');
+      } else if (!formData.responder_id && createResponder) {
+        await createResponder({
+          name, agency, identifier, cell_phone, responder_type,
+          access_level, status: 'Staged', special_skills
+        });
+        setSuccessMessage('Responder created');
+      } else {
+        throw new Error('Missing responder identifier or service function');
       }
+
       setShowResponderForm(false);
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (err) {
-      setError(err.message || 'Failed to update responder');
+      setError(err.message || 'Failed to save responder');
     } finally {
       setLoading(false);
     }
@@ -616,9 +635,10 @@ const PlanningDashboard = ({
         <div className="section responders-section">
           <div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h2>Responders ({availableRespondersList.length})</h2>
-            {/* Hidden spacer to ensure header height matches columns with buttons, aligning the search boxes */}
-            <div style={{ visibility: 'hidden' }}>
-              <button className="btn btn-primary" style={{ fontSize: '14px' }}>Spacer</button>
+            <div>
+              <button className="btn btn-primary" onClick={() => openEditResponderForm(null)} style={{ fontSize: '14px' }}>
+                New Responder
+              </button>
             </div>
           </div>
 

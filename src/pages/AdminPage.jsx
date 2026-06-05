@@ -374,7 +374,6 @@ const AdminPage = () => {
           p_phone: formData.cell_phone,
           p_type: formData.responder_type,
           p_skills: formData.special_skills,
-          p_outdoor_mode: formData.outdoor_mode,
           p_display_density: formData.display_density,
         });
         if (updateError) throw updateError;
@@ -391,7 +390,6 @@ const AdminPage = () => {
           p_phone: formData.cell_phone,
           p_type: formData.responder_type,
           p_skills: formData.special_skills,
-          p_outdoor_mode: formData.outdoor_mode,
           p_display_density: formData.display_density,
         });
         if (insertError) throw insertError;
@@ -431,12 +429,19 @@ const AdminPage = () => {
         if (updateError) throw updateError;
         setSuccess(`Responder ${formData.name} updated successfully.`);
       } else {
+        // Requirement: Responder must be linked to an incident (FK constraint)
+        if (!incidentId) {
+          throw new Error("No active incident session. Please join an incident before adding responders.");
+        }
+
         const { error: insertError } = await supabase
           .from('responders')
           .insert({
             ...payload,
             responder_id: uuidv4(),
-            incident_id: incidentId, // Link to current active incident if available
+            incident_id: incidentId,
+            // Requirement: device_id is NOT NULL and UNIQUE in schema. Generate a unique internal ID.
+            device_id: `admin_created_${uuidv4()}`,
             checkin_datetime: new Date().toISOString(),
             status: 'Staged'
           });
@@ -626,18 +631,6 @@ const AdminPage = () => {
     if (!window.confirm(`Permanently delete team "${name}"? This action cannot be undone and will remove all assignment links.`)) return;
 
     try {
-      // Release members to Staged status before deletion to ensure they aren't orphaned in an active status
-      const { data: members } = await supabase.from('team_responders').select('responder_id').eq('team_id', id);
-      const rIds = members?.map(m => m.responder_id) || [];
-      
-      if (rIds.length > 0) {
-        await supabase.from('responders').update({ status: 'Staged' }).in('responder_id', rIds);
-        await supabase.from('responder_team_history')
-          .update({ detached_datetime: new Date().toISOString() })
-          .eq('team_id', id)
-          .is('detached_datetime', null);
-      }
-
       const { error: deleteError } = await supabase
         .from('teams')
         .delete()

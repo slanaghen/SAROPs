@@ -14,66 +14,75 @@
  * @param {string|null} origin - Optional override for origin (defaults to SARTopo)
  * @returns {Object} Payload for Supabase upsert
  */
-export const mapSartopoToAssignment = (feature, opPeriodId, existing = null, origin = 'SARTopo') => {
+export const mapSartopoToAssignment = (feature, opPeriodId, existing = null, baseline = null, origin = 'SARTopo') => {
   const p = feature.properties || {};
+  const b = baseline?.properties || {};
 
-  console.debug('[mapSartopoToAssignment] Incoming SARTopo properties:', p);
-  console.debug('[mapSartopoToAssignment] Existing SAROps assignment:', existing);
-  
-  // Extract values with fallbacks matching SARTopo's standard JSON structure (fixed p variable not defined)
-  const title = p.title || p.name || 'Untitled SARTopo Object';
-  
-  // Map SARTopo priority integers or variations to SAROps labels
-  const rawPriority = p.priority || p.Priority || p.importance || p.priority_level;
-  let mappedPriority = existing?.priority || null;
-  
-  if (rawPriority !== undefined && rawPriority !== null) {
-    const pStr = String(rawPriority).toLowerCase();
-    if (pStr === '1' || pStr.includes('high')) mappedPriority = 'High';
-    else if (pStr === '2' || pStr.includes('medium') || pStr.includes('normal')) mappedPriority = 'Medium';
-    else if (pStr === '3' || pStr.includes('low')) mappedPriority = 'Low';
-    else mappedPriority = rawPriority; // Preserve other string values
-  }
+  // Helper to extract value using standard SARTopo aliases
+  const getSartopoValue = (props, keys) => {
+    const key = keys.find(k => Object.prototype.hasOwnProperty.call(props, k));
+    return key ? props[key] : undefined;
+  };
 
-  // Normalize numeric fields (SARTopo often returns these as strings)
-  const podValue = parseInt(p.unresponsive_pod || p.unresponsivePOD || p.pod || p.probabilityOfDetection, 10);
-  const teamSizeValue = parseInt(p.teamSize || p.team_size || p.personnel || p.size || p.personnel_count, 10);
+  /**
+   * Logic: Merge property by property.
+   * 1. If property changed in SARTopo (Incoming != Baseline): SARTopo wins.
+   * 2. If property NOT changed in SARTopo: SAROps wins (keeping local modifications).
+   * 3. If new assignment: SARTopo wins.
+   */
+  const resolve = (keys, saropsField, transform = (v) => v) => {
+    const incoming = getSartopoValue(p, keys);
+    const prev = getSartopoValue(b, keys);
+    
+    // Property changed in SARTopo if it's different from the baseline (or baseline is unknown)
+    const changedInSartopo = incoming !== undefined && (prev === undefined || String(incoming) !== String(prev));
+
+    if (!existing || changedInSartopo) {
+      return transform(incoming !== undefined ? incoming : prev);
+    }
+    
+    // If SARTopo didn't change it, respect the current SAROps value
+    const current = existing[saropsField];
+    return current !== undefined ? current : transform(incoming);
+  };
+
+  const transformPriority = (raw) => {
+    if (raw === undefined || raw === null) return null;
+    const pStr = String(raw).toLowerCase();
+    if (pStr === '1' || pStr.includes('high')) return 'High';
+    if (pStr === '2' || pStr.includes('medium') || pStr.includes('normal')) return 'Medium';
+    if (pStr === '3' || pStr.includes('low')) return 'Low';
+    return raw;
+  };
+
+  const transformInt = (v) => {
+    const val = parseInt(v, 10);
+    return isNaN(val) ? null : val;
+  };
 
   const payload = {
-    // Primary/Foreign Keys
-    // Omit assignment_id (PK) to ensure uniform payloads in bulk upsert operations.
-    // Conflict resolution is handled via the natural unique key (op_period_id, sartopo_id).
     op_period_id: opPeriodId,
     sartopo_id: feature.id,
-    
-    // Operational State
     status: existing?.status || 'Planned',
     origin: existing?.origin || origin,
     is_orphaned: false,
     
-    // Core Data
-    title: title, // Title is NOT NULL in DB, so always provide a value
-    segment: p.segment || p.division || p.sector || existing?.segment || null,
-    resource_type: p.resource_type || p.resourceType || p.class || p.type || existing?.resource_type || null,
-    team_size: isNaN(teamSizeValue) ? (existing?.team_size || null) : teamSizeValue,
-    frequency_primary: p.primary_frequency || p.primaryFrequency || p.frequency || p.tac || p.tac_channel || p.comms || existing?.frequency_primary || null,
-    description: p.description || p.comments || p.notes || existing?.description || null,
-    priority: mappedPriority,
-    hazards: p.hazards || p.safety || existing?.hazards || null,
-    
-    // Extended SARTopo Fields
-    transportation: p.transportation || p.travel_method || existing?.transportation || null,
-    time_allocated: p.time_allocated || p.timeAllocated || p.duration || existing?.time_allocated || null,
-    prepared_by: p.prepared_by || p.preparedBy || p.author || existing?.prepared_by || null,
+    title: resolve(['title', 'name'], 'title', (v) => v || 'Untitled SARTopo Object'),
+    segment: resolve(['segment', 'division', 'sector'], 'segment'),
+    resource_type: resolve(['resource_type', 'resourceType', 'class', 'type'], 'resource_type'),
+    team_size: resolve(['teamSize', 'team_size', 'personnel', 'size', 'personnel_count'], 'team_size', transformInt),
+    frequency_primary: resolve(['primary_frequency', 'primaryFrequency', 'frequency', 'tac', 'tac_channel', 'comms'], 'frequency_primary'),
+    description: resolve(['description', 'comments', 'notes'], 'description'),
+    priority: resolve(['priority', 'Priority', 'importance', 'priority_level'], 'priority', transformPriority),
+    hazards: resolve(['hazards', 'safety'], 'hazards'),
+    transportation: resolve(['transportation', 'travel_method'], 'transportation'),
+    time_allocated: resolve(['time_allocated', 'timeAllocated', 'duration'], 'time_allocated'),
+    prepared_by: resolve(['prepared_by', 'preparedBy', 'author'], 'prepared_by'),
+    probability_of_detection: resolve(['unresponsive_pod', 'unresponsivePOD', 'pod', 'probabilityOfDetection', 'POD', 'cluePOD', 'clue_pod'], 'probability_of_detection', transformInt),
 
-    // Calculations
-    probability_of_detection: isNaN(podValue) ? (existing?.probability_of_detection || null) : podValue,
-    
-    // Metadata
     updated_at: new Date().toISOString()
   };
 
-  console.debug('[mapSartopoToAssignment] Final generated payload:', payload);
   return payload;
 };
 

@@ -10,7 +10,6 @@ import './styles.css';
 function App() {
   const [offline, setOffline] = useState(!navigator.onLine);
   const [user, setUser] = useState(null);
-  const [outdoorMode, setOutdoorMode] = useState(false);
   const [displayDensity, setDisplayDensity] = useState('comfortable');
   const [menuOpen, setMenuOpen] = useState(false);
   const navigate = useNavigate();
@@ -24,12 +23,11 @@ function App() {
       
       if (session?.user?.email) {
         const { data } = await supabase.from('users')
-          .select('outdoor_mode, display_density')
+          .select('display_density')
           .eq('email', session.user.email)
           .maybeSingle();
         
         if (data) {
-          setOutdoorMode(!!data.outdoor_mode);
           setDisplayDensity(data.display_density || 'comfortable');
         }
 
@@ -42,7 +40,6 @@ function App() {
             table: 'users', 
             filter: `email=eq.${session.user.email}` 
           }, payload => {
-            if (payload.new.outdoor_mode !== undefined) setOutdoorMode(!!payload.new.outdoor_mode);
             if (payload.new.display_density !== undefined) setDisplayDensity(payload.new.display_density);
           })
           .subscribe();
@@ -207,7 +204,7 @@ function App() {
   }, [isActive, isAdmin, accessLevel, location.pathname, navigate]);
 
   return (
-    <div className={`app-shell ${outdoorMode ? 'outdoor-mode' : ''} ${displayDensity === 'compact' ? 'compact-mode' : ''}`}>
+    <div className={`app-shell ${displayDensity === 'compact' ? 'compact-mode' : ''}`}>
       <div className="incident-banner">
         <div className="banner-left">
           <div className="banner-logo-container">
