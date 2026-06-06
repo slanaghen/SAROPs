@@ -35,9 +35,16 @@ const AssignmentFormModal = ({
       title={formData.assignment_id ? 'Edit Assignment' : 'New Assignment'}
       loading={loading}
       actions={
-        <button className="btn btn-primary" onClick={() => onSave(formData)} disabled={loading}>
-          {loading ? 'Saving...' : 'Save Assignment'}
-        </button>
+        <>
+          {!formData.assignment_id && (
+            <button className="btn btn-secondary" onClick={() => onSave(formData, true)} disabled={loading}>
+              {loading ? 'Saving...' : 'Save & Add Another'}
+            </button>
+          )}
+          <button className="btn btn-primary" onClick={() => onSave(formData, false)} disabled={loading}>
+            {loading ? 'Saving...' : (formData.assignment_id ? 'Save Changes' : 'Save & Exit')}
+          </button>
+        </>
       }
     >
       {error && <div className="alert alert-error" style={{ marginBottom: '16px' }}>{error}</div>}

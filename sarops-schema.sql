@@ -103,6 +103,10 @@ CREATE TABLE incidents (
   name TEXT NOT NULL,
   number TEXT NOT NULL,
   sartopo_id TEXT,
+  sartopo_sync_enabled BOOLEAN DEFAULT FALSE,
+  sartopo_last_fetch_at BIGINT DEFAULT 0,
+  sartopo_last_upload_at BIGINT DEFAULT 0,
+  sartopo_synced_titles TEXT[] DEFAULT '{}'::TEXT[],
   sartopo_map_data JSONB,
   notes TEXT,
   start_datetime TIMESTAMP WITH TIME ZONE NOT NULL,
@@ -455,6 +459,7 @@ BEGIN
     FROM team_responders tr
     JOIN teams t ON tr.team_id = t.team_id
     WHERE tr.responder_id = _responder_id
+      AND t.status != 'Disbanded'
     LIMIT 1;
 
     is_command_staff_team_member := COALESCE(is_command_staff_team_member, false);
@@ -474,18 +479,22 @@ BEGIN
             WHEN _team_status = 'Staged' THEN 'Attached'::responder_status
             WHEN _team_status = 'Assigned' THEN 'Assigned'::responder_status
             WHEN _team_status = 'Deployed' THEN 'Deployed'::responder_status
-            ELSE 'Attached'::responder_status
+            ELSE 'Staged'::responder_status
         END;
     ELSE
         -- When removed from a team, return to Staged (unless session logic overrides via UPDATE)
         target_status := 'Staged'::responder_status;
     END IF;
 
-    -- Update the responder's access_level and status if they are different
+    -- Update the responder's access_level and status only if they have changed
     UPDATE responders
     SET access_level = CASE WHEN access_level = 'admin' THEN 'admin'::access_level ELSE target_access_level END,
         status = target_status
-    WHERE responder_id = _responder_id;
+    WHERE responder_id = _responder_id
+      AND (
+        access_level IS DISTINCT FROM (CASE WHEN access_level = 'admin' THEN 'admin'::access_level ELSE target_access_level END)
+        OR status IS DISTINCT FROM target_status
+      );
 
   RETURN NULL;
 END;
@@ -737,6 +746,79 @@ $func$ LANGUAGE plpgsql;
 CREATE TRIGGER trigger_sync_assignment_size_from_membership
 AFTER INSERT OR UPDATE OR DELETE ON team_responders
 FOR EACH ROW EXECUTE FUNCTION sync_assignment_size_on_membership_change();
+
+-- Function to validate responder membership (prevent multiple active teams)
+CREATE OR REPLACE FUNCTION validate_responder_active_membership()
+RETURNS TRIGGER AS $func$
+BEGIN
+    IF EXISTS (
+        SELECT 1 
+        FROM team_responders tr
+        JOIN teams t ON tr.team_id = t.team_id
+        WHERE tr.responder_id = NEW.responder_id
+          AND tr.team_id != NEW.team_id
+          AND t.status != 'Disbanded'
+    ) THEN
+        RAISE EXCEPTION 'Responder is already a member of another active team.';
+    END IF;
+    RETURN NEW;
+END;
+$func$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Function to validate team reactivation (ensure members are available)
+CREATE OR REPLACE FUNCTION validate_team_activation()
+RETURNS TRIGGER AS $func$
+BEGIN
+    -- Check when status is updated FROM Disbanded TO an active status
+    IF OLD.status = 'Disbanded' AND NEW.status != 'Disbanded' THEN
+        IF EXISTS (
+            SELECT 1 
+            FROM team_responders tr
+            JOIN team_responders tr2 ON tr.responder_id = tr2.responder_id
+            JOIN teams t2 ON tr2.team_id = t2.team_id
+            WHERE tr.team_id = NEW.team_id
+              AND tr2.team_id != NEW.team_id
+              AND t2.status != 'Disbanded'
+        ) THEN
+            RAISE EXCEPTION 'One or more members of this team are already assigned to other active teams.';
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$func$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Function to validate team leader assignments
+CREATE OR REPLACE FUNCTION validate_team_leader_membership()
+RETURNS TRIGGER AS $func$
+BEGIN
+    IF NEW.leader_responder_id IS NOT NULL AND (TG_OP = 'INSERT' OR OLD.leader_responder_id IS DISTINCT FROM NEW.leader_responder_id) THEN
+        IF EXISTS (
+            SELECT 1 
+            FROM team_responders tr
+            JOIN teams t ON tr.team_id = t.team_id
+            WHERE tr.responder_id = NEW.leader_responder_id
+              AND tr.team_id != NEW.team_id
+              AND t.status != 'Disbanded'
+        ) THEN
+            RAISE EXCEPTION 'Responder is already assigned as a member or leader of another active team.';
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$func$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Triggers for membership validation
+CREATE TRIGGER trigger_check_responder_membership
+BEFORE INSERT OR UPDATE ON team_responders
+FOR EACH ROW EXECUTE FUNCTION validate_responder_active_membership();
+
+CREATE TRIGGER trigger_check_team_activation
+BEFORE UPDATE OF status ON teams
+FOR EACH ROW EXECUTE FUNCTION validate_team_activation();
+
+CREATE TRIGGER trigger_check_team_leader_membership
+BEFORE INSERT OR UPDATE OF leader_responder_id ON teams
+FOR EACH ROW EXECUTE FUNCTION validate_team_leader_membership();
 
 
 -- ============================================================================
@@ -1373,6 +1455,10 @@ BEGIN
       name TEXT NOT NULL,
       number TEXT NOT NULL,
       sartopo_id TEXT,
+      sartopo_sync_enabled BOOLEAN DEFAULT FALSE,
+      sartopo_last_fetch_at BIGINT DEFAULT 0,
+      sartopo_last_upload_at BIGINT DEFAULT 0,
+      sartopo_synced_titles TEXT[] DEFAULT ''{}''::TEXT[],
       sartopo_map_data JSONB,
       notes TEXT,
       start_datetime TIMESTAMP WITH TIME ZONE NOT NULL,
@@ -1676,6 +1762,7 @@ BEGIN
         FROM team_responders tr
         JOIN teams t ON tr.team_id = t.team_id
         WHERE tr.responder_id = _responder_id
+          AND t.status != ''Disbanded''
         LIMIT 1;
 
         is_command_staff_team_member := COALESCE(is_command_staff_team_member, false);
@@ -1693,16 +1780,21 @@ BEGIN
                 WHEN _team_status = ''Staged'' THEN ''Attached''::responder_status
                 WHEN _team_status = ''Assigned'' THEN ''Assigned''::responder_status
                 WHEN _team_status = ''Deployed'' THEN ''Deployed''::responder_status
-                ELSE ''Attached''::responder_status
+                ELSE ''Staged''::responder_status
             END;
         ELSE
             target_status := ''Staged''::responder_status;
         END IF;
 
+        -- Update only on change to optimize performance
         UPDATE responders
         SET access_level = CASE WHEN access_level = ''admin'' THEN ''admin''::access_level ELSE target_access_level END,
             status = target_status
-        WHERE responder_id = _responder_id;
+        WHERE responder_id = _responder_id
+          AND (
+            access_level IS DISTINCT FROM (CASE WHEN access_level = ''admin'' THEN ''admin''::access_level ELSE target_access_level END)
+            OR status IS DISTINCT FROM target_status
+          );
 
       RETURN NULL;
     END;
@@ -1922,6 +2014,74 @@ BEGIN
     EXECUTE 'CREATE TRIGGER trigger_sync_assignment_size_from_membership
     AFTER INSERT OR UPDATE OR DELETE ON team_responders
     FOR EACH ROW EXECUTE FUNCTION sync_assignment_size_on_membership_change();';
+
+    EXECUTE 'CREATE OR REPLACE FUNCTION validate_responder_active_membership()
+    RETURNS TRIGGER AS $func$
+    BEGIN
+        IF EXISTS (
+            SELECT 1 
+            FROM team_responders tr
+            JOIN teams t ON tr.team_id = t.team_id
+            WHERE tr.responder_id = NEW.responder_id
+              AND tr.team_id != NEW.team_id
+              AND t.status != ''Disbanded''
+        ) THEN
+            RAISE EXCEPTION ''Responder is already a member of another active team.'';
+        END IF;
+        RETURN NEW;
+    END;
+    $func$ LANGUAGE plpgsql SECURITY DEFINER;';
+
+    EXECUTE 'CREATE OR REPLACE FUNCTION validate_team_activation()
+    RETURNS TRIGGER AS $func$
+    BEGIN
+        IF OLD.status = ''Disbanded'' AND NEW.status != ''Disbanded'' THEN
+            IF EXISTS (
+                SELECT 1 
+                FROM team_responders tr
+                JOIN team_responders tr2 ON tr.responder_id = tr2.responder_id
+                JOIN teams t2 ON tr2.team_id = t2.team_id
+                WHERE tr.team_id = NEW.team_id
+                  AND tr2.team_id != NEW.team_id
+                  AND t2.status != ''Disbanded''
+            ) THEN
+                RAISE EXCEPTION ''One or more members of this team are already assigned to other active teams.'';
+            END IF;
+        END IF;
+        RETURN NEW;
+    END;
+    $func$ LANGUAGE plpgsql SECURITY DEFINER;';
+
+    EXECUTE 'CREATE OR REPLACE FUNCTION validate_team_leader_membership()
+    RETURNS TRIGGER AS $func$
+    BEGIN
+        IF NEW.leader_responder_id IS NOT NULL AND (TG_OP = ''INSERT'' OR OLD.leader_responder_id IS DISTINCT FROM NEW.leader_responder_id) THEN
+            IF EXISTS (
+                SELECT 1 
+                FROM team_responders tr
+                JOIN teams t ON tr.team_id = t.team_id
+                WHERE tr.responder_id = NEW.leader_responder_id
+                  AND tr.team_id != NEW.team_id
+                  AND t.status != ''Disbanded''
+            ) THEN
+                RAISE EXCEPTION ''Responder is already assigned as a member or leader of another active team.'';
+            END IF;
+        END IF;
+        RETURN NEW;
+    END;
+    $func$ LANGUAGE plpgsql SECURITY DEFINER;';
+
+    EXECUTE 'CREATE TRIGGER trigger_check_responder_membership
+    BEFORE INSERT OR UPDATE ON team_responders
+    FOR EACH ROW EXECUTE FUNCTION validate_responder_active_membership();';
+
+    EXECUTE 'CREATE TRIGGER trigger_check_team_activation
+    BEFORE UPDATE OF status ON teams
+    FOR EACH ROW EXECUTE FUNCTION validate_team_activation();';
+
+    EXECUTE 'CREATE TRIGGER trigger_check_team_leader_membership
+    BEFORE INSERT OR UPDATE OF leader_responder_id ON teams
+    FOR EACH ROW EXECUTE FUNCTION validate_team_leader_membership();';
 
     -- ROW LEVEL SECURITY (RLS) POLICIES
     EXECUTE 'ALTER TABLE incidents ENABLE ROW LEVEL SECURITY;';

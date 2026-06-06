@@ -44,7 +44,7 @@ export const checkOutResponder = async (
     .from('responders')
     .update({
       checkout_datetime: checkoutTime,
-      status: 'Cleared' as ResponderStatus,
+      status: 'CheckedOut' as ResponderStatus,
     })
     .eq('responder_id', responderId)
     .select()
@@ -402,7 +402,7 @@ export const getResponderStats = async (
       supabaseClient
         .from('responders')
         .select('*')
-        .eq('status', 'Debriefed'),
+        .eq('status', 'CheckedOut'),
     ]);
 
     return {

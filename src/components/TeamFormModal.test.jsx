@@ -3,26 +3,11 @@ import * as matchers from '@testing-library/jest-dom/matchers';
 import { vi, describe, it, expect, afterEach, beforeEach } from 'vitest';
 import TeamFormModal from './TeamFormModal';
 import { useIncident } from '../context/IncidentContext';
-import { supabase } from '../lib/supabase';
 
 expect.extend(matchers);
 
 vi.mock('../context/IncidentContext', () => ({
   useIncident: vi.fn(),
-}));
-
-vi.mock('../lib/supabase', () => ({
-  supabase: {
-    from: vi.fn(() => globalThis.createSupabaseQueryMock([])),
-    channel: vi.fn().mockImplementation(() => {
-      const mockChannel = {
-        on: vi.fn().mockImplementation(() => mockChannel),
-        subscribe: vi.fn().mockImplementation(() => mockChannel)
-      };
-      return mockChannel;
-    }),
-    removeChannel: vi.fn(),
-  },
 }));
 
 describe('TeamFormModal', () => {
@@ -108,11 +93,12 @@ describe('TeamFormModal', () => {
     render(<TeamFormModal {...propsWithLeader} />);
     
     fireEvent.change(screen.getByLabelText(/Team Name/i), { target: { value: 'Team 99' } });
-    fireEvent.click(screen.getByText('Save'));
+    fireEvent.click(screen.getByRole('button', { name: /Save/i }));
 
-    expect(defaultProps.onSave).toHaveBeenCalledWith(expect.objectContaining({
-      team_name_number: 'Team 99'
-    }));
+    expect(defaultProps.onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ team_name_number: 'Team 99' }),
+      false
+    );
   });
 
   it('disables save button when no leader is selected', () => {
@@ -122,7 +108,7 @@ describe('TeamFormModal', () => {
     };
     render(<TeamFormModal {...propsNoLeader} />);
     
-    expect(screen.getByRole('button', { name: /Save/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Save Changes/i })).toBeDisabled();
   });
 
   it('calls onClose when Cancel is clicked', () => {
@@ -215,41 +201,6 @@ describe('TeamFormModal', () => {
     render(<TeamFormModal {...legacyProps} />);
     
     expect(screen.getByLabelText(/Type/i)).toHaveValue('Vehicle');
-  });
-
-  it('updates the messaging channel when a specific recipient is selected in Staff mode', async () => {
-    const mockAllTeams = [
-      { team_id: 't-field-1', team_name_number: 'Ground 1', type: 'Ground' }
-    ];
-    
-    // Mock the teams fetch for the recipient dropdown
-    vi.mocked(supabase.from).mockImplementation((table) => {
-      if (table === 'teams') return globalThis.createSupabaseQueryMock(mockAllTeams);
-      return globalThis.createSupabaseQueryMock([]);
-    });
-
-    const staffProps = {
-      ...defaultProps,
-      initialData: { team_id: 'staff-id', type: 'Staff', team_name_number: 'Staff' }
-    };
-    
-    render(<TeamFormModal {...staffProps} />);
-
-    // Wait for the recipient dropdown to populate with the field team option.
-    // This ensures the initial mount fetches (Call 1) are processed and the component is stable.
-    await screen.findByText('Ground 1');
-    const recipientSelect = screen.getByDisplayValue(/Broadcast/i);
-    expect(recipientSelect).toBeInTheDocument();
-
-    // Select "Ground 1" from the dropdown
-    fireEvent.change(recipientSelect, { target: { value: 't-field-1' } });
-
-    // Verify messaging history fetch was re-triggered for the new channel
-    await waitFor(() => {
-      const messageCalls = vi.mocked(supabase.from).mock.calls.filter(c => c[0] === 'team_messages');
-      // At least two calls: one for initial Staff channel, one for the selected field team
-      expect(messageCalls.length).toBeGreaterThan(1);
-    });
   });
 
   it('removes a responder from the team when dropped back into the staged pool', async () => {

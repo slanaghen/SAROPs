@@ -7,14 +7,16 @@ import { usePlanningDashboard } from '../hooks/usePlanningDashboard';
 import TeamFormModal from '../components/TeamFormModal';
 import AssignmentFormModal from '../components/AssignmentFormModal';
 import BaseModal from '../components/BaseModal';
-// import OperationsToolbar from '../components/OperationsToolbar'; // Not used
 import OperationsTable from '../components/OperationsTable';
 import OperationsMap from '../components/OperationsMap';
 import { checkIsParOverdue, formatTimeSince } from '../utils/operationalUtils';
+
 const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   const { 
-    incidentData, incidentId, responderName, user, operationsRefreshInterval, showGlobalMap, setShowGlobalMap 
-  } = useIncident(); // showGlobalMap and setShowGlobalMap are no longer in context
+    incidentData, incidentId, responderName, user, operationsRefreshInterval
+  } = useIncident(); 
+  
+  const [showGlobalMap, setShowGlobalMap] = useState(false); // Local state for layout toggle
   const operationalPeriodId = propOpId || incidentData?.opPeriodId;
 
   const {
@@ -47,42 +49,6 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   const [currentTime, setCurrentTime] = useState(Date.now());
 
   const contentWrapperRef = useRef(null);
-
-  const [splitWidth, setSplitWidth] = useState(50); // percentage for table width in split view
-  const isResizing = useRef(false);
-
-  // Persist layout choices when they change
-  useEffect(() => {
-    localStorage.setItem('sarops_view_mode', viewMode);
-  }, [viewMode]);
-
-  const handleMouseMove = useCallback((e) => {
-    if (!isResizing.current || !contentWrapperRef.current) return;
-    
-    const containerRect = contentWrapperRef.current.getBoundingClientRect();
-    const newWidth = ((e.clientX - containerRect.left) / containerRect.width) * 100;
-    
-    // Constraints: Keep both panels visible (between 20% and 80%)
-    if (newWidth > 20 && newWidth < 80) {
-      setSplitWidth(newWidth);
-    }
-  }, []);
-
-  const stopResizing = useCallback(() => {
-    isResizing.current = false;
-    document.removeEventListener('mousemove', handleMouseMove);
-    document.removeEventListener('mouseup', stopResizing);
-    document.body.style.cursor = 'default';
-    document.body.style.userSelect = 'auto';
-  }, [handleMouseMove]);
-
-  const startResizing = useCallback(() => {
-    isResizing.current = true;
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', stopResizing);
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none'; // Prevent text selection during drag
-  }, [handleMouseMove, stopResizing]);
 
   const sartopoId = opPeriod?.incidents?.sartopo_id;
   const parInterval = opPeriod?.par_check_interval || 0;
@@ -308,15 +274,9 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
 
     try {
       setLoading(true);
-      const now = new Date().toISOString();
-      const { data: members } = await supabase.from('team_responders').select('responder_id').eq('team_id', teamId);
-      const rIds = members?.map(m => m.responder_id) || [];
-      
-      if (rIds.length > 0) {
-        await supabase.from('responders').update({ status: 'Staged' }).in('responder_id', rIds);
-        await supabase.from('responder_team_history').update({ detached_datetime: now }).eq('team_id', teamId).is('detached_datetime', null);
-      }
-
+      // Update team status - Redundant responder status updates removed.
+      // The database trigger 'sync_team_status_on_team_update' automatically 
+      // handles releasing responders to "Staged" and closing history logs.
       await supabase.from('teams').update({ status: 'Disbanded', last_par_check: null }).eq('team_id', teamId);
       await recordAction(`Disbanded team "${teamName}" (ID: ${teamId}, Type: ${teamType}). Fields modified: status="Disbanded", last_par_check=null. All members released back to "Staged" status.`);
       await fetchDashboardData();
@@ -484,7 +444,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     setShowAssignmentForm(true);
   };
 
-  const handleSaveTeam = async (formData) => {
+  const handleSaveTeam = async (formData, stayOpen = false) => {
     try {
       // Auto-generate team name if blank
       let finalTeamName = formData.team_name_number?.trim();
@@ -522,13 +482,17 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       }
 
       setPendingAssignmentId(null);
-      setShowTeamForm(false);
+      if (stayOpen) {
+        openNewTeamForm();
+      } else {
+        setShowTeamForm(false);
+      }
     } catch (err) {
       setPendingAssignmentId(null);
     }
   };
 
-  const handleSaveAssignment = async (formData) => {
+  const handleSaveAssignment = async (formData, stayOpen = false) => {
     const targetTeamId = !!formData.assignment_id ? formData.team_id : (pendingTeamId || null);
     
     try {
@@ -560,7 +524,11 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       }
 
       setPendingTeamId(null);
-      setShowAssignmentForm(false);
+      if (stayOpen) {
+        openNewAssignmentForm();
+      } else {
+        setShowAssignmentForm(false);
+      }
     } catch (err) {
       setPendingTeamId(null);
     }
@@ -674,23 +642,16 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       {!error && (
         <div 
           ref={contentWrapperRef} 
-          className={`operations-content-wrapper ${showGlobalMap ? 'layout-split' : 'layout-table'}`} 
+          className="operations-content-wrapper layout-table" 
           style={{
             ...(loading ? { opacity: 0.8 } : {}),
-            display: showGlobalMap ? 'flex' : 'block',
-            flexDirection: showGlobalMap ? 'row' : 'column',
-            flexWrap: 'nowrap',
-            alignItems: 'stretch',
+            display: 'block',
             height: 'calc(100vh - 200px)',
-            gap: showGlobalMap ? '12px' : '0',
-            overflow: 'hidden'
+            overflowY: 'auto'
           }}
         >
             <div className="table-panel" style={{
-              width: showGlobalMap ? `${splitWidth}%` : '100%',
-              flexShrink: 0, 
-              overflowY: 'auto',
-              height: '100%',
+              width: '100%',
               border: '1px solid #e2e8f0',
               borderRadius: '8px',
               background: '#fff'
@@ -714,39 +675,6 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
               onDragOver={handleDragOver} onDragEnter={handleDragEnter} onDragLeave={() => setDropTarget(null)} onDrop={handleDrop}
             />
           </div>
-
-          {showGlobalMap && (
-            <div className="resizer-handle" onMouseDown={startResizing} style={{ width: '10px', cursor: 'col-resize', backgroundColor: '#f1f5f9', borderLeft: '1px solid #e2e8f0', borderRight: '1px solid #e2e8f0', zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <div style={{ width: '2px', height: '24px', backgroundColor: '#cbd5e1', borderRadius: '1px' }} />
-            </div>
-          )}
-
-          {showGlobalMap && (
-            <div className="map-panel" style={{ flex: 1, minWidth: '400px', overflowY: 'auto' }}>
-              <div className="dashboard-section" style={{ padding: '12px 16px' }}>
-                <h2 style={{ margin: 0, fontSize: '18px', marginBottom: '12px' }}>Operational Map</h2>
-                <div style={{ 
-                    borderRadius: '12px', 
-                    overflow: 'hidden', 
-                    border: '1px solid #cbd5e1', 
-                    boxShadow: '0 6px 22px rgba(0, 0, 0, 0.04)', 
-                    background: '#fff', 
-                    height: '650px', 
-                    position: 'relative',
-                    marginTop: '12px'
-                  }}>
-                    <OperationsMap 
-                      loading={loading} 
-                      assignments={assignments} 
-                      teams={teams} 
-                      sartopoId={sartopoId} 
-                      layoutMode="map" 
-                      style={{ height: '100%' }} 
-                    />
-                </div>
-              </div>
-            </div>
-          )}
         </div>
       )}
 
@@ -833,7 +761,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
           }}>
             <h3 style={{ marginTop: 0 }}>Broadcast Message</h3>
             <p style={{ color: '#4b5563', fontSize: '14px', marginBottom: '16px' }}>
-              Send a message to the leaders of all <strong>{teams.length}</strong> teams in this operational period.
+              Send a message to all <strong>{teams.length}</strong> teams in this operational period.
             </p>
             <textarea
               style={{

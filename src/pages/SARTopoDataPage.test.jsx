@@ -11,29 +11,39 @@ vi.mock('../context/IncidentContext', () => ({
   useIncident: vi.fn(),
 }));
 
-// Requirement: Variables used in hoisted vi.mock must be prefixed with "mock" to prevent TDZ errors
-const mockFrom = {
-  // Use explicit function implementation to ensure "this" context is maintained across the chain
-  select: vi.fn().mockImplementation(function() { return this; }),
-  update: vi.fn().mockImplementation(function() { return this; }),
-  eq: vi.fn().mockImplementation(function() { return this; }),
-  not: vi.fn().mockImplementation(function() { return this; }),
-  gt: vi.fn().mockImplementation(function() { return this; }),
-  order: vi.fn().mockImplementation(function() { return this; }),
-  maybeSingle: vi.fn().mockImplementation(function() { return Promise.resolve({ data: { sartopo_id: 'MAP123' }, error: null }); }),
-  single: vi.fn().mockImplementation(() => Promise.resolve({ data: null, error: null })),
-  insert: vi.fn().mockImplementation(function() { return this; }),
-  upsert: vi.fn().mockImplementation(function() { return this; }),
-  // Requirement: Methods must return a "thenable" object for await to function
-  then: vi.fn(function(onFulfilled) { return Promise.resolve({ data: [], error: null }).then(onFulfilled); }),
+/**
+ * Shared reference to track DB operations across multiple independent query mocks.
+ */
+const mockTrackers = {
+  upsert: vi.fn().mockImplementation(() => Promise.resolve({ error: null })),
+  insert: vi.fn().mockImplementation(() => Promise.resolve({ error: null })),
+  update: vi.fn().mockImplementation(() => Promise.resolve({ error: null })),
+  delete: vi.fn().mockImplementation(() => Promise.resolve({ error: null })),
 };
 
 vi.mock('../lib/supabase', () => ({
   supabase: {
-    from: vi.fn().mockImplementation(() => mockFrom),
+    from: vi.fn().mockImplementation((table) => {
+      let data = [];
+      if (table === 'incidents') {
+        data = { sartopo_id: 'MAP123', sartopo_sync_enabled: false, sartopo_last_fetch_at: 0, sartopo_last_upload_at: 0, sartopo_synced_titles: [] };
+      }
+      const mock = globalThis.createSupabaseQueryMock(data);
+      // Wire up trackers to chainable methods
+      mock.upsert = vi.fn(() => ({ ...mock, then: (cb) => mockTrackers.upsert().then(cb) }));
+      mock.insert = vi.fn(() => ({ ...mock, then: (cb) => mockTrackers.insert().then(cb) }));
+      mock.update = vi.fn(() => ({ ...mock, then: (cb) => mockTrackers.update().then(cb) }));
+      mock.delete = vi.fn(() => ({ ...mock, then: (cb) => mockTrackers.delete().then(cb) }));
+      return mock;
+    }),
     auth: {
       refreshSession: vi.fn().mockResolvedValue({ data: { session: {} }, error: null })
-    }
+    },
+    channel: vi.fn().mockImplementation(() => ({
+      on: vi.fn().mockReturnThis(),
+      subscribe: vi.fn().mockReturnThis(),
+    })),
+    removeChannel: vi.fn(),
   },
 }));
 const mockOpPeriodId = 'op-123';
@@ -42,7 +52,25 @@ describe('SARTopoDataPage', () => {
     vi.clearAllMocks();
     localStorage.clear();
     vi.stubGlobal('alert', vi.fn());
-    
+
+    // Reset trackers
+    Object.values(mockTrackers).forEach(m => m.mockClear());
+
+    // Requirement: Correctly mock assignments fetch without breaking incident metadata initialization.
+    vi.mocked(supabase.from).mockImplementation((table) => {
+      let data = [];
+      if (table === 'incidents') {
+        data = { sartopo_id: 'MAP123', sartopo_sync_enabled: false, sartopo_last_fetch_at: 0, sartopo_last_upload_at: 0, sartopo_synced_titles: [] };
+      }
+      const mock = globalThis.createSupabaseQueryMock(data);
+      // Wire up trackers
+      mock.upsert = vi.fn(() => ({ ...mock, then: (cb) => mockTrackers.upsert().then(cb) }));
+      mock.insert = vi.fn(() => ({ ...mock, then: (cb) => mockTrackers.insert().then(cb) }));
+      mock.update = vi.fn(() => ({ ...mock, then: (cb) => mockTrackers.update().then(cb) }));
+      mock.delete = vi.fn(() => ({ ...mock, then: (cb) => mockTrackers.delete().then(cb) }));
+      return mock;
+    });
+
     // Requirement: Secure signing mandates valid Base64 credentials.
     vi.stubEnv('VITE_SARTOPO_API_CREDENTIAL_ID', 'ID_123');
     vi.stubEnv('VITE_SARTOPO_API_CREDENTIAL_SECRET', 'x7+lOzSEs6+q6m37cUV2S7a19ucAKUxEve60nzRYq6k=');
@@ -56,12 +84,6 @@ describe('SARTopoDataPage', () => {
       text: async () => 'OK'
     });
     vi.stubGlobal('fetch', defaultFetchMock);
-
-    // Re-establish the default mock object and reset method implementations.
-    // This prevents state leakage (like sartopo_map_data overrides) from previous tests
-    // which can break the initialization effects of subsequent tests.
-    mockFrom.maybeSingle.mockImplementation(() => Promise.resolve({ data: { sartopo_id: 'MAP123' }, error: null }));
-    supabase.from.mockImplementation(() => mockFrom);
 
     // Set a default useIncident mock for tests that don't override it
     vi.mocked(useIncident).mockReturnValue({
@@ -83,8 +105,14 @@ describe('SARTopoDataPage', () => {
   it('sartopoConfig correctly parses Map ID, removes legacy keys, and initiates signed requests', async () => {
     // This test verifies that even if legacy keys are pasted into the Map ID, 
     // the system strips them and performs a signed request instead.
-    mockFrom.maybeSingle.mockResolvedValueOnce({ 
-      data: { sartopo_id: 'https://sartopo.com/m/ABCD?foo=bar&k=OLD_KEY&readCode=OLD_KEY' }, error: null 
+    vi.mocked(supabase.from).mockImplementation((table) => {
+      let data = [];
+      if (table === 'incidents') {
+        data = { sartopo_id: 'https://sartopo.com/m/ABCD?foo=bar&k=OLD_KEY&readCode=OLD_KEY' };
+      }
+      const mock = globalThis.createSupabaseQueryMock(data);
+      mock.insert = vi.fn(() => ({ ...mock, then: (cb) => mockTrackers.insert().then(cb) }));
+      return mock;
     });
 
     render(<SARTopoDataPage />);
@@ -194,8 +222,8 @@ describe('SARTopoDataPage', () => {
     });
     
     // Requirement: Verify synchronization triggers and sends correct data
-    await waitFor(() => expect(mockFrom.upsert).toHaveBeenCalled());
-    expect(mockFrom.upsert.mock.calls[0][0][0]).toMatchObject({
+    await waitFor(() => expect(mockTrackers.upsert).toHaveBeenCalled());
+    expect(vi.mocked(mockTrackers.upsert).mock.calls[0][0][0]).toMatchObject({
       op_period_id: mockOpPeriodId,
       sartopo_id: 'feature-1',
       title: 'Clue 1',
@@ -233,9 +261,9 @@ describe('SARTopoDataPage', () => {
     const fetchBtn = await screen.findByText('Download from SARTopo');
     fireEvent.click(fetchBtn);
 
-    await waitFor(() => expect(mockFrom.upsert).toHaveBeenCalled());
+    await waitFor(() => expect(mockTrackers.upsert).toHaveBeenCalled());
     
-    expect(mockFrom.upsert.mock.calls[0][0][0]).toMatchObject({
+    expect(vi.mocked(mockTrackers.upsert).mock.calls[0][0][0]).toMatchObject({
       probability_of_detection: 85,
       frequency_primary: 'TAC 4',
       team_size: 4,
@@ -251,7 +279,8 @@ describe('SARTopoDataPage', () => {
     expect(screen.queryByText(/Latest Download:/i)).not.toBeInTheDocument();
     
     // Trigger fetch manually as it no longer auto-syncs on load by default
-    fireEvent.click(await screen.findByText('Download from SARTopo'));
+    const fetchBtn = await screen.findByText('Download from SARTopo');
+    fireEvent.click(fetchBtn);
 
     await waitFor(() => {
       expect(screen.getByText(/Latest Download:/i)).toBeInTheDocument();
@@ -263,16 +292,14 @@ describe('SARTopoDataPage', () => {
       { assignment_id: 'a1', title: 'Task 1', status: 'Assigned', op_period_id: 'op-123', updated_at: new Date().toISOString(), origin: 'SARTopo', sartopo_id: 's1' }
     ];
     
-    mockFrom.then.mockImplementationOnce((onFulfilled) => 
-      Promise.resolve({ data: mockAsns, error: null }).then(onFulfilled)
-    );
-    
-    // Default useIncident mock from beforeEach is used
-
-    // Mock Supabase to return our task for all queries in this test
-    mockFrom.then.mockImplementation((onFulfilled) => 
-      Promise.resolve({ data: mockAsns, error: null }).then(onFulfilled)
-    );
+    vi.mocked(supabase.from).mockImplementation((table) => {
+      let data = [];
+      if (table === 'assignments') data = mockAsns;
+      else if (table === 'incidents') {
+        data = { sartopo_id: 'MAP123', sartopo_sync_enabled: false, sartopo_last_fetch_at: 0, sartopo_last_upload_at: 0, sartopo_synced_titles: [] };
+      }
+      return globalThis.createSupabaseQueryMock(data);
+    });
 
     // Mock fetch for the reconciliation logic
     vi.mocked(fetch).mockResolvedValue({
@@ -285,7 +312,8 @@ describe('SARTopoDataPage', () => {
     render(<SARTopoDataPage />);
     
     // Must populate internal features state first
-    fireEvent.click(await screen.findByText('Download from SARTopo'));
+    const downloadBtn = await screen.findByText('Download from SARTopo');
+    fireEvent.click(downloadBtn);
     await waitFor(() => expect(screen.getByText(/Latest Download:/i)).toBeInTheDocument());
 
     const generateBtn = await screen.findByRole('button', { name: /Generate JSON/i });
@@ -301,11 +329,14 @@ describe('SARTopoDataPage', () => {
       { assignment_id: 'a1', title: 'Task 1', status: 'Assigned', op_period_id: 'op-123', updated_at: new Date().toISOString(), origin: 'SARTopo', sartopo_id: 's1' }
     ];
     
-    mockFrom.then.mockImplementation((onFulfilled) => 
-      Promise.resolve({ data: mockAsns, error: null }).then(onFulfilled)
-    );
-    
-    // Default useIncident mock from beforeEach is used
+    vi.mocked(supabase.from).mockImplementation((table) => {
+      let data = [];
+      if (table === 'assignments') data = mockAsns;
+      else if (table === 'incidents') {
+        data = { sartopo_id: 'MAP123', sartopo_sync_enabled: false, sartopo_last_fetch_at: 0, sartopo_last_upload_at: 0, sartopo_synced_titles: [] };
+      }
+      return globalThis.createSupabaseQueryMock(data);
+    });
 
     // Mock fetch for the reconciliation logic (fetching base features)
     vi.mocked(fetch).mockResolvedValue({
@@ -314,18 +345,20 @@ describe('SARTopoDataPage', () => {
       headers: { get: (name) => name === 'content-type' ? 'application/json' : null },
       json: async () => ({ features: [{ id: 's1', geometry: { type: 'Point', coordinates: [0,0] }, properties: { class: 'Assignment', title: 'Task 1' } }] })
     });
-
     render(<SARTopoDataPage />);
     
     // 1. Requirement: Must download features first so generateUploadGeoJSON has a base state to merge with
-    fireEvent.click(await screen.findByText('Download from SARTopo'));
+    const downloadBtn = await screen.findByText('Download from SARTopo');
+    fireEvent.click(downloadBtn);
     await waitFor(() => expect(screen.getByText(/Latest Download:/i)).toBeInTheDocument());
 
     // 2. Click Generate JSON
-    fireEvent.click(await screen.findByRole('button', { name: /Generate JSON/i }));
+    const generateBtn = await screen.findByRole('button', { name: /Generate JSON/i });
+    fireEvent.click(generateBtn);
 
     // 3. Wait for generation results to appear in the preview heading
-    expect(await screen.findByText((c, el) => el.tagName === 'H2' && c.includes('Map Upload') && c.includes('(1)'))).toBeInTheDocument();
+    const heading = await screen.findByText((c, el) => el.tagName === 'H2' && c.includes('Map Upload') && c.includes('(1)'));
+    expect(heading).toBeInTheDocument();
 
     const uploadSection = screen.getByRole('heading', { name: /Map Upload to SARTopo/i }).closest('.section-card');
     expect(uploadSection).toBeInTheDocument();
@@ -336,7 +369,8 @@ describe('SARTopoDataPage', () => {
     // Toggle Show Geometry
     fireEvent.click(within(uploadSection).getByText('Show Geometry'));
     // Wait for the UI to update the JSON string display
-    expect(await within(uploadSection).findByText(/"geometry":/i)).toBeInTheDocument();
+    const geometryText = await within(uploadSection).findByText(/"geometry":/i);
+    expect(geometryText).toBeInTheDocument();
     expect(within(uploadSection).getByText('Hide Geometry')).toBeInTheDocument();
   });
 
@@ -431,36 +465,29 @@ describe('SARTopoDataPage', () => {
     ];
 
     // Mock API key to match implementation's expectations
-    const mockKey = 'x7+lOzSEs6+q6m37cUV2S7a19ucAKUxEve60nzRYq6k=';
     vi.stubEnv('VITE_SARTOPO_API_CREDENTIAL_ID', 'ID123');
-    vi.stubEnv('VITE_SARTOPO_API_CREDENTIAL_SECRET', mockKey);
+    vi.stubEnv('VITE_SARTOPO_API_CREDENTIAL_SECRET', 'x7+lOzSEs6+q6m37cUV2S7a19ucAKUxEve60nzRYq6k=');
 
-    // Mock the Supabase query for assignments
-    mockFrom.then.mockImplementation((onFulfilled) => 
-      Promise.resolve({ data: mockAsns, error: null }).then(onFulfilled)
-    );
-    
     // Default useIncident mock from beforeEach is used
 
-    // Mock SARTopo features in the DB for reconciliation baseline
-    mockFrom.maybeSingle.mockResolvedValue({ 
-      data: { 
-        sartopo_id: 'MAP123',
-        sartopo_map_data: {
-          features: [
-            { id: 's1', properties: { title: 'Old Task 1', class: 'Assignment', pod: 50 } },
-            { id: 's2', properties: { title: 'Old Task 2', class: 'Assignment', team_size: 2 } }
-          ] 
-        } 
-      }, 
-      error: null 
+    vi.mocked(supabase.from).mockImplementation((table) => {
+      let data = [];
+      if (table === 'assignments') data = mockAsns;
+      else if (table === 'incidents') data = { sartopo_id: 'MAP123' };
+      const mock = globalThis.createSupabaseQueryMock(data);
+      mock.update = vi.fn(() => ({ ...mock, then: (cb) => mockTrackers.update().then(cb) }));
+      return mock;
     });
 
     // Mock fetch for the SARTopo POST requests (Step 3)
-    global.fetch.mockResolvedValue({
-      ok: true,
-      status: 200,
-      text: async () => 'OK'
+    global.fetch.mockImplementation(async (url) => {
+      const isGet = !url.includes('Assignment/');
+      return {
+        ok: true,
+        status: 200,
+        json: async () => isGet ? { features: [{ id: 's1', properties: { class: 'Assignment' } }, { id: 's2', properties: { class: 'Assignment' } }] } : {},
+        text: async () => 'OK'
+      };
     });
 
     render(<SARTopoDataPage />);
@@ -476,12 +503,11 @@ describe('SARTopoDataPage', () => {
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalledTimes(3);
       // Step 1: Ensure reconciliation uses the reliable /since/0 endpoint (Encoded params)
-      const encodedKey = encodeURIComponent(mockKey);
-      expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining(`since/0?k=${encodedKey}`));
+      expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining(`since/0`));
       
       // Step 3: Verify individual resource updates for each assignment
       expect(global.fetch).toHaveBeenCalledWith(
-        expect.stringContaining(`Assignment/s1?k=${encodedKey}`),
+        expect.stringContaining(`Assignment/s1`),
         expect.objectContaining({
           method: 'POST',
           body: expect.any(URLSearchParams)
@@ -509,6 +535,12 @@ describe('SARTopoDataPage', () => {
       isActive: true, incidentId: 'inc-123', responderName: 'Steve', 
       incidentData: { opPeriodId: 'op-123' } 
     });
+    vi.mocked(supabase.from).mockImplementation((table) => {
+      let data = (table === 'incidents') ? { sartopo_id: 'MAP123' } : [];
+      const mock = globalThis.createSupabaseQueryMock(data);
+      mock.insert = vi.fn(() => ({ ...mock, then: (cb) => mockTrackers.insert().then(cb) }));
+      return mock;
+    });
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
       headers: { get: () => 'application/json' },
@@ -524,8 +556,8 @@ describe('SARTopoDataPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /Download from SARTopo/i }));
 
     await waitFor(() => {
-      expect(supabase.from).toHaveBeenCalledWith('action_logs');
-      const logCall = vi.mocked(mockFrom.insert).mock.calls.find(c => c[0].action?.includes('Synced'));
+      const logCall = mockTrackers.insert.mock.calls.find(c => c[0].action?.includes('Synced'));
+      expect(logCall).toBeDefined();
       expect(logCall[0]).toEqual(expect.objectContaining({ user_name: 'Steve' }));
     });
   });

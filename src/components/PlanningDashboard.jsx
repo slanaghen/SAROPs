@@ -56,6 +56,18 @@ const PlanningDashboard = ({
   const [draggedItem, setDraggedItem] = useState(null); // { id, type }
   const [dropTarget, setDropTarget] = useState(null); // { id, type }
 
+  // Define helper functions before they are used in useMemo hooks to avoid initialization errors
+  const getResponderName = (responderId) => {
+    const responder = responders.find(r => r.responder_id === responderId);
+    return responder ? responder.name : 'Unknown';
+  };
+
+  const getTeamMemberCount = (team) => {
+    return team.current_responders?.length || 0;
+  };
+
+  const isStagedResponder = (responder) => String(responder?.status || '').toLowerCase() === 'staged';
+
   const commandStaffExists = useMemo(() => (teams || []).some(t => t.type === 'Staff'), [teams]);
 
   const handleDragStart = (e, id, type) => {
@@ -160,8 +172,6 @@ const PlanningDashboard = ({
     return false;
   };
 
-  const isStagedResponder = (responder) => String(responder?.status || '').toLowerCase() === 'staged';
-
   // Filter responders logic
   const availableRespondersList = useMemo(() => {
     return responders.filter(r => {
@@ -226,12 +236,6 @@ const PlanningDashboard = ({
     });
   }, [assignments, assignmentFilter, viewMode, operationalPeriodId]);
 
-  // Get responder details for the team leader
-  const getResponderName = (responderId) => {
-    const responder = responders.find(r => r.responder_id === responderId);
-    return responder ? responder.name : 'Unknown';
-  };
-
   // Show responders who are Staged (available) OR already part of the team being edited
   const stagedResponders = responders.filter(r => {
     const isStaged = isStagedResponder(r);
@@ -239,11 +243,6 @@ const PlanningDashboard = ({
     const isCurrentLeader = teamForm.leader_responder_id === r.responder_id;
     return isStaged || isCurrentMember || isCurrentLeader;
   });
-
-  // Get team member count
-  const getTeamMemberCount = (team) => {
-    return team.current_responders?.length || 0;
-  };
 
   const openNewTeamForm = () => {
     setTeamForm({
@@ -376,7 +375,7 @@ const PlanningDashboard = ({
     }
   };
 
-  const handleSaveTeam = async (formData) => {
+  const handleSaveTeam = async (formData, stayOpen = false) => {
     if (!formData.leader_responder_id) {
       setError('A team leader must be selected in order to save a team.');
       return;
@@ -443,7 +442,11 @@ const PlanningDashboard = ({
         });
         setSuccessMessage('Team created');
       }
-      setShowTeamForm(false);
+      if (stayOpen) {
+        openNewTeamForm();
+      } else {
+        setShowTeamForm(false);
+      }
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (err) {
       const message = err.message || 'Failed to save team';
@@ -457,7 +460,7 @@ const PlanningDashboard = ({
     }
   };
 
-  const handleSaveAssignment = async (formData) => {
+  const handleSaveAssignment = async (formData, stayOpen = false) => {
     try {
       setLoading(true);
 
@@ -490,7 +493,11 @@ const PlanningDashboard = ({
         await createAssignment(payload);
         setSuccessMessage('Assignment created');
       }
-      setShowAssignmentForm(false);
+      if (stayOpen) {
+        openNewAssignmentForm();
+      } else {
+        setShowAssignmentForm(false);
+      }
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (err) {
       const message = err.message || 'Failed to save assignment';
@@ -504,7 +511,7 @@ const PlanningDashboard = ({
     }
   };
 
-  const handleSaveResponder = async (formData) => {
+  const handleSaveResponder = async (formData, stayOpen = false) => {
     try {
       setLoading(true);
 
@@ -530,7 +537,11 @@ const PlanningDashboard = ({
         throw new Error('Missing responder identifier or service function');
       }
 
-      setShowResponderForm(false);
+      if (stayOpen) {
+        openEditResponderForm(null);
+      } else {
+        setShowResponderForm(false);
+      }
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (err) {
       setError(err.message || 'Failed to save responder');

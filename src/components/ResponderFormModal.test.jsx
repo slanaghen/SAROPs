@@ -23,20 +23,19 @@ describe('ResponderFormModal', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.useFakeTimers(); // For consistency, though this modal is simple
   });
 
   it('handles multi-select skills correctly by joining them into a string', () => {
     render(<ResponderFormModal {...defaultProps} />);
-    const skillsSelect = screen.getByLabelText(/Special Skills/i);
+    const skillsSelect = screen.getByLabelText(/Capabilities/i);
     
-    const uasOption = within(skillsSelect).getByRole('option', { name: 'UAS' });
     const medicalOption = within(skillsSelect).getByRole('option', { name: 'Medical' });
+    const diveOption = within(skillsSelect).getByRole('option', { name: 'Dive' });
     
     // Manually set the selected property on the options. JSDOM will update 
     // the select.selectedOptions collection automatically.
-    uasOption.selected = true;
     medicalOption.selected = true;
+    diveOption.selected = true;
 
     // Fire change on the select element without a custom target object to avoid 
     // "TypeError: 'set' on proxy" on read-only properties like 'type' or 'selectedOptions'.
@@ -47,9 +46,10 @@ describe('ResponderFormModal', () => {
     });
 
     fireEvent.click(screen.getByText(/Save Changes/i));
-    expect(defaultProps.onSave).toHaveBeenCalledWith(expect.objectContaining({
-      special_skills: 'UAS, Medical'
-    }));
+    expect(defaultProps.onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ special_skills: 'Medical, Dive' }),
+      false
+    );
   });
 
   afterEach(() => {

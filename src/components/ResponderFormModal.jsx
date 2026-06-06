@@ -49,8 +49,8 @@ const ResponderFormModal = ({
     }));
   };
 
-  const handleSave = () => {
-    onSave(formData);
+  const handleSave = (stayOpen = false) => {
+    onSave(formData, stayOpen);
   };
 
   return (
@@ -66,8 +66,13 @@ const ResponderFormModal = ({
               Check Out
             </button>
           )}
-          <button className="btn btn-primary" onClick={handleSave} disabled={loading}>
-            {loading ? 'Saving...' : 'Save Changes'}
+          {!formData?.responder_id && (
+            <button className="btn btn-secondary" onClick={() => handleSave(true)} disabled={loading}>
+              {loading ? 'Saving...' : 'Save & Add Another'}
+            </button>
+          )}
+          <button className="btn btn-primary" onClick={() => handleSave(false)} disabled={loading}>
+            {loading ? 'Saving...' : (formData?.responder_id ? 'Save Changes' : 'Save & Exit')}
           </button>
         </>
       }
@@ -134,7 +139,7 @@ const ResponderFormModal = ({
         </div>
 
         <div className="form-row" style={{ marginTop: '8px' }}>
-          <label htmlFor="res_skills">Special Skills (Hold Ctrl/Cmd to multi-select)</label>
+          <label htmlFor="res_skills">Capabilities (Hold Ctrl/Cmd to multi-select)</label>
           <select
             id="res_skills"
             name="special_skills" // Ensure name attribute matches formData key

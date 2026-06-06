@@ -383,7 +383,7 @@ describe('AdminPage Authentication Gate', () => {
 
     fireEvent.change(screen.getByLabelText(/Email Address/i), { target: { value: 'new@user.com' } });
     fireEvent.change(screen.getByLabelText(/Password/i), { target: { value: 'password123' } });
-    fireEvent.click(screen.getByRole('button', { name: /Save User/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Save & Exit/i }));
 
     await waitFor(() => {
       expect(supabase.rpc).toHaveBeenCalledWith('admin_add_user', expect.objectContaining({
@@ -445,7 +445,7 @@ describe('AdminPage Authentication Gate', () => {
     expect(screen.getByRole('heading', { name: /Edit User:/i })).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText('Agency'), { target: { value: 'Updated Agency' } });
-    fireEvent.click(screen.getByRole('button', { name: /Save User/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }));
 
     await waitFor(() => {
       expect(supabase.rpc).toHaveBeenCalledWith('admin_add_user', expect.objectContaining({ p_email: 'edit@user.com', p_agency: 'Updated Agency' }));

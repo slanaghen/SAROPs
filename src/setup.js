@@ -1,27 +1,44 @@
 import { expect, vi } from 'vitest';
 import * as matchers from '@testing-library/jest-dom/matchers';
-import { AbortController as NodeAbortController, AbortSignal as NodeAbortSignal } from 'node:events';
 
 // Centralized setup for jest-dom matchers
 expect.extend(matchers);
 
+// Fix for "AbortController is not a constructor" errors in Vitest + JSDOM.
+// React Router 7 and Supabase require native implementations. We ensure that 
+// if we are in a JSDOM environment, the window object uses the native Node.js 
+// constructors from globalThis to avoid realm mismatches and instance checks failing.
 if (typeof window !== 'undefined') {
-  // Overwrite JSDOM globals with Node.js native constructors to resolve realm mismatches.
-  // This prevents "AbortController is not a constructor" and 
-  // "Expected signal to be an instance of AbortSignal" errors during React Router 7 navigation.
   Object.defineProperty(window, 'AbortController', {
     writable: true,
     configurable: true,
-    value: NodeAbortController,
+    value: globalThis.AbortController,
   });
   Object.defineProperty(window, 'AbortSignal', {
     writable: true,
     configurable: true,
-    value: NodeAbortSignal,
+    value: globalThis.AbortSignal,
   });
-
-  globalThis.AbortController = NodeAbortController;
-  globalThis.AbortSignal = NodeAbortSignal;
+  Object.defineProperty(window, 'Event', {
+    writable: true,
+    configurable: true,
+    value: globalThis.Event,
+  });
+  Object.defineProperty(window, 'MessageEvent', {
+    writable: true,
+    configurable: true,
+    value: globalThis.MessageEvent,
+  });
+  Object.defineProperty(window, 'CloseEvent', {
+    writable: true,
+    configurable: true,
+    value: globalThis.CloseEvent,
+  });
+  Object.defineProperty(window, 'ErrorEvent', {
+    writable: true,
+    configurable: true,
+    value: globalThis.ErrorEvent,
+  });
 }
 
 /**
@@ -37,12 +54,14 @@ globalThis.createSupabaseQueryMock = (data, error = null) => {
     in: vi.fn(() => query),
     is: vi.fn(() => query),
     not: vi.fn(() => query),
+    or: vi.fn(() => query),
     gt: vi.fn(() => query),
     order: vi.fn(() => query),
     limit: vi.fn(() => query),
     update: vi.fn(() => query),
     delete: vi.fn(() => query),
     insert: vi.fn(() => query),
+    upsert: vi.fn(() => query),
     single: vi.fn(() => { isSingle = true; return query; }),
     maybeSingle: vi.fn(() => { isSingle = true; return query; }),
     then: vi.fn((onFulfilled) => {
@@ -67,5 +86,17 @@ vi.mock('@googlemaps/js-api-loader', () => {
     setOptions: vi.fn(),
   };
   const MockLoader = vi.fn(() => mockLoaderInstance);
+
+  // Define the global window.google object for tests to satisfy component expectations
+  const googleMock = {
+    maps: {
+      Map: MockMap,
+      ControlPosition: { TOP_LEFT: 1, TOP_CENTER: 2, TOP_RIGHT: 3, LEFT_CENTER: 4, LEFT_TOP: 5, LEFT_BOTTOM: 6, RIGHT_TOP: 7, RIGHT_CENTER: 8, RIGHT_BOTTOM: 9, BOTTOM_LEFT: 10, BOTTOM_CENTER: 11, BOTTOM_RIGHT: 12 },
+      event: { addListenerOnce: vi.fn(), trigger: vi.fn() }
+    }
+  };
+  globalThis.google = googleMock;
+  if (typeof window !== 'undefined') window.google = googleMock;
+
   return { Loader: MockLoader };
 });

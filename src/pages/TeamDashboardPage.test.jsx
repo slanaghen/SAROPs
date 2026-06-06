@@ -3,11 +3,26 @@ import * as matchers from '@testing-library/jest-dom/matchers';
 import { vi, describe, it, expect, afterEach, beforeEach } from 'vitest';
 import TeamFormModal from '../components/TeamFormModal';
 import { useIncident } from '../context/IncidentContext';
+import { supabase } from '../lib/supabase';
 
 expect.extend(matchers);
 
 vi.mock('../context/IncidentContext', () => ({
   useIncident: vi.fn(),
+}));
+
+vi.mock('../lib/supabase', () => ({
+  supabase: {
+    from: vi.fn(() => globalThis.createSupabaseQueryMock([])),
+    channel: vi.fn().mockImplementation(() => {
+      const mockChannel = {
+        on: vi.fn().mockImplementation(() => mockChannel),
+        subscribe: vi.fn().mockImplementation(() => mockChannel)
+      };
+      return mockChannel;
+    }),
+    removeChannel: vi.fn(),
+  },
 }));
 
 afterEach(() => {
@@ -92,11 +107,12 @@ describe('TeamFormModal', () => {
     render(<TeamFormModal {...propsWithLeader} />);
     
     fireEvent.change(screen.getByLabelText(/Team Name/i), { target: { value: 'Team 99' } });
-    fireEvent.click(screen.getByText('Save'));
+    fireEvent.click(screen.getByRole('button', { name: /Save/i }));
 
-    expect(defaultProps.onSave).toHaveBeenCalledWith(expect.objectContaining({
-      team_name_number: 'Team 99'
-    }));
+    expect(defaultProps.onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ team_name_number: 'Team 99' }),
+      false
+    );
   });
 
   it('disables save button when no leader is selected', () => {

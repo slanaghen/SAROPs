@@ -60,12 +60,15 @@ describe('AssignmentFormModal', () => {
     
     fireEvent.change(screen.getByLabelText(/Segment/i), { target: { value: 'B' } });
     fireEvent.change(screen.getByLabelText(/Debrief Narrative/i), { target: { value: 'Found tracks' } });
-    fireEvent.click(screen.getByText('Save Assignment'));
+    fireEvent.click(screen.getByRole('button', { name: /Save & Exit/i }));
 
-    expect(defaultProps.onSave).toHaveBeenCalledWith(expect.objectContaining({
-      segment: 'B',
-      debrief_narrative: 'Found tracks'
-    }));
+    expect(defaultProps.onSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        segment: 'B',
+        debrief_narrative: 'Found tracks'
+      }),
+      false
+    );
   });
 
   it('calls onClose when Cancel is clicked', () => {

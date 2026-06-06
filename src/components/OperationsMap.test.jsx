@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor, cleanup } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import OperationsMap from './OperationsMap';
 
@@ -10,10 +10,15 @@ describe('OperationsMap', () => {
     vi.stubEnv('VITE_GOOGLE_MAPS_API_KEY', 'valid-test-key');
   });
 
-  it('renders the map container when an API key is present', () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllEnvs();
+  });
+
+  it('renders the map container when an API key is present', async () => {
     const { container } = render(<OperationsMap loading={false} />);
     // Should find the map container div
-    expect(container.querySelector('.map-container')).toBeInTheDocument();
+    await waitFor(() => expect(container.querySelector('.map-container')).toBeInTheDocument());
   });
 
   it('renders fallback UI when the Google Maps API key is missing', async () => {

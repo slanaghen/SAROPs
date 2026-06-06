@@ -57,9 +57,8 @@ const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
     setFormData(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
   };
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    onSave(formData);
+  const handleSave = (stayOpen = false) => {
+    onSave(formData, stayOpen);
   };
 
   return (
@@ -68,12 +67,29 @@ const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
       onClose={onClose}
       title={isProfileSettings ? 'Account Settings' : (isEditing ? `Edit User: ${initialData.email}` : 'Add New User')}
       actions={
-        <button type="submit" form="user-form" className="btn btn-primary" disabled={loading}>
-          {loading ? 'Saving...' : 'Save User'}
-        </button>
+        <>
+          {!isEditing && !isProfileSettings && (
+            <button 
+              type="button"
+              className="btn btn-secondary" 
+              onClick={() => handleSave(true)} 
+              disabled={loading}
+            >
+              {loading ? 'Saving...' : 'Save & Add Another'}
+            </button>
+          )}
+          <button 
+            type="button" 
+            className="btn btn-primary" 
+            onClick={() => handleSave(false)} 
+            disabled={loading}
+          >
+            {loading ? 'Saving...' : (isEditing ? 'Save Changes' : 'Save & Exit')}
+          </button>
+        </>
       }
     >
-      <form id="user-form" onSubmit={handleSubmit}>
+      <form id="user-form" onSubmit={(e) => { e.preventDefault(); handleSave(false); }}>
         <div className="modal-scroll-wrapper" style={{ maxHeight: '65vh', overflowY: 'auto', paddingRight: '8px' }}>
           {error && <div className="alert alert-error" style={{ marginBottom: '16px' }}>{error}</div>}
           {success && <div className="save-message" style={{ marginBottom: '16px' }}>{success}</div>}
@@ -181,7 +197,7 @@ const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
           </div>
 
           <div className="form-row">
-            <label htmlFor="user_skills">Special Skills</label>
+            <label htmlFor="user_skills">Capabilities</label>
             <textarea id="user_skills" name="special_skills" value={formData.special_skills} onChange={handleChange} placeholder="EMT, Rope Rescue, K9 Handler" style={{ minHeight: '80px' }} />
           </div>
         </div>

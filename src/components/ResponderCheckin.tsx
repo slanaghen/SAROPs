@@ -392,7 +392,7 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
             </div>
 
             <div className="form-group">
-              <label htmlFor="special_skills">Special Skills / Capabilities</label>
+              <label htmlFor="special_skills">Capabilities</label>
               <select
                 id="special_skills"
                 name="special_skills"
@@ -405,15 +405,9 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
                 <option value="">— Select Capability —</option>
                 <option value="Air Scent Dog">Air Scent Dog</option>
                 <option value="Trail Dog">Trail Dog</option>
-                <option value="UAS">UAS</option>
-                <option value="Vehicle">Vehicle</option>
-                <option value="Snowmobile">Snowmobile</option>
-                <option value="UTV">UTV</option>
                 <option value="Swiftwater">Swiftwater</option>
                 <option value="Dive">Dive</option>
                 <option value="Avalanche">Avalanche</option>
-                <option value="Boat">Boat</option>
-                <option value="Helicopter">Helicopter</option>
                 <option value="Rope Rescue">Rope Rescue</option>
                 <option value="Litter">Litter</option>
                 <option value="Medical">Medical</option>
@@ -555,7 +549,7 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
 
               {displayResponder.special_skills ? (
                 <div className="detail-item">
-                  <span className="detail-label">Special Skills:</span>
+                  <span className="detail-label">Capabilities:</span>
                   <span className="detail-value">{displayResponder.special_skills}</span>
                 </div>
               ) : null}

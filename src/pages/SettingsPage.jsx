@@ -38,7 +38,7 @@ const SettingsPage = () => {
     fetchMyProfile();
   }, [fetchMyProfile]);
 
-  const handleSaveProfile = async (formData) => {
+  const handleSaveProfile = async (formData, stayOpen = false) => {
     setLoading(true);
     setError(null);
     setSuccess(null);

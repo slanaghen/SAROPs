@@ -355,11 +355,10 @@ const AdminPage = () => {
     }
   }, [isAdmin, refreshDashboardData]);
 
-  const handleSaveUser = async (formData) => {
+  const handleSaveUser = async (formData, stayOpen = false) => {
     setLoading(true);
     setError(null);
     setSuccess(null);
-    setShowUserModal(false); // Close modal immediately
 
     try {
       if (formData.email && editingUser) { // Editing existing user
@@ -396,19 +395,25 @@ const AdminPage = () => {
         setSuccess(`User ${formData.email} added successfully.`);
       }
       await fetchTable('users');
+
+      if (stayOpen) {
+        setEditingUser(null);
+        setShowUserModal(true);
+      } else {
+        setShowUserModal(false);
+        setEditingUser(null);
+      }
     } catch (err) {
       setError(err.message || 'Failed to save user.');
     } finally {
       setLoading(false);
-      setEditingUser(null);
     }
   };
 
-  const handleSaveResponder = async (formData) => {
+  const handleSaveResponder = async (formData, stayOpen = false) => {
     setLoading(true);
     setError(null);
     setSuccess(null);
-    setShowResponderModal(false);
 
     try {
       const payload = {
@@ -449,11 +454,18 @@ const AdminPage = () => {
         setSuccess(`Responder ${formData.name} added to system.`);
       }
       await refreshDashboardData();
+
+      if (stayOpen) {
+        setEditingResponder(null);
+        setShowResponderModal(true);
+      } else {
+        setShowResponderModal(false);
+        setEditingResponder(null);
+      }
     } catch (err) {
       setError(err.message || 'Failed to save responder.');
     } finally {
       setLoading(false);
-      setEditingResponder(null);
     }
   };
 
@@ -478,11 +490,10 @@ const AdminPage = () => {
     }
   };
 
-  const handleSaveTeam = async (formData) => {
+  const handleSaveTeam = async (formData, stayOpen = false) => {
     setLoading(true);
     setError(null);
     setSuccess(null);
-    setShowTeamModal(false);
 
     try {
       const teamId = formData.team_id;
@@ -552,11 +563,18 @@ const AdminPage = () => {
         setSuccess(`Team ${formData.team_name_number} created.`);
       }
       await refreshDashboardData();
+
+      if (stayOpen) {
+        setEditingTeam(null);
+        setShowTeamModal(true);
+      } else {
+        setShowTeamModal(false);
+        setEditingTeam(null);
+      }
     } catch (err) {
       setError(err.message || 'Failed to save team.');
     } finally {
       setLoading(false);
-      setEditingTeam(null);
     }
   };
 
@@ -764,11 +782,10 @@ const AdminPage = () => {
     }
   };
 
-  const handleSaveAssignment = async (formData) => {
+  const handleSaveAssignment = async (formData, stayOpen = false) => {
     setLoading(true);
     setError(null);
     setSuccess(null);
-    setShowAssignmentModal(false);
 
     try {
       const payload = {
@@ -806,11 +823,18 @@ const AdminPage = () => {
         setSuccess(`Assignment ${formData.title} created.`);
       }
       await refreshDashboardData();
+
+      if (stayOpen) {
+        setEditingAssignment(null);
+        setShowAssignmentModal(true);
+      } else {
+        setShowAssignmentModal(false);
+        setEditingAssignment(null);
+      }
     } catch (err) {
       setError(err.message || 'Failed to save assignment.');
     } finally {
       setLoading(false);
-      setEditingAssignment(null);
     }
   };
 

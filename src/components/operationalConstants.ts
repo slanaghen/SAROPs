@@ -10,8 +10,7 @@ export const TEAM_TYPES = [
 export const RESOURCE_TYPES = [...TEAM_TYPES];
 
 export const SKILLS_LIST = [
-  "Air Scent Dog", "Trail Dog", "UAS", "Vehicle", "Snowmobile", "UTV", 
-  "Swiftwater", "Dive", "Avalanche", "Boat", "Helicopter", "Rope Rescue", 
+  "Air Scent Dog", "Trail Dog", "Swiftwater", "Dive", "Avalanche", "Rope Rescue", 
   "Litter", "Medical", "Other"
 ];
 

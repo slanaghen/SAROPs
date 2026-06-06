@@ -256,30 +256,36 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
   }, [assignment]);
 
   const fetchMessages = useCallback(async () => {
-    if (!messagingChannelId) return;
+    if (!messagingChannelId && !staffTeamId) return;
 
-    let query = supabase.from('team_messages').select('*').eq('team_id', messagingChannelId);
+    let query = supabase.from('team_messages').select('*');
 
     if (!isStaffOrAdmin) {
       // For Responders: Fetch messages for my team plus any broadcasts from Staff
-      const targetIds = [messagingChannelId]; // This is team?.team_id
+      const targetIds = [];
+      if (messagingChannelId) targetIds.push(messagingChannelId);
       if (staffTeamId) targetIds.push(staffTeamId); // Add staff broadcasts
+      if (targetIds.length === 0) return;
       query = query.in('team_id', targetIds);
     } else {
       // Staff always targets a specific channel (either their own or a selected team)
+      if (!messagingChannelId) return;
       query = query.eq('team_id', messagingChannelId);
     }
 
     const { data } = await query.order('created_at', { ascending: true });
     if (Array.isArray(data)) setMessages(data);
-  }, [messagingChannelId, staffTeamId, accessLevel, incidentData?.opPeriodId]);
+  }, [messagingChannelId, staffTeamId, isStaffOrAdmin]);
 
   useEffect(() => {
-    if (!messagingChannelId) return;
+    if (!messagingChannelId && !staffTeamId) return;
+
     setMessages([]); // Clear previous channel messages during transition
     fetchMessages();
+    
+    const subId = messagingChannelId || staffTeamId;
     const channel = supabase
-      .channel(`responder-msgs-${messagingChannelId}`)
+      .channel(`responder-msgs-${subId}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'team_messages' }, 
         payload => {
           const msg = payload.new;
@@ -637,10 +643,9 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
             title={accessLevel === 'staff' || accessLevel === 'admin' ? 'Staff Status' : `Your Team: ${team?.team_name_number}`} 
             sectionKey="team" 
             showBadge={team && parRequired ? (
-              <span 
-                className="status-indicator incomplete" 
+              <span
+                className="status-indicator incomplete chip-overdue-gradient"
                 style={{ 
-                  backgroundColor: '#dc2626', 
                   color: 'white', 
                   gap: '4px',
                   whiteSpace: 'nowrap'
@@ -703,12 +708,11 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
                         <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 600 }}>Last PAR Check:</span>
                         {parRequired ? (
                           <span 
-                            className="status-indicator incomplete" 
+                            className="status-indicator incomplete chip-overdue-gradient"
                             onClick={() => handleParResponse('OK')}
                             title="Click to reset PAR"
-                            style={{ 
+                            style={{
                               gap: '4px',
-                              backgroundColor: '#dc2626', 
                               color: 'white', 
                               padding: '2px 8px',
                               whiteSpace: 'nowrap',
@@ -893,7 +897,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
         </div>
       )}
 
-      {team && team.status !== 'Disbanded' && (
+      {(team || staffTeamId || isStaffOrAdmin) && (
         <div className="dashboard-section messaging-info">
           <SectionHeader 
             title="Team Communications" 

@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 
 const Login = ({ onLoginSuccess }) => {
+  const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [incidents, setIncidents] = useState([]);
@@ -193,6 +195,7 @@ const Login = ({ onLoginSuccess }) => {
             </label>
             <button type="submit" className="btn btn-primary" disabled={loading} style={{ width: '100%', marginTop: '20px' }}>Login</button>
             <button type="button" onClick={() => setView('register')} className="btn btn-secondary" style={{ width: '100%', marginTop: '10px' }}>Register</button>
+            <button type="button" onClick={() => navigate('/checkin')} className="btn btn-secondary" style={{ width: '100%', marginTop: '10px' }}>Check-in without Account</button>
           </form>
         )}
 
