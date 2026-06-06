@@ -237,12 +237,12 @@ const IncidentEditPage = () => {
   const handleCreateMap = async () => {
     // Robust environment detection for Vitest, Jest, and browser runtime
     const isTest = (function() {
-      if (typeof globalThis !== 'undefined' && (globalThis.vitest || globalThis.__vitest_worker__)) return true;
+      if (typeof globalThis !== 'undefined' && (globalThis.vitest || globalThis.__vitest_worker__ || globalThis.VITEST)) return true;
       if (typeof process !== 'undefined' && (process.env?.VITEST || process.env?.NODE_ENV === 'test')) return true;
       try {
-        if (import.meta.env?.MODE === 'test') return true;
+        if (import.meta.env?.MODE === 'test' || import.meta.env?.VITEST) return true;
       } catch (e) {}
-      return typeof vi !== 'undefined' || typeof jest !== 'undefined';
+      return (typeof vi !== 'undefined' && vi !== null) || (typeof jest !== 'undefined' && jest !== null);
     })();
 
     const credId = [
@@ -503,7 +503,6 @@ const IncidentEditPage = () => {
         
         try {
           const { data: { session } } = await supabase.auth.getSession();
-          const responderId = uuidv4();
 
           // Fetch the user's actual system access_level to preserve Admin rights during operational check-in
           let userAccessLevel = 'responder';
@@ -516,23 +515,26 @@ const IncidentEditPage = () => {
             if (userProfile) userAccessLevel = userProfile.access_level;
           }
           
-          // 1. Create Responder record
-          const { error: respError } = await supabase.from('responders').insert({
-            responder_id: responderId,
-            incident_id: incidentId,
-            name: responderData.name,
-            agency: responderData.agency,
-            identifier: responderData.identifier,
-            cell_phone: responderData.cell_phone,
-            special_skills: responderData.special_skills,
-            auth_uid: session?.user?.id,
-            device_id: `device_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 11)}`,
-            checkin_datetime: new Date().toISOString(),
-            status: 'Deployed',
-            access_level: userAccessLevel
-          });
+          // Use the secure check-in RPC to establish operational identity and correctly populate the vehicles table
+          const { data: responderRecord, error: checkinError } = await supabase
+            .rpc('checkin_responder_securely', {
+              p_incident_id: incidentId,
+              p_auth_uid: session?.user?.id,
+              p_name: responderData.name,
+              p_agency: responderData.agency,
+              p_identifier: responderData.identifier,
+              p_cell_phone: responderData.cell_phone,
+              p_responder_type: responderData.responder_type || 'SAR',
+              p_special_skills: responderData.special_skills,
+              p_vehicles: responderData.vehicles,
+              p_access_level: userAccessLevel,
+              p_status: 'Deployed',
+              p_device_id: `device_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 11)}`
+            })
+            .maybeSingle();
 
-          if (respError) throw respError;
+          if (checkinError) throw checkinError;
+          const finalResponder = Array.isArray(responderRecord) ? responderRecord[0] : responderRecord;
 
           // Log creator check-in
           await supabase.from('action_logs').insert({
@@ -547,9 +549,11 @@ const IncidentEditPage = () => {
           // This ensures compliance with sarops-status-progression.md rules.
 
           // Update global context
-          if (setResponderId) setResponderId(responderId);
-          setResponderName(responderData.name);
-          setResponderStatus('Deployed');
+            if (finalResponder) {
+              if (setResponderId) setResponderId(finalResponder.responder_id);
+              setResponderName(finalResponder.name);
+              setResponderStatus(finalResponder.status);
+            }
           if (setAccessLevel) setAccessLevel(userAccessLevel);
 
           // Refresh Supabase session to apply new JWT claims (IC role and incident context)

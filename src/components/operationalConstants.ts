@@ -9,11 +9,6 @@ export const TEAM_TYPES = [
 
 export const RESOURCE_TYPES = [...TEAM_TYPES];
 
-export const SKILLS_LIST = [
-  "Air Scent Dog", "Trail Dog", "Swiftwater", "Dive", "Avalanche", "Rope Rescue", 
-  "Litter", "Medical", "Other"
-];
-
 export const RESPONDER_TYPES = ["SAR", "Fire", "Law", "Medical"];
 
 export const RESPONDER_STATUS_LIST = ["Staged", "Attached", "Assigned", "Deployed", "CheckedOut"];

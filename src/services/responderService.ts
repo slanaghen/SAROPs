@@ -54,6 +54,16 @@ export const checkOutResponder = async (
     throw new Error(`Failed to check out responder: ${error.message}`);
   }
 
+  // Also check out associated vehicles
+  await supabaseClient
+    .from('vehicles')
+    .update({
+      checkout_datetime: checkoutTime,
+      status: 'CheckedOut' as ResponderStatus
+    })
+    .eq('responder_id', responderId)
+    .is('checkout_datetime', null);
+
   if (!data) {
     throw new Error('No responder data returned from database');
   }

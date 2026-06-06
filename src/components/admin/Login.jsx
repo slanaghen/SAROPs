@@ -12,6 +12,7 @@ const Login = ({ onLoginSuccess }) => {
   const [error, setError] = useState(null);
   const [view, setView] = useState('login'); // 'login', 'register', 'verify'
   const [otpToken, setOtpToken] = useState('');
+  const [vehicles, setVehicles] = useState('');
 
   useEffect(() => {
     const fetchActiveIncidents = async () => {
@@ -72,6 +73,7 @@ const Login = ({ onLoginSuccess }) => {
             p_cell_phone: data.cell_phone || null,
             p_responder_type: data.responder_type || 'SAR',
             p_special_skills: data.special_skills || null,
+            p_vehicles: vehicles || data.vehicles || null,
             p_access_level: data.access_level,
             p_status: 'Staged',
             p_device_id: `admin_${data.email}_${selectedIncidentId}`
@@ -92,7 +94,8 @@ const Login = ({ onLoginSuccess }) => {
         }
       }
 
-      onLoginSuccess(selectedIncidentId, data, responderRecord);
+      // Ensure form-entered vehicles override profile vehicles in the user record passed to the success handler
+      onLoginSuccess(selectedIncidentId, { ...data, vehicles: vehicles || data.vehicles }, responderRecord);
     } catch (err) {
       setError(err.message || 'Login failed');
     } finally {
@@ -192,6 +195,10 @@ const Login = ({ onLoginSuccess }) => {
                   <option key={inc.incident_id} value={inc.incident_id}>{inc.name} ({inc.number})</option>
                 ))}
               </select>
+            </label>
+            <label>Checking in with Vehicle(s)?
+              <input type="text" value={vehicles} onChange={(e) => setVehicles(e.target.value)} placeholder="e.g. 3121, UTV, Boat" />
+              <small className="form-hint" style={{ color: '#64748b', fontSize: '11px', display: 'block', marginTop: '4px' }}>Optional: List vehicle designations separated by commas.</small>
             </label>
             <button type="submit" className="btn btn-primary" disabled={loading} style={{ width: '100%', marginTop: '20px' }}>Login</button>
             <button type="button" onClick={() => setView('register')} className="btn btn-secondary" style={{ width: '100%', marginTop: '10px' }}>Register</button>

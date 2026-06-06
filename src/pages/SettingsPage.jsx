@@ -55,6 +55,7 @@ const SettingsPage = () => {
         p_phone: formData.cell_phone,
         p_type: formData.responder_type,
         p_skills: formData.special_skills,
+        p_vehicles: formData.vehicles,
         p_display_density: formData.display_density,
       });
 

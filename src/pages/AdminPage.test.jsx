@@ -81,6 +81,7 @@ describe('AdminPage Authentication Gate', () => {
       users: [],
       incidents: [],
       responders: [],
+      vehicles: [],
       teams: [],
       assignments: [],
       loading: false,
@@ -135,6 +136,7 @@ describe('AdminPage Authentication Gate', () => {
       users: [mockUser],
       incidents: [mockIncident],
       responders: [],
+      vehicles: [{ vehicle_id: 'v1', designation: '3121', status: 'Staged' }],
       teams: [],
       assignments: [],
       loading: false,
@@ -144,6 +146,7 @@ describe('AdminPage Authentication Gate', () => {
 
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
 
+    expect(await screen.findByText('3121')).toBeInTheDocument();
     expect(await screen.findByText('Lost Hiker')).toBeInTheDocument();
     expect(await screen.findByText('Test User')).toBeInTheDocument(); // Check for system user by name
     expect(screen.getByText(/user@example.com/)).toBeInTheDocument(); // Verify email is also present
@@ -170,6 +173,7 @@ describe('AdminPage Authentication Gate', () => {
       users: [],
       incidents: [],
       responders: [{ responder_id: 'r1', name: 'Res 1', status: 'Staged' }],
+      vehicles: [],
       teams: [],
       assignments: [],
       loading: false,
@@ -219,6 +223,7 @@ describe('AdminPage Authentication Gate', () => {
       users: [mockUserToEdit],
       incidents: [],
       responders: [],
+      vehicles: [],
       teams: [],
       assignments: [],
       loading: false,
@@ -277,6 +282,7 @@ describe('AdminPage Authentication Gate', () => {
       users: [],
       incidents: [],
       responders: [],
+      vehicles: [],
       teams: [mockTeam],
       assignments: [],
       loading: false,
@@ -329,6 +335,7 @@ describe('AdminPage Authentication Gate', () => {
       users: [],
       incidents: [mockIncident],
       responders: [],
+      vehicles: [],
       teams: [],
       assignments: [],
       loading: false,
@@ -397,6 +404,8 @@ describe('AdminPage Authentication Gate', () => {
         p_phone: '',
         p_type: 'SAR',
         p_skills: '',
+        p_vehicles: '',
+        p_display_density: 'comfortable',
       }));
     });
   });
@@ -433,6 +442,7 @@ describe('AdminPage Authentication Gate', () => {
       users: [mockUserToEdit],
       incidents: [],
       responders: [],
+      vehicles: [],
       teams: [],
       assignments: [],
       loading: false,
@@ -472,6 +482,7 @@ describe('AdminPage Authentication Gate', () => {
     vi.mocked(useAdminData).mockReturnValue({
       users: [{ email: 'existing@user.com', username: 'ExistingUser' }],
       incidents: [],
+      vehicles: [],
       responders: [],
       teams: [],
       assignments: [],
@@ -520,6 +531,7 @@ describe('AdminPage Authentication Gate', () => {
       users: [],
       incidents: [],
       responders: [mockResponder],
+      vehicles: [],
       teams: [],
       assignments: [],
       loading: false,
@@ -580,6 +592,7 @@ describe('AdminPage Authentication Gate', () => {
       users: [],
       incidents: [mockIncident],
       responders: [{ responder_id: 'r1', status: 'Staged' }],
+      vehicles: [],
       teams: [],
       assignments: [{ assignment_id: 'a1', status: 'Deployed' }],
       loading: false,
@@ -654,6 +667,7 @@ describe('AdminPage Authentication Gate', () => {
       users: [],
       incidents: [],
       responders: [],
+      vehicles: [],
       teams: [],
       assignments: [mockAsn],
       loading: false,
@@ -691,6 +705,7 @@ describe('AdminPage Authentication Gate', () => {
       users: [],
       incidents: [],
       responders: [mockRes],
+      vehicles: [],
       teams: [],
       assignments: [],
       loading: false,
@@ -733,6 +748,7 @@ describe('AdminPage Authentication Gate', () => {
       users: mockUsers,
       incidents: [],
       responders: [],
+      vehicles: [],
       teams: [],
       assignments: [],
       loading: false,
@@ -853,7 +869,7 @@ describe('AdminPage Authentication Gate', () => {
           par_check_interval: 60
         }] 
       }],
-      responders: [], teams: [], assignments: [], loading: false, refresh: vi.fn(), refreshAll: vi.fn(),
+      responders: [], vehicles: [], teams: [], assignments: [], loading: false, refresh: vi.fn(), refreshAll: vi.fn(),
     });
     localStorage.setItem('sarops_user_email', 'admin@test.com');
 
@@ -925,6 +941,7 @@ describe('AdminPage Authentication Gate', () => {
       users: [{ email: 'admin@test.com' }],
       incidents: [mockIncident],
       responders: [],
+      vehicles: [],
       teams: [],
       assignments: [],
       loading: false,

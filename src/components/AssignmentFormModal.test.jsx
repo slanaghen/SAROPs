@@ -33,6 +33,15 @@ describe('AssignmentFormModal', () => {
     expect(screen.getByLabelText(/Segment/i)).toHaveValue('A');
   });
 
+  it('disables the status field and sets it to Planned when creating a new assignment', () => {
+    const newAsnProps = { ...defaultProps, initialData: { assignment_id: null } };
+    render(<AssignmentFormModal {...newAsnProps} />);
+    
+    const statusSelect = screen.getByLabelText(/Status/i);
+    expect(statusSelect).toBeDisabled();
+    expect(statusSelect).toHaveValue('Planned');
+  });
+
   it('enforces character limit on description narrative', () => {
     render(<AssignmentFormModal {...defaultProps} />);
     const textarea = screen.getByLabelText(/Description/i);

@@ -3,8 +3,7 @@ import BaseModal from './BaseModal';
 import { 
   RESPONDER_TYPES, 
   RESPONDER_STATUS_LIST, 
-  ACCESS_LEVELS, 
-  SKILLS_LIST 
+  ACCESS_LEVELS
 } from './operationalConstants';
 
 /**
@@ -139,18 +138,20 @@ const ResponderFormModal = ({
         </div>
 
         <div className="form-row" style={{ marginTop: '8px' }}>
-          <label htmlFor="res_skills">Capabilities (Hold Ctrl/Cmd to multi-select)</label>
-          <select
+          <label htmlFor="res_skills">Capabilities</label>
+          <textarea
             id="res_skills"
-            name="special_skills" // Ensure name attribute matches formData key
-            multiple
-            value={formData.special_skills ? formData.special_skills.split(', ') : []}
+            name="special_skills"
+            value={formData.special_skills || ''}
             onChange={handleInputChange}
-            className="multi-select"
-            style={{ minHeight: '120px' }}
-          >
-            {SKILLS_LIST.map(skill => <option key={skill} value={skill}>{skill}</option>)}
-          </select>
+            placeholder="e.g. EMT, K9 Handler, Rope Rescue, ..."
+            style={{ minHeight: '80px' }}
+          />
+        </div>
+
+        <div className="form-row">
+          <label htmlFor="res_vehicles">Vehicles (Comma-separated)</label>
+          <input id="res_vehicles" name="vehicles" value={formData.vehicles || ''} onChange={handleInputChange} placeholder="3121, UTV, boat, ..." />
         </div>
       </div>
     </BaseModal>

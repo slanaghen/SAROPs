@@ -43,10 +43,8 @@ describe('ResponderCheckin confirmation screen', () => {
     fireEvent.change(screen.getByLabelText(/Cell Phone Number/i), {
       target: { value: '1231234567' },
     });
-    const skillsSelect = screen.getByLabelText(/Special Skills/i);
-    const medicalOption = screen.getByRole('option', { name: 'Medical' }) as HTMLOptionElement;
-    medicalOption.selected = true;
-    fireEvent.change(skillsSelect);
+    const capabilitiesInput = screen.getByLabelText(/Capabilities/i);
+    fireEvent.change(capabilitiesInput, { target: { value: 'Medical' } });
     fireEvent.click(screen.getByLabelText('SAR'));
 
     fireEvent.click(screen.getByRole('button', { name: /Continue to Confirmation/i }));

@@ -29,7 +29,8 @@ const LoginPage = () => {
             identifier: userRecord.identifier || userRecord.username,
             cell_phone: userRecord.cell_phone || '',
             special_skills: userRecord.special_skills || '',
-            responder_type: userRecord.responder_type || 'SAR'
+            responder_type: userRecord.responder_type || 'SAR',
+            vehicles: userRecord.vehicles || ''
           }
         } 
       });

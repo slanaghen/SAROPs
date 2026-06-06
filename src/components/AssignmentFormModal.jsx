@@ -19,6 +19,7 @@ const AssignmentFormModal = ({
   useEffect(() => {
     setFormData({
       ...initialData,
+      status: initialData.assignment_id ? (initialData.status || 'Planned') : 'Planned',
       resource_type: normalizeResourceTypeName(initialData?.resource_type)
     });
   }, [initialData, isOpen]);
@@ -70,6 +71,7 @@ const AssignmentFormModal = ({
             name="status" 
             value={formData.status || 'Planned'} 
             onChange={handleInputChange}
+            disabled={!formData.assignment_id}
             required
           >
             <option value="Planned">Planned</option>

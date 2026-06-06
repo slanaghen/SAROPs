@@ -358,12 +358,12 @@ const SARTopoDataPage = () => {
     setError(null);
     // Robust environment detection for Vitest, Jest, and browser runtime
     const isTest = (function() {
-      if (typeof globalThis !== 'undefined' && (globalThis.vitest || globalThis.__vitest_worker__)) return true;
+      if (typeof globalThis !== 'undefined' && (globalThis.vitest || globalThis.__vitest_worker__ || globalThis.VITEST)) return true;
       if (typeof process !== 'undefined' && (process.env?.VITEST || process.env?.NODE_ENV === 'test')) return true;
       try {
-        if (import.meta.env?.MODE === 'test') return true;
+        if (import.meta.env?.MODE === 'test' || import.meta.env?.VITEST) return true;
       } catch (e) {}
-      return typeof vi !== 'undefined' || typeof jest !== 'undefined';
+      return (typeof vi !== 'undefined' && vi !== null) || (typeof jest !== 'undefined' && jest !== null);
     })();
 
     const apiKey = [

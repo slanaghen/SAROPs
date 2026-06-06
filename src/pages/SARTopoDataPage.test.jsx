@@ -30,10 +30,10 @@ vi.mock('../lib/supabase', () => ({
       }
       const mock = globalThis.createSupabaseQueryMock(data);
       // Wire up trackers to chainable methods
-      mock.upsert = vi.fn(() => ({ ...mock, then: (cb) => mockTrackers.upsert().then(cb) }));
-      mock.insert = vi.fn(() => ({ ...mock, then: (cb) => mockTrackers.insert().then(cb) }));
-      mock.update = vi.fn(() => ({ ...mock, then: (cb) => mockTrackers.update().then(cb) }));
-      mock.delete = vi.fn(() => ({ ...mock, then: (cb) => mockTrackers.delete().then(cb) }));
+      mock.upsert = vi.fn((...args) => ({ ...mock, then: (cb) => mockTrackers.upsert(...args).then(cb) }));
+      mock.insert = vi.fn((...args) => ({ ...mock, then: (cb) => mockTrackers.insert(...args).then(cb) }));
+      mock.update = vi.fn((...args) => ({ ...mock, then: (cb) => mockTrackers.update(...args).then(cb) }));
+      mock.delete = vi.fn((...args) => ({ ...mock, then: (cb) => mockTrackers.delete(...args).then(cb) }));
       return mock;
     }),
     auth: {
@@ -64,10 +64,10 @@ describe('SARTopoDataPage', () => {
       }
       const mock = globalThis.createSupabaseQueryMock(data);
       // Wire up trackers
-      mock.upsert = vi.fn(() => ({ ...mock, then: (cb) => mockTrackers.upsert().then(cb) }));
-      mock.insert = vi.fn(() => ({ ...mock, then: (cb) => mockTrackers.insert().then(cb) }));
-      mock.update = vi.fn(() => ({ ...mock, then: (cb) => mockTrackers.update().then(cb) }));
-      mock.delete = vi.fn(() => ({ ...mock, then: (cb) => mockTrackers.delete().then(cb) }));
+      mock.upsert = vi.fn((...args) => ({ ...mock, then: (cb) => mockTrackers.upsert(...args).then(cb) }));
+      mock.insert = vi.fn((...args) => ({ ...mock, then: (cb) => mockTrackers.insert(...args).then(cb) }));
+      mock.update = vi.fn((...args) => ({ ...mock, then: (cb) => mockTrackers.update(...args).then(cb) }));
+      mock.delete = vi.fn((...args) => ({ ...mock, then: (cb) => mockTrackers.delete(...args).then(cb) }));
       return mock;
     });
 
@@ -111,7 +111,7 @@ describe('SARTopoDataPage', () => {
         data = { sartopo_id: 'https://sartopo.com/m/ABCD?foo=bar&k=OLD_KEY&readCode=OLD_KEY' };
       }
       const mock = globalThis.createSupabaseQueryMock(data);
-      mock.insert = vi.fn(() => ({ ...mock, then: (cb) => mockTrackers.insert().then(cb) }));
+      mock.insert = vi.fn((...args) => ({ ...mock, then: (cb) => mockTrackers.insert(...args).then(cb) }));
       return mock;
     });
 
@@ -475,7 +475,7 @@ describe('SARTopoDataPage', () => {
       if (table === 'assignments') data = mockAsns;
       else if (table === 'incidents') data = { sartopo_id: 'MAP123' };
       const mock = globalThis.createSupabaseQueryMock(data);
-      mock.update = vi.fn(() => ({ ...mock, then: (cb) => mockTrackers.update().then(cb) }));
+      mock.update = vi.fn((...args) => ({ ...mock, then: (cb) => mockTrackers.update(...args).then(cb) }));
       return mock;
     });
 
@@ -538,7 +538,7 @@ describe('SARTopoDataPage', () => {
     vi.mocked(supabase.from).mockImplementation((table) => {
       let data = (table === 'incidents') ? { sartopo_id: 'MAP123' } : [];
       const mock = globalThis.createSupabaseQueryMock(data);
-      mock.insert = vi.fn(() => ({ ...mock, then: (cb) => mockTrackers.insert().then(cb) }));
+      mock.insert = vi.fn((...args) => ({ ...mock, then: (cb) => mockTrackers.insert(...args).then(cb) }));
       return mock;
     });
     vi.mocked(fetch).mockResolvedValue({

@@ -52,6 +52,15 @@ describe('TeamFormModal', () => {
     expect(screen.getByLabelText(/Team Name/i)).toHaveValue('Team 1');
   });
 
+  it('disables the status field and sets it to Staged when creating a new team', () => {
+    const newTeamProps = { ...defaultProps, initialData: { team_id: null } };
+    render(<TeamFormModal {...newTeamProps} />);
+    
+    const statusSelect = screen.getByLabelText(/Status/i);
+    expect(statusSelect).toBeDisabled();
+    expect(statusSelect).toHaveValue('Staged');
+  });
+
   it('does not render when closed', () => {
     const { container } = render(<TeamFormModal {...defaultProps} isOpen={false} />);
     expect(container.firstChild).toBeNull();

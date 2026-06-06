@@ -3,6 +3,7 @@ import '../styles/PlanningDashboard.css';
 import TeamFormModal from './TeamFormModal';
 import AssignmentFormModal from './AssignmentFormModal';
 import ResponderFormModal from './ResponderFormModal';
+import VehicleFormModal from './admin/VehicleFormModal';
 
 /**
  * PlanningDashboard Component
@@ -19,6 +20,7 @@ const PlanningDashboard = ({
   teams = [],
   assignments = [], 
   responders = [],
+  vehicles = [],
   defaultNewTeamName = '',
   defaultNewTeamType = 'Ground',
   defaultNewAssignmentDivision = 'A',
@@ -29,12 +31,16 @@ const PlanningDashboard = ({
   createTeam,
   createAssignment,
   createResponder,
+  createVehicle,
+  updateVehicle,
   updateAssignment,
   deleteAssignment,
   updateTeam,
   updateResponder,
   checkOutResponder,
   attachResponderToTeam,
+  attachVehicleToTeam,
+  attachResponderToVehicle,
   detachResponderFromTeam,
   deleteTeam,
 }) => {
@@ -44,12 +50,15 @@ const PlanningDashboard = ({
   const [showTeamForm, setShowTeamForm] = useState(false);
   const [showAssignmentForm, setShowAssignmentForm] = useState(false);
   const [showResponderForm, setShowResponderForm] = useState(false);
+  const [showVehicleForm, setShowVehicleForm] = useState(false);
   const [teamForm, setTeamForm] = useState({});
   const [assignmentForm, setAssignmentForm] = useState({});
   const [responderForm, setResponderForm] = useState({});
+  const [vehicleForm, setVehicleForm] = useState({});
   const [showMembersModal, setShowMembersModal] = useState(false);
   const [activeTeam, setActiveTeam] = useState(null);
   const [responderFilter, setResponderFilter] = useState('');
+  const [vehicleFilter, setVehicleFilter] = useState('');
   const [teamFilter, setTeamFilter] = useState('');
   const [assignmentFilter, setAssignmentFilter] = useState('');
   const [viewMode, setViewMode] = useState('All');
@@ -58,7 +67,7 @@ const PlanningDashboard = ({
 
   // Define helper functions before they are used in useMemo hooks to avoid initialization errors
   const getResponderName = (responderId) => {
-    const responder = responders.find(r => r.responder_id === responderId);
+    const responder = (responders || []).find(r => r.responder_id === responderId);
     return responder ? responder.name : 'Unknown';
   };
 
@@ -66,9 +75,13 @@ const PlanningDashboard = ({
     return team.current_responders?.length || 0;
   };
 
+  const getTeamVehicleCount = (team) => {
+    return team.current_vehicles?.length || 0;
+  };
+
   const isStagedResponder = (responder) => String(responder?.status || '').toLowerCase() === 'staged';
 
-  const commandStaffExists = useMemo(() => (teams || []).some(t => t.type === 'Staff'), [teams]);
+  const commandStaffExists = useMemo(() => (teams || []).some(t => t?.type === 'Staff'), [teams]);
 
   const handleDragStart = (e, id, type) => {
     setDraggedItem({ id, type });
@@ -121,12 +134,58 @@ const PlanningDashboard = ({
         }
       }
     } 
+    // Vehicle <-> Team logic
+    else if ((draggedItem.type === 'vehicle' && type === 'team') || (draggedItem.type === 'team' && type === 'vehicle')) {
+      const vehicleId = draggedItem.type === 'vehicle' ? draggedItem.id : id;
+      const teamId = draggedItem.type === 'team' ? draggedItem.id : id;
+      const vehicle = (vehicles || []).find(v => v.vehicle_id === vehicleId);
+      const team = (teams || []).find(t => t.team_id === teamId);
+
+      if (vehicle && team) {
+        handleDragEnd();
+        setLoading(true);
+        try {
+          if (attachVehicleToTeam) {
+            await attachVehicleToTeam(vehicleId, teamId);
+            setSuccessMessage(`Vehicle "${vehicle.designation}" attached to team "${team.team_name_number}"`);
+            setTimeout(() => setSuccessMessage(null), 3000);
+          }
+        } catch (err) {
+          setError(err.message || 'Failed to attach vehicle to team');
+        } finally {
+          setLoading(false);
+        }
+      }
+    }
+    // Responder <-> Vehicle logic (Designating a driver)
+    else if ((draggedItem.type === 'responder' && type === 'vehicle') || (draggedItem.type === 'vehicle' && type === 'responder')) {
+      const responderId = draggedItem.type === 'responder' ? draggedItem.id : id;
+      const vehicleId = draggedItem.type === 'vehicle' ? draggedItem.id : id;
+      const responder = (responders || []).find(r => r.responder_id === responderId);
+      const vehicle = (vehicles || []).find(v => v.vehicle_id === vehicleId);
+
+      if (responder && vehicle) {
+        handleDragEnd();
+        setLoading(true);
+        try {
+          if (attachResponderToVehicle) {
+            await attachResponderToVehicle(responderId, vehicleId);
+            setSuccessMessage(`Responder "${responder.name}" designated as driver for "${vehicle.designation}"`);
+            setTimeout(() => setSuccessMessage(null), 3000);
+          }
+        } catch (err) {
+          setError(err.message || 'Failed to designate driver');
+        } finally {
+          setLoading(false);
+        }
+      }
+    }
     // Responder <-> Team logic
     else if ((draggedItem.type === 'responder' && type === 'team') || (draggedItem.type === 'team' && type === 'responder')) {
       const responderId = draggedItem.type === 'responder' ? draggedItem.id : id;
       const teamId = draggedItem.type === 'team' ? draggedItem.id : id;
-      const responder = responders.find(r => r.responder_id === responderId);
-      const team = teams.find(t => t.team_id === teamId);
+      const responder = (responders || []).find(r => r.responder_id === responderId);
+      const team = (teams || []).find(t => t.team_id === teamId);
 
       if (responder && team) {
         handleDragEnd();
@@ -151,7 +210,7 @@ const PlanningDashboard = ({
     
     // Highlight if dragging team over assignment, or if dragging assignment/responder over this team
     if (draggedItem.id === teamId && draggedItem.type === 'team' && (dropTarget?.type === 'assignment')) return true;
-    if (dropTarget?.id === teamId && (draggedItem.type === 'assignment' || draggedItem.type === 'responder')) return true;
+    if (dropTarget?.id === teamId && (draggedItem.type === 'assignment' || draggedItem.type === 'responder' || draggedItem.type === 'vehicle')) return true;
     
     return false;
   };
@@ -166,19 +225,28 @@ const PlanningDashboard = ({
 
   const isResponderHighlighted = (responderId) => {
     if (!draggedItem) return false;
-    // Highlight if we are dragging a responder over a team or vice versa
-    if (draggedItem.id === responderId && draggedItem.type === 'responder' && dropTarget?.type === 'team') return true;
-    if (dropTarget?.id === responderId && draggedItem.type === 'team') return true;
+    // Highlight if we are dragging a responder over a team/vehicle or vice versa
+    if (draggedItem.id === responderId && draggedItem.type === 'responder' && (dropTarget?.type === 'team' || dropTarget?.type === 'vehicle')) return true;
+    if (dropTarget?.id === responderId && (draggedItem.type === 'team' || draggedItem.type === 'vehicle')) return true;
+    return false;
+  };
+
+  const isVehicleHighlighted = (vehicleId) => {
+    if (!draggedItem) return false;
+    // Highlight if we are dragging a vehicle over a team/responder or vice versa
+    if (draggedItem.id === vehicleId && draggedItem.type === 'vehicle' && (dropTarget?.type === 'team' || dropTarget?.type === 'responder')) return true;
+    if (dropTarget?.id === vehicleId && (draggedItem.type === 'team' || draggedItem.type === 'responder')) return true;
     return false;
   };
 
   // Filter responders logic
   const availableRespondersList = useMemo(() => {
-    return responders.filter(r => {
+    return (responders || []).filter(r => {
+      const statusLower = String(r.status || '').toLowerCase();
       // View Mode Filter
       if (viewMode === 'Operations') {
-        if (!['Attached', 'Assigned', 'Deployed'].includes(r.status)) return false;
-      } else if (viewMode === 'Planning' && r.status !== 'Staged') return false;
+        if (!['attached', 'assigned', 'deployed'].includes(statusLower)) return false;
+      } else if (viewMode === 'Planning' && statusLower !== 'staged') return false;
       
       const term = responderFilter.toLowerCase().trim();
       if (!term) return true;
@@ -192,9 +260,29 @@ const PlanningDashboard = ({
     });
   }, [responders, responderFilter, viewMode]);
 
+  // Filter vehicles logic
+  const availableVehiclesList = useMemo(() => {
+    return (vehicles || []).filter(v => {
+      const statusLower = String(v.status || '').toLowerCase();
+      if (statusLower === 'checkedout') return false;
+
+      if (viewMode === 'Operations') {
+        if (!['attached', 'assigned', 'deployed'].includes(statusLower)) return false;
+      } else if (viewMode === 'Planning' && statusLower !== 'staged') return false;
+      
+      const term = vehicleFilter.toLowerCase().trim();
+      if (!term) return true;
+      
+      return (
+        v.designation.toLowerCase().includes(term) ||
+        (v.type && v.type.toLowerCase().includes(term))
+      );
+    });
+  }, [vehicles, vehicleFilter, viewMode]);
+
   // Filter teams logic
   const filteredTeams = useMemo(() => {
-    return teams.filter(t => {
+    return (teams || []).filter(t => {
       // View Mode Filter
       if (viewMode === 'Operations') {
         if (!['Assigned', 'Deployed'].includes(t.status)) return false;
@@ -214,7 +302,7 @@ const PlanningDashboard = ({
 
   // Filter assignments logic
   const filteredAssignments = useMemo(() => {
-    return assignments.filter(asn => {
+    return (assignments || []).filter(asn => {
       if (asn.op_period_id !== operationalPeriodId || asn.is_orphaned) return false;
 
       // View Mode Filter
@@ -237,7 +325,7 @@ const PlanningDashboard = ({
   }, [assignments, assignmentFilter, viewMode, operationalPeriodId]);
 
   // Show responders who are Staged (available) OR already part of the team being edited
-  const stagedResponders = responders.filter(r => {
+  const stagedResponders = (responders || []).filter(r => {
     const isStaged = isStagedResponder(r);
     const isCurrentMember = (teamForm.responder_ids || []).includes(r.responder_id);
     const isCurrentLeader = teamForm.leader_responder_id === r.responder_id;
@@ -313,6 +401,27 @@ const PlanningDashboard = ({
     setShowResponderForm(true);
   };
 
+  const openNewVehicleForm = () => {
+    console.log('📝 Opening Vehicle Editor for New Vehicle');
+    setVehicleForm({
+      designation: '',
+      type: '',
+      status: 'Staged',
+      responder_id: ''
+    });
+    setShowVehicleForm(true);
+  };
+
+  const openEditVehicleForm = (vehicle) => {
+    console.log('📝 Opening Vehicle Editor for:', vehicle.designation);
+    setVehicleForm({
+      ...vehicle,
+      responder_id: vehicle.responder_id || '',
+      status: vehicle.status || 'Staged'
+    });
+    setShowVehicleForm(true);
+  };
+
   const handleToggleNewTeamResponder = (responderId) => {
     const selectedIds = teamForm.responder_ids || [];
     const isSelected = selectedIds.includes(responderId);
@@ -337,7 +446,7 @@ const PlanningDashboard = ({
       setLoading(true);
 
       // Ensure all members return to Staged status before deleting the team
-      const rIds = team.current_responders?.map(r => r.responder_id) || [];
+      const rIds = (team.current_responders || []).map(r => r.responder_id);
       if (rIds.length > 0 && updateResponder) {
         // Update each responder's status to 'Staged'
         await Promise.all(rIds.map(id => updateResponder(id, { status: 'Staged' })));
@@ -388,12 +497,12 @@ const PlanningDashboard = ({
       let finalTeamName = formData.team_name_number?.trim();
       if (!finalTeamName) {
         const type = formData.type || 'Other';
-        const existingOfSameType = teams.filter(t => t.type === type);
+        const existingOfSameType = (teams || []).filter(t => t.type === type);
         let nextNum = existingOfSameType.length + 1;
         finalTeamName = `${type} ${nextNum}`;
 
         // Local uniqueness check to avoid immediate collisions
-        while (teams.some(t => t.team_name_number === finalTeamName)) {
+        while ((teams || []).some(t => t.team_name_number === finalTeamName)) {
           nextNum++;
           finalTeamName = `${type} ${nextNum}`;
         }
@@ -410,7 +519,7 @@ const PlanningDashboard = ({
         await updateTeam(formData.team_id, {
           team_name_number: finalTeamName,
           type: formData.type,
-          sartopo_color_hex: formData.sartopo_color_hex || '#FF0000',
+          sartopo_color_hex: formData.sartopo_color_hex || '#ff0000',
           op_period_id: formData.op_period_id,
           status: formData.status,
           leader_responder_id: formData.leader_responder_id,
@@ -418,7 +527,7 @@ const PlanningDashboard = ({
         });
 
         // 2. Reconcile responder attachments
-        const originalIds = formData.current_responders?.map(r => r.responder_id) || [];
+        const originalIds = (formData.current_responders || []).map(r => r.responder_id);
         const roles = formData.responder_roles || {};
         const toAdd = finalResponderIds.filter(id => !originalIds.includes(id));
         const toRemove = originalIds.filter(id => !finalResponderIds.includes(id));
@@ -550,6 +659,33 @@ const PlanningDashboard = ({
     }
   };
 
+  const handleSaveVehicle = async (formData, stayOpen = false) => {
+    try {
+      setLoading(true);
+      if (formData.vehicle_id && updateVehicle) {
+        await updateVehicle(formData.vehicle_id, formData);
+        setSuccessMessage('Vehicle updated');
+      } else if (createVehicle) {
+        // Force Staged status for new vehicles from planning board
+        await createVehicle({ ...formData, status: 'Staged' });
+        setSuccessMessage('Vehicle added to staging');
+      } else {
+        throw new Error('Vehicle service function not provided');
+      }
+
+      if (stayOpen) {
+        formData.vehicle_id ? openEditVehicleForm(formData) : openNewVehicleForm();
+      } else {
+        setShowVehicleForm(false);
+      }
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err) {
+      setError(err.message || 'Failed to save vehicle');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleCheckOutResponder = async (responder) => {
     if (!window.confirm(`Are you sure you want to check out ${responder.name}?`)) return;
     
@@ -575,7 +711,7 @@ const PlanningDashboard = ({
 
   const handleToggleResponder = async (responder) => {
     if (!activeTeam) return;
-    const isMember = activeTeam.current_responders?.some(r => r.responder_id === responder.responder_id);
+    const isMember = (activeTeam.current_responders || []).some(r => r.responder_id === responder.responder_id);
     try {
       setLoading(true);
       if (isMember && detachResponderFromTeam) {
@@ -641,7 +777,7 @@ const PlanningDashboard = ({
         </div>
       )}
 
-      <div className="dashboard-container" style={{ maxHeight: 'calc(100vh - 160px)', overflowY: 'auto', paddingBottom: '20px' }}>
+      <div className="dashboard-container" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '20px', maxHeight: 'calc(100vh - 160px)', overflowY: 'auto', paddingBottom: '20px' }}>
         {/* Available Responders Section */}
         <div className="section responders-section">
           <div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -719,6 +855,74 @@ const PlanningDashboard = ({
           )}
         </div>
 
+        {/* Available Vehicles Section */}
+        <div className="section vehicles-section">
+          <div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h2>Staged Vehicles ({availableVehiclesList.length})</h2>
+            <div>
+              <button className="btn btn-primary" onClick={openNewVehicleForm} style={{ fontSize: '14px' }}>
+                New Vehicle
+              </button>
+            </div>
+          </div>
+
+          <div className="responder-filters" style={{ padding: '0 16px 12px', display: 'flex', gap: '8px' }}>
+            <input 
+              type="text" 
+              placeholder="Search designation or type..." 
+              value={vehicleFilter}
+              onChange={(e) => setVehicleFilter(e.target.value)}
+              style={{ flex: 1, padding: '6px 10px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+            />
+            {vehicleFilter && (
+              <button className="btn btn-secondary btn-sm" onClick={() => setVehicleFilter('')} style={{ fontSize: '10px' }}>
+                Clear
+              </button>
+            )}
+          </div>
+
+          {availableVehiclesList.length === 0 ? (
+            <div className="empty-state">
+              <p>No available vehicles in staging</p>
+            </div>
+          ) : (
+            <div className="vehicle-list" style={{ maxHeight: '600px', overflowY: 'auto' }}>
+              {availableVehiclesList.map(vehicle => (
+                <div
+                  key={vehicle.vehicle_id}
+                  className={`responder-card ${isVehicleHighlighted(vehicle.vehicle_id) ? 'selected' : ''} ${draggedItem?.id === vehicle.vehicle_id ? 'dragging' : ''} ${vehicle.status?.toLowerCase() === 'staged' ? 'staged-resource' : ''}`}
+                  draggable="true"
+                  onDragStart={(e) => handleDragStart(e, vehicle.vehicle_id, 'vehicle')}
+                  onDragEnd={handleDragEnd}
+                  onDragOver={(e) => handleDragOver(e, 'vehicle')}
+                  onDragEnter={(e) => handleDragEnter(e, vehicle.vehicle_id, 'vehicle')}
+                  onDragLeave={() => setDropTarget(null)}
+                  onDrop={(e) => handleDrop(e, vehicle.vehicle_id, 'vehicle')}
+                  role="option"
+                  tabIndex={0}
+                >
+                  <div className="responder-header">
+                    <div className="responder-name">{vehicle.designation}</div>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginLeft: 'auto' }}>
+                      <span className={`status-indicator ${vehicle.status?.toLowerCase() || ''}`}>
+                        {vehicle.status}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="responder-agency-meta">
+                    {vehicle.type}
+                    {vehicle.responder_id && (
+                      <span style={{ marginLeft: '8px', color: '#1e293b', fontWeight: 600 }}>
+                        | Driver: {getResponderName(vehicle.responder_id)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         {/* Staged Teams Section */}
         <div className="section teams-section">
           <div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -770,6 +974,7 @@ const PlanningDashboard = ({
                       {team.type}
                     </div>
                     <span style={{ fontSize: '11px', color: '#64748b' }}>Size: {getTeamMemberCount(team)}</span>
+                    <span style={{ fontSize: '11px', color: '#64748b' }}>Veh: {getTeamVehicleCount(team)}</span>
                     <span style={{ fontSize: '11px', color: '#1e293b', fontWeight: 500 }}>
                       {team.type === 'Staff' ? 'IC' : 'Ldr'}: {getResponderName(team.leader_responder_id)}
                     </span>
@@ -921,17 +1126,30 @@ const PlanningDashboard = ({
         />
       )}
 
+      {showVehicleForm && (
+        <VehicleFormModal
+          key={`veh-${vehicleForm.vehicle_id || 'new'}`}
+          isOpen={showVehicleForm}
+          onClose={() => setShowVehicleForm(false)}
+          onSave={handleSaveVehicle}
+          initialData={vehicleForm.vehicle_id ? vehicleForm : null}
+          responders={responders}
+          loading={loading}
+          error={error}
+        />
+      )}
+
       {/* Members Modal */}
       {showMembersModal && activeTeam && (
         <div className="modal-backdrop">
           <div className="modal" style={{ maxHeight: '90vh', overflowY: 'hidden', display: 'flex', flexDirection: 'column' }}>
             <h3>Manage Members — {activeTeam.team_name_number}</h3>
             <div className="members-list" style={{ flex: 1, overflowY: 'auto', paddingRight: '8px', minHeight: '200px' }}>
-              {responders.length === 0 ? (
+              {(responders || []).length === 0 ? (
                 <p>No responders available</p>
               ) : (
-                responders.map(r => {
-                  const isMember = activeTeam.current_responders?.some(cr => cr.responder_id === r.responder_id);
+                (responders || []).map(r => {
+                  const isMember = (activeTeam.current_responders || []).some(cr => cr.responder_id === r.responder_id);
                   return (
                     <div key={r.responder_id} className="member-row">
                       <div>

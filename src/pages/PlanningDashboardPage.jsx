@@ -25,6 +25,7 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
     teams,
     assignments,
     responders,
+    vehicles,
     loading,
     stats,
     error: hookError,
@@ -39,6 +40,37 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
     detachResponderFromTeam,
     deleteTeam,
   } = usePlanningDashboard(supabase, operationalPeriodId);
+
+  const attachVehicleToTeam = async (vehicleId, teamId) => {
+    // Find the vehicle in local state to check for a designated driver
+    const vehicle = (vehicles || []).find(v => v.vehicle_id === vehicleId);
+
+    // 1. Link the vehicle to the team. 
+    // Database trigger 'trigger_sync_vehicle_status_on_team_link' handles updating the vehicle status.
+    const { error: vehError } = await supabase
+      .from('vehicles')
+      .update({ team_id: teamId })
+      .eq('vehicle_id', vehicleId);
+    
+    if (vehError) throw vehError;
+
+    // 2. If the vehicle has a designated driver, add them to the team as well.
+    // Database triggers handle the responder status update ('Attached') and membership validation.
+    if (vehicle?.responder_id && attachResponderToTeam) {
+      await attachResponderToTeam(vehicle.responder_id, teamId);
+    }
+
+    await fetchDashboardData();
+  };
+
+  const attachResponderToVehicle = async (responderId, vehicleId) => {
+    const { error } = await supabase
+      .from('vehicles')
+      .update({ responder_id: responderId })
+      .eq('vehicle_id', vehicleId);
+    if (error) throw error;
+    await fetchDashboardData();
+  };
 
   // Helper to calculate the next available Assignment name based on division
   const getNextAssignmentName = (division) => {
@@ -73,15 +105,52 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
   const createResponder = async (responderData) => {
     if (!incidentId) throw new Error("No active incident context.");
     
-    const { error } = await supabase.from('responders').insert({
-      ...responderData,
-      responder_id: uuidv4(),
-      incident_id: incidentId,
-      device_id: `dashboard_created_${uuidv4()}`,
-      checkin_datetime: new Date().toISOString(),
-      status: 'Staged'
+    // Use the secure check-in RPC to handle vehicle parsing and driver designation automatically
+    const { error } = await supabase.rpc('checkin_responder_securely', {
+      p_incident_id: incidentId,
+      p_auth_uid: null, // Manually created from dashboard
+      p_name: responderData.name,
+      p_agency: responderData.agency,
+      p_identifier: responderData.identifier,
+      p_cell_phone: responderData.cell_phone,
+      p_responder_type: responderData.responder_type || 'SAR',
+      p_special_skills: responderData.special_skills,
+      p_vehicles: responderData.vehicles,
+      p_access_level: responderData.access_level || 'responder',
+      p_status: 'Staged',
+      p_device_id: `dashboard_created_${uuidv4()}`
     });
 
+    if (error) throw error;
+    await fetchDashboardData();
+  };
+
+  /**
+   * Persist a new vehicle to the database.
+   */
+  const createVehicle = async (vehicleData) => {
+    if (!incidentId) throw new Error("No active incident context.");
+    
+    const { error } = await supabase
+      .from('vehicles')
+      .upsert({
+        ...vehicleData,
+        incident_id: incidentId,
+        checkin_datetime: new Date().toISOString(),
+      }, { onConflict: 'incident_id, designation' });
+
+    if (error) throw error;
+    await fetchDashboardData();
+  };
+
+  /**
+   * Update an existing vehicle record.
+   */
+  const updateVehicle = async (id, vehicleData) => {
+    const { error } = await supabase
+      .from('vehicles')
+      .update(vehicleData)
+      .eq('vehicle_id', id);
     if (error) throw error;
     await fetchDashboardData();
   };
@@ -115,10 +184,13 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
     await fetchDashboardData();
   };
 
-  // Load data when component mounts or when operational period changes
+  /**
+   * Trigger data synchronization when the mission context or operational period stabilizes.
+   * This ensures staged resources are visible immediately upon page load.
+   */
   useEffect(() => {
-    fetchDashboardData();
-  }, [operationalPeriodId, fetchDashboardData]);
+    if (incidentId || operationalPeriodId) fetchDashboardData();
+  }, [incidentId, operationalPeriodId, fetchDashboardData]);
 
   /**
    * Handle team assignment
@@ -172,6 +244,7 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
             teams={teams}
             assignments={assignments}
             responders={responders}
+            vehicles={vehicles}
             defaultNewTeamName=""
             defaultNewTeamType="Ground"
             defaultNewAssignmentDivision="A"
@@ -182,12 +255,16 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
             createTeam={createTeam}
             createAssignment={createAssignment}
             createResponder={createResponder}
+            createVehicle={createVehicle}
+            updateVehicle={updateVehicle}
             updateAssignment={updateAssignment}
             deleteAssignment={deleteAssignment}
             updateResponder={updateResponder}
             checkOutResponder={checkOutResponder}
             updateTeam={updateTeam}
             attachResponderToTeam={attachResponderToTeam}
+            attachVehicleToTeam={attachVehicleToTeam}
+            attachResponderToVehicle={attachResponderToVehicle}
             detachResponderFromTeam={detachResponderFromTeam}
             deleteTeam={deleteTeam}
           />
@@ -225,6 +302,14 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
               <div style={{ fontSize: '12px', color: '#475569' }}>
                 Staged: {stats.responders.staged}, Attached: {stats.responders.attached}, Assigned: {stats.responders.assigned}, 
                 Deployed: {stats.responders.deployed}, Total: {stats.responders.total}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <strong style={{ color: '#1e293b', fontSize: '10px', textTransform: 'uppercase', marginBottom: '2px' }}>Vehicles</strong>
+              <div style={{ fontSize: '12px', color: '#475569' }}>
+                Staged: {(vehicles || []).filter(v => v.status?.toLowerCase() === 'staged').length}, Attached: {(vehicles || []).filter(v => v.status?.toLowerCase() === 'attached').length}, 
+                Active: {(vehicles || []).filter(v => ['assigned', 'deployed'].includes(v.status?.toLowerCase())).length}, Total: {(vehicles || []).length}
               </div>
             </div>
           </div>

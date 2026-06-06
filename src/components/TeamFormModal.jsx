@@ -13,6 +13,8 @@ const TeamFormModal = ({
   onSave,
   initialData = {},
   responders = [],
+  vehicles = [],
+  onEditVehicle,
   loading = false,
   error = null,
   commandStaffExists = false
@@ -26,9 +28,11 @@ const TeamFormModal = ({
     }
     return {
       ...data,
+      status: data.team_id ? (data.status || 'Staged') : 'Staged',
       type: normalizeResourceTypeName(data.type),
       equipment: Array.isArray(data.equipment) ? data.equipment.join(', ') : (data.equipment || ''),
-      responder_roles: roles
+      responder_roles: roles,
+      vehicle_ids: data.current_vehicles?.map(v => v.vehicle_id) || data.vehicle_ids || []
     };
   };
 
@@ -56,6 +60,18 @@ const TeamFormModal = ({
       isStagedResponder(r) || initialMemberIds.has(r.responder_id)
     );
   }, [responders, initialData]);
+
+  const availableVehicles = useMemo(() => {
+    const initialVehicleIds = new Set([
+      ...(initialData.vehicle_ids || []),
+      ...(initialData.current_vehicles?.map(v => v.vehicle_id) || [])
+    ].filter(Boolean));
+
+    return (vehicles || []).filter(v => 
+      (v.status && v.status.toLowerCase() === 'staged') || 
+      initialVehicleIds.has(v.vehicle_id)
+    );
+  }, [vehicles, initialData]);
 
   const handleDropIntoRole = (e, role) => {
     e.preventDefault();
@@ -95,20 +111,27 @@ const TeamFormModal = ({
   const handleDropOnPool = (e) => {
     e.preventDefault();
     const responderId = e.dataTransfer.getData('responderId');
-    if (!responderId) return;
+    const vehicleId = e.dataTransfer.getData('vehicleId');
 
-    const currentIds = teamForm.responder_ids || [];
-    const newRoles = { ...(teamForm.responder_roles || {}) };
-    delete newRoles[responderId];
+    if (responderId) {
+      const currentIds = teamForm.responder_ids || [];
+      const newRoles = { ...(teamForm.responder_roles || {}) };
+      delete newRoles[responderId];
 
-    const isLeader = responderId === teamForm.leader_responder_id;
+      const isLeader = responderId === teamForm.leader_responder_id;
 
-    setTeamForm({
-      ...teamForm,
-      leader_responder_id: isLeader ? null : teamForm.leader_responder_id,
-      responder_ids: currentIds.filter(id => id !== responderId),
-      responder_roles: newRoles
-    });
+      setTeamForm({
+        ...teamForm,
+        leader_responder_id: isLeader ? null : teamForm.leader_responder_id,
+        responder_ids: currentIds.filter(id => id !== responderId),
+        responder_roles: newRoles
+      });
+    } else if (vehicleId) {
+      setTeamForm({
+        ...teamForm,
+        vehicle_ids: (teamForm.vehicle_ids || []).filter(id => id !== vehicleId)
+      });
+    }
   };
   const handleDropMember = (e) => {
     e.preventDefault();
@@ -131,6 +154,20 @@ const TeamFormModal = ({
     });
   };
 
+  const handleDropVehicle = (e) => {
+    e.preventDefault();
+    const vehicleId = e.dataTransfer.getData('vehicleId');
+    if (!vehicleId) return;
+
+    const currentIds = teamForm.vehicle_ids || [];
+    if (currentIds.includes(vehicleId)) return;
+
+    setTeamForm({
+      ...teamForm,
+      vehicle_ids: [...currentIds, vehicleId]
+    });
+  };
+
   const handleRoleChange = (responderId, role) => {
     setTeamForm({
       ...teamForm,
@@ -149,7 +186,8 @@ const TeamFormModal = ({
 
     onSave({
       ...teamForm,
-      equipment: equipmentArray
+      equipment: equipmentArray,
+      vehicle_ids: teamForm.vehicle_ids
     }, stayOpen);
   };
 
@@ -226,7 +264,12 @@ const TeamFormModal = ({
 
           <div className="form-row" style={{ flex: 1, minWidth: 0 }}>
             <label htmlFor="team_status">Status</label>
-            <select id="team_status" value={teamForm.status} onChange={e => setTeamForm({ ...teamForm, status: e.target.value })}>
+            <select 
+              id="team_status" 
+              value={teamForm.status} 
+              onChange={e => setTeamForm({ ...teamForm, status: e.target.value })}
+              disabled={!teamForm.team_id}
+            >
               <option>Staged</option>
               <option>Assigned</option>
               <option>Deployed</option>
@@ -236,17 +279,17 @@ const TeamFormModal = ({
         </div>
 
         <div className="form-row responders-selector">
-          <label>Team Composition (Drag & Drop Members)</label>
-          <div className="drag-drop-composition" style={{ display: 'flex', gap: '24px', alignItems: 'flex-start' }}>
+          <label>Team Members (Drag & Drop Members)</label>
+          <div className="drag-drop-composition" style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
             {/* Left Panel: Available Chips */}
             <div 
               className="responder-pool" 
               onDrop={handleDropOnPool} // Add drop handler for the pool
               onDragOver={(e) => e.preventDefault()} // Allow drops on the pool
-              style={{ flex: 1, minHeight: '200px', background: '#f8fafc', padding: '12px', borderRadius: '12px', border: '1px dashed #cbd5e1' }}
+              style={{ flex: 1, maxHeight: '55vh', background: '#f8fafc', padding: '12px', borderRadius: '12px', border: '1px dashed #cbd5e1', overflowY: 'auto' }}
             >
-              <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '12px' }}>Staged Responders</label>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', maxHeight: '250px', overflowY: 'auto' }}>
+              <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '12px' }}>Personnel Pool (Staged)</label>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '20px' }}>
                 {availableResponders.filter(r => !(teamForm.responder_ids || []).includes(r.responder_id)).map(r => (
                   <div 
                     key={r.responder_id}
@@ -265,15 +308,36 @@ const TeamFormModal = ({
                   <p style={{ fontSize: '12px', color: '#94a3b8' }}>No staged responders available.</p>
                 )}
               </div>
+
+              <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '12px' }}>Vehicle Pool (Staged)</label>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {availableVehicles.filter(v => !(teamForm.vehicle_ids || []).includes(v.vehicle_id)).map(v => (
+                  <div 
+                    key={v.vehicle_id}
+                    draggable
+                    onDragStart={(e) => e.dataTransfer.setData('vehicleId', v.vehicle_id)}
+                    onClick={() => onEditVehicle?.(v)}
+                    className="chip vehicle-chip"
+                    style={{ cursor: 'grab', padding: '4px 8px', background: '#fff', border: '1px solid #d9d9d9', borderRadius: '6px', fontSize: '12px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}
+                  >
+                    <div style={{ fontWeight: 600 }}>{v.designation}</div>
+                    <div style={{ opacity: 0.7, fontSize: '10px' }}>{v.type}</div> 
+                  </div>
+                ))}
+                {availableVehicles.filter(v => !(teamForm.vehicle_ids || []).includes(v.vehicle_id)).length === 0 && (
+                  <p style={{ fontSize: '12px', color: '#94a3b8' }}>No staged vehicles available.</p>
+                )}
+              </div>
+
               <small className="form-hint" style={{ marginTop: '16px', display: 'block' }}>Drag a chip and drop it on the table to add a member.</small>
             </div>
 
-            {/* Right Panel: Composition Table */}
-            <div style={{ flex: 1.5, maxHeight: '350px', overflowY: 'auto' }}>
+            {/* Middle Panel: Composition Table */}
+            <div style={{ flex: 1.2, maxHeight: '55vh', overflowY: 'auto' }}>
               <table className="operations-table" style={{ width: '100%', minWidth: 'auto', border: '1px solid #e2e8f0', background: '#fff' }}>
                 <thead>
                   <tr style={{ background: '#f8fafc' }}>
-                    <th style={{ width: '60%', textAlign: 'left', padding: '4px 10px', fontSize: '12px' }}>Team Member</th>
+                    <th style={{ width: '60%', textAlign: 'left', padding: '4px 10px', fontSize: '12px' }}>Team Composition</th>
                     <th style={{ width: '40%', textAlign: 'left', padding: '4px 10px', fontSize: '12px' }}>Role / Position</th>
                   </tr>
                 </thead>
@@ -385,6 +449,38 @@ const TeamFormModal = ({
                   </tr>
                 </tbody>
               </table>
+            </div>
+
+            {/* Right Panel: Team Vehicles */}
+            <div 
+              className="vehicle-drop-zone"
+              onDrop={handleDropVehicle}
+              onDragOver={(e) => e.preventDefault()}
+              style={{ flex: 0.8, maxHeight: '55vh', background: '#f8fafc', padding: '12px', borderRadius: '12px', border: '1px dashed #cbd5e1', overflowY: 'auto' }}
+            >
+              <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '12px' }}>Staged Vehicles</label>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {(teamForm.vehicle_ids || []).map(id => {
+                  const v = vehicles.find(veh => veh.vehicle_id === id);
+                  if (!v) return null;
+                  return (
+                    <div 
+                      key={id}
+                      draggable
+                      onDragStart={(e) => e.dataTransfer.setData('vehicleId', id)}
+                      onClick={() => onEditVehicle?.(v)}
+                      className="chip vehicle-chip"
+                      style={{ cursor: 'grab', padding: '6px 10px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '6px', fontSize: '12px' }}
+                    >
+                      <div style={{ fontWeight: 600 }}>{v.designation}</div>
+                      <div style={{ opacity: 0.7, fontSize: '10px' }}>{v.type}</div>
+                    </div>
+                  );
+                })}
+                {(teamForm.vehicle_ids || []).length === 0 && (
+                  <p style={{ fontSize: '11px', color: '#94a3b8', fontStyle: 'italic' }}>Drop staged vehicle chips here...</p>
+                )}
+              </div>
             </div>
           </div>
         </div>

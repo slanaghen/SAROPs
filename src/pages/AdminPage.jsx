@@ -20,6 +20,8 @@ import AdminRespondersTable from '../components/admin/AdminRespondersTable';
 import AdminTeamsTable from '../components/admin/AdminTeamsTable';
 import AdminAssignmentsTable from '../components/admin/AdminAssignmentsTable';
 import AdminIncidentsTable from '../components/admin/AdminIncidentsTable';
+import AdminVehiclesTable from '../components/admin/AdminVehiclesTable';
+import VehicleFormModal from '../components/admin/VehicleFormModal';
 
 const AdminPage = () => {
   const navigate = useNavigate();
@@ -32,7 +34,7 @@ const AdminPage = () => {
 
   const { 
     users, incidents: allIncidents, responders: allResponders, 
-    teams: allTeams, assignments: allAssignments, 
+    teams: allTeams, assignments: allAssignments, vehicles: allVehicles,
     loading: fetching, refresh: fetchTable, refreshAll: refreshDashboardData
   } = useAdminData();
 
@@ -40,6 +42,7 @@ const AdminPage = () => {
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [isRespondersExpanded, setIsRespondersExpanded] = useState(true);
+  const [isVehiclesExpanded, setIsVehiclesExpanded] = useState(true);
 
   const recordAction = useCallback(async (actionText) => {
     if (!incidentId) return;
@@ -83,6 +86,8 @@ const AdminPage = () => {
   const [editingTeam, setEditingTeam] = useState(null);
   const [showAssignmentModal, setShowAssignmentModal] = useState(false);
   const [editingAssignment, setEditingAssignment] = useState(null);
+  const [showVehicleModal, setShowVehicleModal] = useState(false);
+  const [editingVehicle, setEditingVehicle] = useState(null);
 
   /**
    * Determines if a non-disbanded Staff team already exists for the operational period
@@ -373,6 +378,7 @@ const AdminPage = () => {
           p_phone: formData.cell_phone,
           p_type: formData.responder_type,
           p_skills: formData.special_skills,
+          p_vehicles: formData.vehicles,
           p_display_density: formData.display_density,
         });
         if (updateError) throw updateError;
@@ -389,6 +395,7 @@ const AdminPage = () => {
           p_phone: formData.cell_phone,
           p_type: formData.responder_type,
           p_skills: formData.special_skills,
+          p_vehicles: formData.vehicles,
           p_display_density: formData.display_density,
         });
         if (insertError) throw insertError;
@@ -416,43 +423,30 @@ const AdminPage = () => {
     setSuccess(null);
 
     try {
-      const payload = {
-        name: formData.name,
-        agency: formData.agency,
-        identifier: formData.identifier,
-        cell_phone: formData.cell_phone,
-        special_skills: formData.special_skills,
-        access_level: formData.access_level,
-        responder_type: formData.responder_type,
-      };
-
-      if (formData.responder_id) {
-        const { error: updateError } = await supabase
-          .from('responders')
-          .update(payload)
-          .eq('responder_id', formData.responder_id);
-        if (updateError) throw updateError;
-        setSuccess(`Responder ${formData.name} updated successfully.`);
-      } else {
-        // Requirement: Responder must be linked to an incident (FK constraint)
-        if (!incidentId) {
-          throw new Error("No active incident session. Please join an incident before adding responders.");
-        }
-
-        const { error: insertError } = await supabase
-          .from('responders')
-          .insert({
-            ...payload,
-            responder_id: uuidv4(),
-            incident_id: incidentId,
-            // Requirement: device_id is NOT NULL and UNIQUE in schema. Generate a unique internal ID.
-            device_id: `admin_created_${uuidv4()}`,
-            checkin_datetime: new Date().toISOString(),
-            status: 'Staged'
-          });
-        if (insertError) throw insertError;
-        setSuccess(`Responder ${formData.name} added to system.`);
+      const targetIncidentId = formData.incident_id || incidentId;
+      if (!targetIncidentId) {
+        throw new Error("No active incident context. Please join an incident before adding responders.");
       }
+
+      // Requirement: Use the secure check-in RPC to handle vehicle parsing and status rules automatically
+      const { data: responderData, error: rpcError } = await supabase.rpc('checkin_responder_securely', {
+        p_incident_id: targetIncidentId,
+        p_auth_uid: formData.auth_uid || null,
+        p_name: formData.name,
+        p_agency: formData.agency,
+        p_identifier: formData.identifier,
+        p_cell_phone: formData.cell_phone,
+        p_responder_type: formData.responder_type || 'SAR',
+        p_special_skills: formData.special_skills,
+        p_vehicles: formData.vehicles,
+        p_access_level: formData.access_level,
+        p_status: formData.responder_id ? (formData.status || 'Staged') : 'Staged',
+        p_device_id: formData.device_id || `admin_created_${uuidv4()}`
+      });
+
+      if (rpcError) throw rpcError;
+      
+      setSuccess(`Responder ${formData.name} saved successfully.`);
       await refreshDashboardData();
 
       if (stayOpen) {
@@ -469,20 +463,71 @@ const AdminPage = () => {
     }
   };
 
+  const handleSaveVehicle = async (formData, stayOpen = false) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const payload = {
+        designation: formData.designation,
+        type: formData.type,
+        status: formData.status,
+        responder_id: formData.responder_id || null,
+        incident_id: formData.incident_id || incidentId
+      };
+
+      if (formData.vehicle_id) {
+        const { error: updateError } = await supabase.from('vehicles').update(payload).eq('vehicle_id', formData.vehicle_id);
+        if (updateError) throw updateError;
+        setSuccess(`Vehicle ${formData.designation} updated.`);
+      } else {
+        if (!incidentId && !formData.incident_id) throw new Error("Select an incident context.");
+        // Use upsert to handle cases where the designation already exists for this incident
+        const { error: insertError } = await supabase
+          .from('vehicles')
+          .upsert({ ...payload, checkin_datetime: new Date().toISOString() }, { onConflict: 'incident_id, designation' });
+        if (insertError) throw insertError;
+        setSuccess(`Vehicle ${formData.designation} checked in.`);
+      }
+      await fetchTable('vehicles');
+      if (stayOpen) {
+        setEditingVehicle(null);
+        setShowVehicleModal(true);
+      } else {
+        setShowVehicleModal(false);
+        setEditingVehicle(null);
+      }
+    } catch (err) {
+      setError(err.message || 'Failed to save vehicle.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const openEditTeamForm = async (team) => {
     if (!team) return;
     setLoading(true);
     try {
-      // Fetch current membership and roles to populate the unified composition table
-      const { data: members } = await supabase
-        .from('team_responders')
-        .select('responder_id, role')
-        .eq('team_id', team.team_id);
+      // Requirement: Fetch current membership, roles, and vehicle attachments for reconciliation
+      const [membersRes, vehiclesRes] = await Promise.all([
+        supabase
+          .from('team_responders')
+          .select('responder_id, role')
+          .eq('team_id', team.team_id),
+        supabase
+          .from('vehicles')
+          .select('vehicle_id')
+          .eq('team_id', team.team_id)
+      ]);
+
+      const members = membersRes.data || [];
+      const currentVehicles = vehiclesRes.data || [];
       
       setEditingTeam({
         ...team,
-        current_responders: members || [],
-        responder_ids: members?.map(m => m.responder_id) || []
+        current_responders: members,
+        responder_ids: members.map(m => m.responder_id),
+        current_vehicles: currentVehicles,
+        vehicle_ids: currentVehicles.map(v => v.vehicle_id)
       });
       setShowTeamModal(true);
     } finally {
@@ -529,6 +574,18 @@ const AdminPage = () => {
           ...toRemove.map(id => supabase.from('team_responders').delete().eq('team_id', teamId).eq('responder_id', id))
         ]);
 
+        // 3. Reconcile vehicles
+        const finalVehIds = formData.vehicle_ids || [];
+        const originalVehIds = editingTeam?.current_vehicles?.map(v => v.vehicle_id) || [];
+        
+        const vehToAdd = finalVehIds.filter(id => !originalVehIds.includes(id));
+        const vehToRemove = originalVehIds.filter(id => !finalVehIds.includes(id));
+
+        await Promise.all([
+          ...vehToAdd.map(id => supabase.from('vehicles').update({ team_id: teamId }).eq('vehicle_id', id)),
+          ...vehToRemove.map(id => supabase.from('vehicles').update({ team_id: null }).eq('vehicle_id', id))
+        ]);
+
         setSuccess(`Team ${formData.team_name_number} updated.`);
       } else {
         // Adding new team to the current active incident context
@@ -558,6 +615,12 @@ const AdminPage = () => {
                role: roles[id] || '' 
              })
            ));
+        }
+
+        // Process initial vehicle assignments
+        const finalVehIds = formData.vehicle_ids || [];
+        if (finalVehIds.length > 0) {
+          await supabase.from('vehicles').update({ team_id: newTeamId }).in('vehicle_id', finalVehIds);
         }
 
         setSuccess(`Team ${formData.team_name_number} created.`);
@@ -704,6 +767,41 @@ const AdminPage = () => {
       await fetchTable('responders');
     } catch (err) {
       setError('Failed to delete responder: ' + err.message);
+    }
+  };
+
+  const handleCheckOutVehicle = async (id) => {
+    if (!window.confirm('Mark this vehicle as checked out?')) return;
+    try {
+      setLoading(true);
+      const now = new Date().toISOString();
+      const { error: updateError } = await supabase
+        .from('vehicles')
+        .update({ status: 'CheckedOut', checkout_datetime: now })
+        .eq('vehicle_id', id);
+
+      if (updateError) throw updateError;
+      const vehicle = allVehicles.find(v => v.vehicle_id === id);
+      await recordAction?.(`Admin checked out vehicle "${vehicle?.designation || 'Unknown'}" (ID: ${id}).`);
+      setSuccess('Vehicle checked out.');
+      await fetchTable('vehicles');
+    } catch (err) {
+      setError('Failed to check out vehicle: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteVehicle = async (id, designation) => {
+    if (!window.confirm(`Permanently delete vehicle "${designation}"?`)) return;
+    try {
+      const { error: deleteError } = await supabase.from('vehicles').delete().eq('vehicle_id', id);
+      if (deleteError) throw deleteError;
+      await recordAction?.(`Admin deleted vehicle "${designation}" (ID: ${id}).`);
+      setSuccess('Vehicle record deleted.');
+      await fetchTable('vehicles');
+    } catch (err) {
+      setError('Failed to delete vehicle: ' + err.message);
     }
   };
 
@@ -1065,6 +1163,19 @@ const AdminPage = () => {
         }}
       />
 
+      <AdminVehiclesTable
+        allVehicles={allVehicles}
+        allIncidents={allIncidents}
+        allResponders={allResponders}
+        fetching={fetching}
+        isVehiclesExpanded={isVehiclesExpanded}
+        setIsVehiclesExpanded={setIsVehiclesExpanded}
+        handleCheckOutVehicle={handleCheckOutVehicle}
+        handleDeleteVehicle={handleDeleteVehicle}
+        handleEditVehicle={(v) => { setEditingVehicle(v); setShowVehicleModal(true); }}
+        handleNewVehicle={() => { setEditingVehicle(null); setShowVehicleModal(true); }}
+      />
+
       <AdminTeamsTable
         allTeams={allTeams}
         allIncidents={allIncidents}
@@ -1127,6 +1238,16 @@ const AdminPage = () => {
         isAdminMode={true}
       />
 
+      <VehicleFormModal
+        isOpen={showVehicleModal}
+        onClose={() => setShowVehicleModal(false)}
+        onSave={handleSaveVehicle}
+        initialData={editingVehicle}
+        responders={allResponders}
+        loading={loading}
+        error={error}
+      />
+
       <TeamFormModal
         isOpen={showTeamModal}
         onClose={() => setShowTeamModal(false)}
@@ -1135,7 +1256,9 @@ const AdminPage = () => {
         loading={loading}
         error={error}
         responders={allResponders}
+        vehicles={allVehicles}
         commandStaffExists={commandStaffExists}
+        onEditVehicle={(v) => { setEditingVehicle(v); setShowVehicleModal(true); }}
       />
 
       <AssignmentFormModal

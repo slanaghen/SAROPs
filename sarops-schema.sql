@@ -86,6 +86,7 @@ DROP TABLE IF EXISTS incidents CASCADE;
 DROP TABLE IF EXISTS responders CASCADE;
 DROP TABLE IF EXISTS operational_periods CASCADE;
 DROP TABLE IF EXISTS teams CASCADE;
+DROP TABLE IF EXISTS vehicles CASCADE;
 DROP TABLE IF EXISTS assignments CASCADE;
 DROP TABLE IF EXISTS responder_team_history CASCADE;
 DROP TABLE IF EXISTS clues CASCADE;
@@ -127,6 +128,7 @@ CREATE TABLE responders (
   cell_phone TEXT,
   device_id TEXT NOT NULL,
   special_skills TEXT,
+  vehicles TEXT,
   checkin_datetime TIMESTAMP WITH TIME ZONE NOT NULL,
   checkout_datetime TIMESTAMP WITH TIME ZONE,
   access_level access_level NOT NULL DEFAULT 'responder',
@@ -169,6 +171,24 @@ CREATE TABLE teams (
   par_status TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Table: vehicles
+-- Vehicles and equipment used during an incident
+CREATE TABLE vehicles (
+  vehicle_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  incident_id TEXT NOT NULL REFERENCES incidents(incident_id) ON DELETE CASCADE ON UPDATE CASCADE,
+  responder_id UUID REFERENCES responders(responder_id) ON DELETE CASCADE,
+  designation TEXT NOT NULL, -- e.g., "3121", "Rescue 1"
+  type TEXT, -- e.g., "UTV", "Boat", "Helicopter"
+  status responder_status NOT NULL DEFAULT 'Staged',
+  team_id UUID REFERENCES teams(team_id) ON DELETE SET NULL,
+  checkin_datetime TIMESTAMP WITH TIME ZONE NOT NULL,
+  checkout_datetime TIMESTAMP WITH TIME ZONE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT vehicle_incident_designation_unique UNIQUE (incident_id, designation),
+  CONSTRAINT check_vehicle_checkout_date_presence CHECK (status != 'CheckedOut' OR checkout_datetime IS NOT NULL)
 );
 
 -- Ensure only one Staff team per operational period
@@ -318,6 +338,11 @@ CREATE INDEX idx_responders_status ON responders(status);
 CREATE INDEX idx_responders_device_id ON responders(device_id);
 CREATE INDEX idx_responders_access_level ON responders(access_level);
 
+CREATE INDEX idx_vehicles_incident_id ON vehicles(incident_id);
+CREATE INDEX idx_vehicles_responder_id ON vehicles(responder_id);
+CREATE INDEX idx_vehicles_team_id ON vehicles(team_id);
+CREATE INDEX idx_vehicles_status ON vehicles(status);
+
 CREATE INDEX idx_action_logs_incident_id ON action_logs(incident_id);
 CREATE INDEX idx_team_messages_composite ON team_messages(team_id, created_at);
 
@@ -352,7 +377,22 @@ SELECT
       WHERE tr.team_id = t.team_id
     ),
     '[]'::json
-  ) AS current_responders
+  ) AS current_responders,
+  COALESCE(
+    (
+      SELECT json_agg(
+        json_build_object(
+          'vehicle_id', v.vehicle_id,
+          'designation', v.designation,
+          'type', v.type,
+          'status', v.status
+        )
+      )
+      FROM vehicles v
+      WHERE v.team_id = t.team_id
+    ),
+    '[]'::json
+  ) AS current_vehicles
 FROM teams t
 LEFT JOIN responders r ON t.leader_responder_id = r.responder_id
 JOIN operational_periods op ON t.op_period_id = op.op_period_id
@@ -525,6 +565,12 @@ BEGIN
             SELECT responder_id FROM team_responders WHERE team_id = NEW.team_id
         )
         AND status IS DISTINCT FROM _target_responder_status;
+
+        -- Synchronize status for attached vehicles
+        UPDATE vehicles
+        SET status = _target_responder_status
+        WHERE team_id = NEW.team_id
+        AND status IS DISTINCT FROM _target_responder_status;
     END IF;
 
     -- 2. Automatically close team history logs on disbandment
@@ -553,6 +599,32 @@ BEGIN
 END;
 $func$ LANGUAGE plpgsql SECURITY DEFINER;
 
+-- Function to sync vehicle status when it is linked to or unlinked from a team
+CREATE OR REPLACE FUNCTION sync_vehicle_status_on_team_link()
+RETURNS TRIGGER AS $func$
+DECLARE
+    _team_status team_status;
+BEGIN
+    IF NEW.team_id IS NOT NULL AND (TG_OP = 'INSERT' OR OLD.team_id IS DISTINCT FROM NEW.team_id) THEN
+        SELECT status INTO _team_status FROM teams WHERE team_id = NEW.team_id;
+        NEW.status := CASE 
+            WHEN _team_status = 'Staged' THEN 'Attached'::responder_status
+            WHEN _team_status = 'Assigned' THEN 'Assigned'::responder_status
+            WHEN _team_status = 'Deployed' THEN 'Deployed'::responder_status
+            ELSE NEW.status
+        END;
+    ELSIF NEW.team_id IS NULL AND OLD.team_id IS NOT NULL THEN
+        -- If unlinked, return to Staged
+        NEW.status := 'Staged'::responder_status;
+    END IF;
+    RETURN NEW;
+END;
+$func$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE TRIGGER trigger_sync_vehicle_status_on_team_link
+BEFORE UPDATE OF team_id ON vehicles
+FOR EACH ROW EXECUTE FUNCTION sync_vehicle_status_on_team_link();
+
 -- Trigger to ensure Staff team always exists for every operational period
 CREATE TRIGGER ensure_staff_team_on_new_op
 AFTER INSERT ON operational_periods
@@ -566,6 +638,9 @@ CREATE TRIGGER update_operational_periods_updated_at BEFORE UPDATE ON operationa
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_teams_updated_at BEFORE UPDATE ON teams
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_vehicles_updated_at BEFORE UPDATE ON vehicles
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- Trigger for status changes on the teams table
@@ -701,6 +776,11 @@ BEGIN
 
         -- 4. Check out all responders currently active in this incident
         UPDATE responders
+        SET status = 'CheckedOut', checkout_datetime = NEW.end_datetime
+        WHERE incident_id = NEW.incident_id AND checkout_datetime IS NULL;
+
+        -- 5. Check out all vehicles currently active in this incident
+        UPDATE vehicles
         SET status = 'CheckedOut', checkout_datetime = NEW.end_datetime
         WHERE incident_id = NEW.incident_id AND checkout_datetime IS NULL;
 
@@ -915,22 +995,22 @@ $func$ LANGUAGE sql STABLE SECURITY DEFINER;
 -- SECURITY DEFINER is required to prevent recursion in RLS
 CREATE OR REPLACE FUNCTION check_is_operational_staff()
 RETURNS BOOLEAN AS $func$
-BEGIN
-  RETURN (
-    -- Use auth.uid to join against auth.users for a reliable system user check
+  SELECT (
     EXISTS (
+      SELECT 1 WHERE (auth.jwt() ->> 'access_level') IN ('staff', 'admin')
+    )
+    OR EXISTS (
       SELECT 1 FROM users 
-      WHERE email = (SELECT email FROM auth.users WHERE id = auth.uid())
+      WHERE email = (SELECT email FROM auth.users WHERE id = (SELECT auth.uid()))
       AND access_level IN ('staff', 'admin')
     )
     OR EXISTS (
       SELECT 1 FROM responders 
-      WHERE auth_uid = auth.uid() 
+      WHERE auth_uid = (SELECT auth.uid()) 
       AND access_level IN ('staff', 'admin')
     )
   );
-END;
-$func$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
+$func$ LANGUAGE sql STABLE SECURITY DEFINER;
 
 -- Helper to check if an incident is active
 CREATE OR REPLACE FUNCTION is_incident_active(_incident_id TEXT)
@@ -1072,13 +1152,26 @@ CREATE OR REPLACE FUNCTION checkin_responder_securely(
   p_cell_phone TEXT DEFAULT NULL,
   p_responder_type TEXT DEFAULT 'SAR',
   p_special_skills TEXT DEFAULT NULL,
+  p_vehicles TEXT DEFAULT NULL,
   p_access_level TEXT DEFAULT 'responder',
   p_status TEXT DEFAULT 'Staged',
   p_device_id TEXT DEFAULT NULL
 )
 RETURNS SETOF responders AS $func$
+DECLARE
+    _responder_record responders;
+    _team_id UUID;
+    _v_text TEXT;
 BEGIN
-  RETURN QUERY
+  -- Resolve the authenticated user's email if available to cross-reference system access levels
+  -- This ensures that even in anonymous sessions, if the user's responder record was 
+  -- promoted to staff/admin, they retain visibility.
+  IF p_access_level = 'responder' THEN
+    -- If no explicit level provided, check if this user already has elevated status in this incident
+    SELECT access_level INTO p_access_level FROM responders WHERE device_id = p_device_id OR (auth_uid = p_auth_uid AND auth_uid IS NOT NULL) LIMIT 1;
+        p_access_level := COALESCE(p_access_level, 'responder');
+  END IF;
+
   INSERT INTO responders (
     incident_id, 
     auth_uid, 
@@ -1088,6 +1181,7 @@ BEGIN
     cell_phone, 
     responder_type, 
     special_skills, 
+    vehicles,
     access_level, 
     status, 
     device_id, 
@@ -1102,6 +1196,7 @@ BEGIN
     p_cell_phone, 
     p_responder_type::responder_type, 
     p_special_skills, 
+    p_vehicles,
     p_access_level::access_level, 
     p_status::responder_status, 
     COALESCE(p_device_id, 'web_' || p_auth_uid || '_' || p_incident_id),
@@ -1115,18 +1210,51 @@ BEGIN
         cell_phone = EXCLUDED.cell_phone,
         responder_type = EXCLUDED.responder_type,
         special_skills = EXCLUDED.special_skills,
+        vehicles = EXCLUDED.vehicles,
         access_level = EXCLUDED.access_level,
         status = EXCLUDED.status,
     auth_uid = EXCLUDED.auth_uid,
         checkin_datetime = EXCLUDED.checkin_datetime,
     updated_at = CURRENT_TIMESTAMP
-  RETURNING *;
+  RETURNING * INTO _responder_record;
+
+  -- Determine if this responder is already attached to an active team
+  -- (This ensures vehicles follow the driver if they are already assigned)
+  SELECT tr.team_id INTO _team_id
+  FROM team_responders tr
+  JOIN teams t ON tr.team_id = t.team_id
+  WHERE tr.responder_id = _responder_record.responder_id
+    AND t.status != 'Disbanded'
+  LIMIT 1;
+
+  -- Handle vehicles list if provided
+  IF p_vehicles IS NOT NULL AND p_vehicles <> '' THEN
+    FOR _v_text IN SELECT trim(s) FROM unnest(string_to_array(p_vehicles, ',')) s LOOP
+      IF _v_text <> '' THEN
+        INSERT INTO vehicles (incident_id, responder_id, designation, checkin_datetime, status, team_id)
+        VALUES (p_incident_id, _responder_record.responder_id, _v_text, CURRENT_TIMESTAMP, 
+                CASE WHEN _team_id IS NOT NULL THEN 'Attached'::responder_status ELSE 'Staged'::responder_status END, 
+                _team_id)
+        ON CONFLICT (incident_id, designation) DO UPDATE SET 
+          responder_id = EXCLUDED.responder_id,
+          team_id = COALESCE(vehicles.team_id, EXCLUDED.team_id),
+          status = CASE 
+            WHEN vehicles.team_id IS NULL AND EXCLUDED.team_id IS NULL THEN 'Staged'::responder_status 
+            ELSE vehicles.status 
+          END,
+          checkout_datetime = NULL,
+          updated_at = CURRENT_TIMESTAMP;
+      END IF;
+    END LOOP;
+  END IF;
+
+  RETURN NEXT _responder_record;
 END;
 $func$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Policies for `incidents`
 CREATE POLICY "Allow all authenticated to view active incidents" ON incidents 
-  FOR SELECT TO authenticated USING (end_datetime IS NULL);
+  FOR SELECT TO authenticated USING (TRUE); -- Allow all users to see incident list for selection
 CREATE POLICY "Admins can manage all incidents" ON incidents 
   FOR ALL TO authenticated USING (check_is_operational_staff()) WITH CHECK (check_is_operational_staff());
 CREATE POLICY "Allow anonymous to start an incident" ON incidents
@@ -1151,6 +1279,17 @@ CREATE POLICY "Allow team leaders to update their members" ON responders
   WITH CHECK (is_leader_of_member(responder_id) OR check_is_operational_staff());
 CREATE POLICY "Admins/Staff can manage all responders" ON responders
   FOR ALL TO authenticated USING (check_is_operational_staff()) WITH CHECK (check_is_operational_staff());
+
+-- Policies for `vehicles`
+CREATE POLICY "Allow all authenticated to view active vehicles" ON vehicles
+  FOR SELECT TO authenticated
+  USING (TRUE); -- Allow all authenticated users to see equipment lists for planning/setup
+CREATE POLICY "Admins/Staff can manage all vehicles" ON vehicles
+  FOR ALL TO authenticated USING (check_is_operational_staff()) WITH CHECK (check_is_operational_staff());
+CREATE POLICY "Allow team leaders to update their vehicles" ON vehicles
+  FOR UPDATE TO authenticated
+  USING (is_leader_of_team(team_id) OR check_is_operational_staff())
+  WITH CHECK (is_leader_of_team(team_id) OR check_is_operational_staff());
 
 -- Policies for `operational_periods`
 -- REVISED: Allow any authenticated user to view operational periods if their parent incident is active.
@@ -1300,6 +1439,7 @@ CREATE OR REPLACE FUNCTION admin_add_user(
   p_phone TEXT DEFAULT NULL,
   p_type TEXT DEFAULT NULL,
   p_skills TEXT DEFAULT NULL,
+  p_vehicles TEXT DEFAULT NULL,
   p_display_density TEXT DEFAULT 'comfortable'
 )
 RETURNS VOID AS $outer_func$
@@ -1320,6 +1460,7 @@ BEGIN
       cell_phone = p_phone,
       responder_type = p_type::responder_type,
       special_skills = p_skills,
+      vehicles = p_vehicles,
       display_density = p_display_density::display_density
     WHERE LOWER(TRIM(email)) = LOWER(TRIM(p_email));
   ELSE
@@ -1327,11 +1468,11 @@ BEGIN
     INSERT INTO users (
       email, username, password, access_level,
       name, agency, identifier, cell_phone, responder_type, special_skills, 
-      display_density
+      vehicles, display_density
     )
     VALUES (
       LOWER(TRIM(p_email)), p_username, crypt(p_password, gen_salt('bf')), p_access_level::access_level,
-      p_name, p_agency, p_identifier, p_phone, p_type::responder_type, p_skills, 
+      p_name, p_agency, p_identifier, p_phone, p_type::responder_type, p_skills, p_vehicles,
       p_display_density::display_density
     );
   END IF;
@@ -1373,6 +1514,7 @@ BEGIN
             email TEXT, username TEXT, password TEXT, access_level_text TEXT,
             name TEXT, agency TEXT, identifier TEXT, cell_phone TEXT, 
             responder_type_text TEXT, special_skills TEXT, 
+            vehicles TEXT,
             display_density_text TEXT, created_at TIMESTAMP WITH TIME ZONE
         )';
         
@@ -1381,7 +1523,7 @@ BEGIN
         EXECUTE format('INSERT INTO users_temp_backup (
                     email, username, password, access_level_text, name, agency, 
                     identifier, cell_phone, responder_type_text, special_skills, 
-                    display_density_text, created_at
+                    vehicles, display_density_text, created_at
                  )
                  SELECT 
                     email, 
@@ -1394,6 +1536,7 @@ BEGIN
                     %s, -- Arg 6: cell_phone
                     %s, -- Arg 7: responder_type
                     %s, -- Arg 8: special_skills
+                    %s, -- Arg 11: vehicles
                     %s, -- Arg 9: display_density
                     %s  -- Arg 10: created_at
                  FROM users',
@@ -1405,6 +1548,7 @@ BEGIN
                  CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='cell_phone') THEN 'cell_phone' ELSE 'NULL' END,
                  CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='responder_type') THEN 'responder_type::TEXT' ELSE '''SAR''' END,
                  CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='special_skills') THEN 'special_skills' ELSE 'NULL' END,
+                 CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='vehicles') THEN 'vehicles' ELSE 'NULL' END,
                  CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='display_density') THEN 'display_density::TEXT' ELSE '''comfortable''' END,
                  CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='created_at') THEN 'created_at' ELSE 'CURRENT_TIMESTAMP' END
         );
@@ -1440,6 +1584,7 @@ BEGIN
     EXECUTE 'DROP TABLE IF EXISTS responders CASCADE;';
     EXECUTE 'DROP TABLE IF EXISTS operational_periods CASCADE;';
     EXECUTE 'DROP TABLE IF EXISTS teams CASCADE;';
+    EXECUTE 'DROP TABLE IF EXISTS vehicles CASCADE;';
     EXECUTE 'DROP TABLE IF EXISTS assignments CASCADE;';
     EXECUTE 'DROP TABLE IF EXISTS responder_team_history CASCADE;';
     EXECUTE 'DROP TABLE IF EXISTS clues CASCADE;';
@@ -1515,6 +1660,22 @@ BEGIN
       par_status TEXT,
       created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );';
+
+    EXECUTE 'CREATE TABLE vehicles (
+      vehicle_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      incident_id TEXT NOT NULL REFERENCES incidents(incident_id) ON DELETE CASCADE ON UPDATE CASCADE,
+      responder_id UUID REFERENCES responders(responder_id) ON DELETE CASCADE,
+      designation TEXT NOT NULL,
+      type TEXT,
+      status responder_status NOT NULL DEFAULT ''Staged'',
+      team_id UUID REFERENCES teams(team_id) ON DELETE SET NULL,
+      checkin_datetime TIMESTAMP WITH TIME ZONE NOT NULL,
+      checkout_datetime TIMESTAMP WITH TIME ZONE,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT vehicle_incident_designation_unique UNIQUE (incident_id, designation),
+      CONSTRAINT check_vehicle_checkout_date_presence CHECK (status != ''CheckedOut'' OR checkout_datetime IS NOT NULL)
     );';
 
     EXECUTE 'CREATE UNIQUE INDEX idx_one_staff_per_op
@@ -1613,6 +1774,7 @@ BEGIN
       cell_phone TEXT,
       responder_type responder_type,
       special_skills TEXT,
+      vehicles TEXT,
       display_density display_density DEFAULT ''comfortable'',
       created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
     );';
@@ -1640,6 +1802,11 @@ BEGIN
     EXECUTE 'CREATE INDEX idx_responders_status ON responders(status);';
     EXECUTE 'CREATE INDEX idx_responders_device_id ON responders(device_id);';
     EXECUTE 'CREATE INDEX idx_responders_access_level ON responders(access_level);';
+
+    EXECUTE 'CREATE INDEX idx_vehicles_incident_id ON vehicles(incident_id);';
+    EXECUTE 'CREATE INDEX idx_vehicles_responder_id ON vehicles(responder_id);';
+    EXECUTE 'CREATE INDEX idx_vehicles_team_id ON vehicles(team_id);';
+    EXECUTE 'CREATE INDEX idx_vehicles_status ON vehicles(status);';
 
     EXECUTE 'CREATE INDEX idx_action_logs_incident_id ON action_logs(incident_id);';
     EXECUTE 'CREATE INDEX idx_team_messages_composite ON team_messages(team_id, created_at);';
@@ -1670,7 +1837,22 @@ BEGIN
           WHERE tr.team_id = t.team_id
         ),
         ''[]''::json
-      ) AS current_responders
+      ) AS current_responders,
+      COALESCE(
+        (
+          SELECT json_agg(
+            json_build_object(
+              ''vehicle_id'', v.vehicle_id,
+              ''designation'', v.designation,
+              ''type'', v.type,
+              ''status'', v.status
+            )
+          )
+          FROM vehicles v
+          WHERE v.team_id = t.team_id
+        ),
+        ''[]''::json
+      ) AS current_vehicles
     FROM teams t
     LEFT JOIN responders r ON t.leader_responder_id = r.responder_id
     JOIN operational_periods op ON t.op_period_id = op.op_period_id
@@ -1849,6 +2031,11 @@ BEGIN
                 SELECT responder_id FROM team_responders WHERE team_id = NEW.team_id
             )
             AND status IS DISTINCT FROM _target_responder_status;
+
+            UPDATE vehicles
+            SET status = _target_responder_status
+            WHERE team_id = NEW.team_id
+            AND status IS DISTINCT FROM _target_responder_status;
         END IF;
 
         IF NEW.status = ''Disbanded'' AND OLD.status IS DISTINCT FROM NEW.status THEN
@@ -1894,6 +2081,9 @@ BEGIN
       FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();';
 
     EXECUTE 'CREATE TRIGGER update_teams_updated_at BEFORE UPDATE ON teams
+      FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();';
+
+    EXECUTE 'CREATE TRIGGER update_vehicles_updated_at BEFORE UPDATE ON vehicles
       FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();';
 
     EXECUTE 'CREATE TRIGGER sync_team_status_on_team_update
@@ -1972,6 +2162,10 @@ BEGIN
               AND status != ''Disbanded'';
 
             UPDATE responders
+            SET status = ''CheckedOut'', checkout_datetime = NEW.end_datetime
+            WHERE incident_id = NEW.incident_id AND checkout_datetime IS NULL;
+
+            UPDATE vehicles
             SET status = ''CheckedOut'', checkout_datetime = NEW.end_datetime
             WHERE incident_id = NEW.incident_id AND checkout_datetime IS NULL;
 
@@ -2164,8 +2358,10 @@ BEGIN
     RETURNS BOOLEAN AS $func$
     BEGIN
       RETURN (
+    -- Allow if the user has an explicit staff/admin session via Auth metadata or custom claims
+    (auth.jwt() ->> access_level) IN (''staff'', ''admin'')
         -- Use auth.uid to join against auth.users for a reliable system user check
-        EXISTS (
+    OR EXISTS (
           SELECT 1 FROM users 
           WHERE email = (SELECT email FROM auth.users WHERE id = auth.uid()) 
           AND access_level IN (''staff'', ''admin'')
@@ -2278,6 +2474,7 @@ BEGIN
       p_cell_phone TEXT DEFAULT NULL,
       p_responder_type TEXT DEFAULT ''SAR'',
       p_special_skills TEXT DEFAULT NULL,
+      p_vehicles TEXT DEFAULT NULL,
       p_access_level TEXT DEFAULT ''responder'',
       p_status TEXT DEFAULT ''Staged'',
       p_device_id TEXT DEFAULT NULL
@@ -2288,11 +2485,12 @@ BEGIN
       INSERT INTO responders (
         incident_id, auth_uid, name, agency, identifier, 
         cell_phone, responder_type, special_skills, 
+        vehicles,
         access_level, status, device_id, checkin_datetime
       )
       VALUES (
         p_incident_id, p_auth_uid, p_name, p_agency, p_identifier, 
-        p_cell_phone, p_responder_type::responder_type, p_special_skills, 
+        p_cell_phone, p_responder_type::responder_type, p_special_skills, p_vehicles,
         p_access_level::access_level, p_status::responder_status, 
         COALESCE(p_device_id, ''web_'' || p_auth_uid || ''_'' || p_incident_id),
         CURRENT_TIMESTAMP
@@ -2305,6 +2503,7 @@ BEGIN
         cell_phone = EXCLUDED.cell_phone,
         responder_type = EXCLUDED.responder_type,
         special_skills = EXCLUDED.special_skills,
+        vehicles = EXCLUDED.vehicles,
         access_level = EXCLUDED.access_level,
         status = EXCLUDED.status,
         auth_uid = EXCLUDED.auth_uid,
@@ -2315,7 +2514,7 @@ BEGIN
     $inner_func$ LANGUAGE plpgsql SECURITY DEFINER;';
 
     EXECUTE 'CREATE POLICY "Allow all authenticated to view active incidents" ON incidents
-      FOR SELECT TO authenticated USING (end_datetime IS NULL);';
+      FOR SELECT TO authenticated USING (TRUE);';
     EXECUTE 'CREATE POLICY "Admins can manage all incidents" ON incidents
       FOR ALL TO authenticated USING (check_is_operational_staff()) WITH CHECK (check_is_operational_staff());';
     EXECUTE 'CREATE POLICY "Allow anonymous to start an incident" ON incidents
@@ -2336,6 +2535,16 @@ BEGIN
       WITH CHECK (is_leader_of_member(responder_id) OR check_is_operational_staff());';
     EXECUTE 'CREATE POLICY "Admins/Staff can manage all responders" ON responders
       FOR ALL TO authenticated USING (check_is_operational_staff()) WITH CHECK (check_is_operational_staff());';
+
+    EXECUTE 'CREATE POLICY "Allow all authenticated to view active vehicles" ON vehicles
+      FOR SELECT TO authenticated
+      USING (TRUE);';
+    EXECUTE 'CREATE POLICY "Admins/Staff can manage all vehicles" ON vehicles
+      FOR ALL TO authenticated USING (check_is_operational_staff()) WITH CHECK (check_is_operational_staff());';
+    EXECUTE 'CREATE POLICY "Allow team leaders to update their vehicles" ON vehicles
+      FOR UPDATE TO authenticated
+      USING (is_leader_of_team(team_id) OR check_is_operational_staff())
+      WITH CHECK (is_leader_of_team(team_id) OR check_is_operational_staff());';
 
     EXECUTE 'CREATE POLICY "Allow authenticated to view active operational periods" ON operational_periods
       FOR SELECT TO authenticated USING (incident_id IN (SELECT incident_id FROM incidents WHERE end_datetime IS NULL));';
@@ -2456,6 +2665,7 @@ BEGIN
       p_phone TEXT DEFAULT NULL,
       p_type TEXT DEFAULT NULL,
       p_skills TEXT DEFAULT NULL,
+      p_vehicles TEXT DEFAULT NULL,
       p_display_density TEXT DEFAULT ''comfortable''
     )
     RETURNS VOID AS $func$
@@ -2476,6 +2686,7 @@ BEGIN
           cell_phone = p_phone,
           responder_type = p_type::responder_type,
           special_skills = p_skills,
+          vehicles = p_vehicles,
           display_density = p_display_density::display_density
     WHERE LOWER(TRIM(email)) = LOWER(TRIM(p_email));
       ELSE
@@ -2484,11 +2695,11 @@ BEGIN
         INSERT INTO users (
           email, username, password, access_level,
           name, agency, identifier, cell_phone, responder_type, special_skills, 
-          display_density
+          vehicles, display_density
         )
         VALUES (
           LOWER(TRIM(p_email)), p_username, crypt(p_password, gen_salt(''bf'')), p_access_level::access_level,
-          p_name, p_agency, p_identifier, p_phone, p_type::responder_type, p_skills, 
+          p_name, p_agency, p_identifier, p_phone, p_type::responder_type, p_skills, p_vehicles,
           p_display_density::display_density
         );
       END IF;
@@ -2513,29 +2724,29 @@ BEGIN
 
     -- Restore users from backup
     IF EXISTS (SELECT FROM pg_class WHERE relname = 'users_temp_backup') THEN
-        EXECUTE 'INSERT INTO users (email, username, password, access_level, name, agency, identifier, cell_phone, responder_type, special_skills, display_density, created_at)
-        SELECT email, COALESCE(username, email), password, access_level_text::access_level, name, agency, identifier, cell_phone, responder_type_text::responder_type, special_skills, display_density_text::display_density, created_at
-        FROM users_temp_backup ON CONFLICT (email) DO NOTHING';
+        EXECUTE $restore$INSERT INTO users (email, username, password, access_level, name, agency, identifier, cell_phone, responder_type, special_skills, vehicles, display_density, created_at)
+        SELECT email, COALESCE(username, email), password, access_level_text::access_level, name, agency, identifier, cell_phone, responder_type_text::responder_type, special_skills, vehicles, display_density_text::display_density, created_at
+        FROM users_temp_backup ON CONFLICT (email) DO NOTHING$restore$;
         EXECUTE 'DROP TABLE users_temp_backup';
     END IF;
 
     -- Re-apply grants inside the re-initialization block to ensure API access persists
-    EXECUTE 'GRANT EXECUTE ON FUNCTION admin_add_user(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated;';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION admin_add_user(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated;';
     EXECUTE 'GRANT EXECUTE ON FUNCTION admin_remove_user(TEXT) TO authenticated;';
     EXECUTE 'GRANT EXECUTE ON FUNCTION admin_update_password(TEXT, TEXT) TO authenticated;';
     EXECUTE 'GRANT EXECUTE ON FUNCTION verify_user_login(TEXT, TEXT) TO anon, authenticated;';
-    EXECUTE 'GRANT EXECUTE ON FUNCTION checkin_responder_securely(TEXT, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated;';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION checkin_responder_securely(TEXT, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated;';
     EXECUTE 'GRANT EXECUTE ON FUNCTION start_next_operational_period(TEXT, UUID) TO authenticated;';
     EXECUTE 'GRANT EXECUTE ON FUNCTION reinitialize_database TO authenticated;';
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Grant execute permissions to ensure functions are visible to the API
-GRANT EXECUTE ON FUNCTION admin_add_user(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION admin_add_user(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION admin_remove_user TO authenticated;
 GRANT EXECUTE ON FUNCTION admin_update_password TO authenticated;
 GRANT EXECUTE ON FUNCTION verify_user_login TO anon, authenticated;
-GRANT EXECUTE ON FUNCTION checkin_responder_securely(TEXT, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION checkin_responder_securely(TEXT, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION start_next_operational_period(TEXT, UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION reinitialize_database TO authenticated;
 
@@ -2553,7 +2764,7 @@ VALUES (
   'SL-001', 
   '303-555-1234', 
   'SAR', 
-  'Leadership, Good looking, Heroic'
+  ''
 ) ON CONFLICT (email) DO NOTHING;
 INSERT INTO users (email, username, password, access_level, name, agency, identifier, cell_phone, responder_type, special_skills) 
 VALUES (
@@ -2579,5 +2790,5 @@ VALUES (
   'SL-003', 
   '303-555-1234', 
   'SAR', 
-  'Leadership, Starstudded'
+  'Swiftwater Rescue, Paramedic'
 ) ON CONFLICT (email) DO NOTHING;

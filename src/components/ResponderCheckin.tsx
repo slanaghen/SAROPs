@@ -4,7 +4,6 @@ import { v4 as uuidv4 } from 'uuid';
 import { supabase } from '../lib/supabase';
 import { Responder, ResponderStatus, AccessLevel, ResponderType } from '../types/sarops-types';
 import { getResponderByIdentifier } from '../services/responderService';
-import { SKILLS_LIST } from '../constants/operationalConstants';
 import '../styles/ResponderCheckin.css';
 
 /**
@@ -38,6 +37,7 @@ interface ResponderCheckinProps {
     identifier: string;
     cell_phone: string;
     special_skills: string;
+    vehicles: string;
     responder_type: ResponderType | '';
   };
 }
@@ -64,6 +64,7 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
     cell_phone: '',
     special_skills: '',
     responder_type: '', // New field
+    vehicles: '',
   });
 
   // UI state
@@ -79,6 +80,7 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
     cell_phone: string;
     responder_type: ResponderType | '';
     special_skills: string;
+    vehicles: string;
     incident_id?: string;
   } | null>(null);
 
@@ -115,17 +117,12 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
   /**
    * Handle form input changes
    */
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, type } = e.target;
     let processedValue: any;
 
-    if (type === 'select-multiple') {
-      const select = e.target as HTMLSelectElement;
-      processedValue = Array.from(select.selectedOptions).map(opt => opt.value).filter(v => v !== '').join(', ');
-    } else {
-      const { value, checked } = e.target as HTMLInputElement;
-      processedValue = type === 'checkbox' ? checked : (name === 'cell_phone' ? formatPhoneNumber(value) : (type === 'radio' ? value : value));
-    }
+    const { value, checked } = e.target as HTMLInputElement;
+    processedValue = type === 'checkbox' ? checked : (name === 'cell_phone' ? formatPhoneNumber(value) : (type === 'radio' ? value : value));
 
     setFormData(prev => ({
       ...prev,
@@ -202,6 +199,7 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
       identifier: (data.identifier || '').trim(),
       cell_phone: (data.cell_phone || '').trim(),
       special_skills: (data.special_skills || '').trim() || undefined,
+      vehicles: (data.vehicles || '').trim() || undefined,
       responder_type: data.responder_type || undefined,
       access_level: initialAccessLevel,
       device_id: generateDeviceId(),
@@ -265,6 +263,8 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
         identifier: '',
         cell_phone: '',
         special_skills: '',
+        vehicles: '',
+        responder_type: '',
       });
       setConfirmationData(null);
 
@@ -391,31 +391,38 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
               </small>
             </div>
 
-            <div className="form-group">
-              <label htmlFor="special_skills">Capabilities</label>
-              <select
-                id="special_skills"
-                name="special_skills"
-                multiple
-                value={formData.special_skills ? formData.special_skills.split(', ') : []}
-                onChange={handleInputChange}
-                className="multi-select"
-                disabled={displayLoading}
-              >
-                <option value="">— Select Capability —</option>
-                <option value="Air Scent Dog">Air Scent Dog</option>
-                <option value="Trail Dog">Trail Dog</option>
-                <option value="Swiftwater">Swiftwater</option>
-                <option value="Dive">Dive</option>
-                <option value="Avalanche">Avalanche</option>
-                <option value="Rope Rescue">Rope Rescue</option>
-                <option value="Litter">Litter</option>
-                <option value="Medical">Medical</option>
-                <option value="Other">Other</option>
-              </select>
-              <small className="form-hint">
-                Hold Cmd (Mac) or Ctrl (Windows) to select multiple capabilities.
-              </small>
+            <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+              <div className="form-group" style={{ flex: 1, minWidth: '200px' }}>
+                <label htmlFor="special_skills">Capabilities</label>
+                <textarea
+                  id="special_skills"
+                  name="special_skills"
+                  value={formData.special_skills}
+                  onChange={handleInputChange}
+                  placeholder="e.g. EMT, K9 Handler, Rope Rescue, ..."
+                  disabled={displayLoading}
+                  style={{ height: '100px', resize: 'none' }}
+                />
+                <small className="form-hint">
+                  List specialized skills or certifications separated by commas.
+                </small>
+              </div>
+
+              <div className="form-group" style={{ flex: 1, minWidth: '200px' }}>
+                <label htmlFor="vehicles">Vehicles</label>
+                <textarea
+                  id="vehicles"
+                  name="vehicles"
+                  value={formData.vehicles}
+                  onChange={handleInputChange}
+                  placeholder="3121, UTV, boat, snowmobile, helicopter, ..."
+                  disabled={displayLoading}
+                  style={{ height: '100px', resize: 'none' }}
+                />
+                <small className="form-hint">
+                  List vehicle designations separated by commas.
+                </small>
+              </div>
             </div>
 
             <div className="form-group radio-form-group">
@@ -551,6 +558,13 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
                 <div className="detail-item">
                   <span className="detail-label">Capabilities:</span>
                   <span className="detail-value">{displayResponder.special_skills}</span>
+                </div>
+              ) : null}
+
+              {displayResponder.vehicles ? (
+                <div className="detail-item">
+                  <span className="detail-label">Vehicles:</span>
+                  <span className="detail-value">{displayResponder.vehicles}</span>
                 </div>
               ) : null}
 

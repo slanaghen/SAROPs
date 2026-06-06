@@ -9,6 +9,7 @@ import AssignmentFormModal from '../components/AssignmentFormModal';
 import BaseModal from '../components/BaseModal';
 import OperationsTable from '../components/OperationsTable';
 import OperationsMap from '../components/OperationsMap';
+import VehicleFormModal from '../components/admin/VehicleFormModal';
 import { checkIsParOverdue, formatTimeSince } from '../utils/operationalUtils';
 
 const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
@@ -20,7 +21,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   const operationalPeriodId = propOpId || incidentData?.opPeriodId;
 
   const {
-    teams, assignments, responders, opPeriod, loading, error, setError, setLoading, stats,
+    teams, assignments, responders, vehicles, opPeriod, loading, error, setError, setLoading, stats,
     fetchDashboardData, updateResourceStatus, assignTeamToAssignment, unassignTeam,
     createTeam, createAssignment, deleteAssignment, deleteTeam,
     detachTeam: disbandTeam, updateTeam, updateAssignment,
@@ -35,6 +36,8 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   const [showAssignmentForm, setShowAssignmentForm] = useState(false);
   const [teamForm, setTeamForm] = useState({});
   const [assignmentForm, setAssignmentForm] = useState({});
+  const [showVehicleForm, setShowVehicleForm] = useState(false);
+  const [editingVehicle, setEditingVehicle] = useState(null);
 
   const [pendingAssignmentId, setPendingAssignmentId] = useState(null);
   const [pendingTeamId, setPendingTeamId] = useState(null);
@@ -426,13 +429,54 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     if (!team) return;
     setLoading(true);
     try {
-      const { data: members } = await supabase.from('team_responders').select('responder_id, role').eq('team_id', team.team_id);
+      // Requirement: Fetch both current membership and vehicle attachments for reconciliation
+      const [membersRes, vehiclesRes] = await Promise.all([
+        supabase.from('team_responders').select('responder_id, role').eq('team_id', team.team_id),
+        supabase.from('vehicles').select('vehicle_id').eq('team_id', team.team_id)
+      ]);
+
+      const members = membersRes.data || [];
+      const currentVehicles = vehiclesRes.data || [];
+
       setTeamForm({
         ...team,
-        current_responders: members, // Ensure roles are passed to the modal
-        responder_ids: members?.map(m => m.responder_id) || []
+        current_responders: members,
+        responder_ids: members.map(m => m.responder_id),
+        current_vehicles: currentVehicles,
+        vehicle_ids: currentVehicles.map(v => v.vehicle_id)
       });
       setShowTeamForm(true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSaveVehicle = async (formData) => {
+    setLoading(true);
+    try {
+      const payload = {
+        designation: formData.designation,
+        type: formData.type,
+        status: formData.status,
+        responder_id: formData.responder_id || null,
+        incident_id: formData.incident_id || incidentId
+      };
+
+      if (formData.vehicle_id) {
+        const { error } = await supabase.from('vehicles').update(payload).eq('vehicle_id', formData.vehicle_id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from('vehicles')
+          .upsert({ ...payload, checkin_datetime: new Date().toISOString() }, { onConflict: 'incident_id, designation' });
+        if (error) throw error;
+      }
+      
+      await fetchDashboardData();
+      setShowVehicleForm(false);
+      setEditingVehicle(null);
+    } catch (err) {
+      setError(err.message || 'Failed to save vehicle');
     } finally {
       setLoading(false);
     }
@@ -476,8 +520,30 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
         const originalIds = teamById[formData.team_id]?.current_responders?.map(r => r.responder_id) || [];
         // Reconciliation is now handled within updateTeam
         await updateTeam(formData.team_id, payload, originalIds, finalIds, roles);
+
+        // Reconcile vehicles
+        const finalVehIds = formData.vehicle_ids || [];
+        const originalVehIds = teamById[formData.team_id]?.current_vehicles?.map(v => v.vehicle_id) || [];
+        const vehToAdd = finalVehIds.filter(id => !originalVehIds.includes(id));
+        const vehToRemove = originalVehIds.filter(id => !finalVehIds.includes(id));
+
+        await Promise.all([
+          ...vehToAdd.map(id => supabase.from('vehicles').update({ team_id: formData.team_id }).eq('vehicle_id', id)),
+          ...vehToRemove.map(id => supabase.from('vehicles').update({ team_id: null }).eq('vehicle_id', id))
+        ]);
       } else {
-        const newTeam = await createTeam({ ...payload, op_period_id: operationalPeriodId, responder_ids: formData.responder_ids, responder_roles: formData.responder_roles });
+        const newTeam = await createTeam({ 
+          ...payload, 
+          op_period_id: operationalPeriodId, 
+          responder_ids: formData.responder_ids, 
+          responder_roles: formData.responder_roles 
+        });
+        
+        // Process initial vehicle assignments for new team
+        if (formData.vehicle_ids?.length > 0) {
+          await supabase.from('vehicles').update({ team_id: newTeam.team_id }).in('vehicle_id', formData.vehicle_ids);
+        }
+
         if (pendingAssignmentId) await assignTeamToAssignment(newTeam.team_id, pendingAssignmentId);
       }
 
@@ -667,7 +733,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
               openNewTeamForm={openNewTeamForm}
               openNewAssignmentForm={openNewAssignmentForm}
               onEditAssignment={(id) => openEditAssignmentForm(assignmentById[id])}
-              onNewTeam={(asnId) => { setPendingAssignmentId(asnId); setTeamForm({ op_period_id: operationalPeriodId, status: 'Assigned', type: 'Ground' }); setShowTeamForm(true); }}
+              onNewTeam={(asnId) => { setPendingAssignmentId(asnId); setTeamForm({ op_period_id: operationalPeriodId, status: 'Staged', type: 'Ground' }); setShowTeamForm(true); }}
                 onNewAssignment={(teamId) => { setPendingTeamId(teamId); setAssignmentForm({ op_period_id: operationalPeriodId, status: 'Assigned', segment: 'A' }); setShowAssignmentForm(true); }}
               onDeleteAssignment={handleDeleteAssignment} onAssignResource={(row) => { setAssigningRow(row); setSelectedAssignTarget(''); }}
               draggedItem={draggedItem} dropTarget={dropTarget}
@@ -731,6 +797,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
           onSave={handleSaveTeam}
           initialData={teamForm}
           responders={responders}
+          vehicles={vehicles}
           loading={loading}
           error={error}
           commandStaffExists={commandStaffExists}
