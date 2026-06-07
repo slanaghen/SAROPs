@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import PlanningDashboard from '../components/PlanningDashboard';
 import { usePlanningDashboard } from '../hooks/usePlanningDashboard';
@@ -28,6 +28,7 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
     vehicles,
     loading,
     stats,
+    refresh: fetchTable,
     error: hookError,
     fetchDashboardData,
     assignTeamToAssignment,
@@ -60,7 +61,12 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
       await attachResponderToTeam(vehicle.responder_id, teamId);
     }
 
+    // Requirement: Ensure JWT claims are synchronized before refreshing data 
+    // to prevent RLS-induced missing records during mutations.
+    await supabase.auth.refreshSession();
     await fetchDashboardData();
+    // Specific table fetch must happen last to ensure logistical resources are updated.
+    if (fetchTable) await fetchTable('vehicles');
   };
 
   const attachResponderToVehicle = async (responderId, vehicleId) => {
@@ -69,7 +75,9 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
       .update({ responder_id: responderId })
       .eq('vehicle_id', vehicleId);
     if (error) throw error;
+    await supabase.auth.refreshSession();
     await fetchDashboardData();
+    if (fetchTable) await fetchTable('vehicles');
   };
 
   // Helper to calculate the next available Assignment name based on division
@@ -122,7 +130,11 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
     });
 
     if (error) throw error;
+    await supabase.auth.refreshSession();
+    // Sequential await ensures aggregate statistics and specific logistical records 
+    // are both current without race conditions clobbering incident-wide lists.
     await fetchDashboardData();
+    if (fetchTable) await fetchTable('responders');
   };
 
   /**
@@ -135,12 +147,15 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
       .from('vehicles')
       .upsert({
         ...vehicleData,
+        responder_id: vehicleData.responder_id || null, // Convert empty string from form to null for UUID type
         incident_id: incidentId,
         checkin_datetime: new Date().toISOString(),
       }, { onConflict: 'incident_id, designation' });
 
     if (error) throw error;
+    await supabase.auth.refreshSession();
     await fetchDashboardData();
+    if (fetchTable) await fetchTable('vehicles');
   };
 
   /**
@@ -149,10 +164,15 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
   const updateVehicle = async (id, vehicleData) => {
     const { error } = await supabase
       .from('vehicles')
-      .update(vehicleData)
+      .update({
+        ...vehicleData,
+        responder_id: vehicleData.responder_id || null // Convert empty string from form to null for UUID type
+      })
       .eq('vehicle_id', id);
     if (error) throw error;
+    await supabase.auth.refreshSession();
     await fetchDashboardData();
+    if (fetchTable) await fetchTable('vehicles');
   };
 
   /**
@@ -165,7 +185,9 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
       .eq('responder_id', id);
 
     if (error) throw error;
+    await supabase.auth.refreshSession();
     await fetchDashboardData();
+    if (fetchTable) await fetchTable('responders');
   };
 
   /**
@@ -181,16 +203,53 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
       .eq('responder_id', id);
 
     if (error) throw error;
+    await supabase.auth.refreshSession();
     await fetchDashboardData();
+    if (fetchTable) await fetchTable('responders');
   };
 
   /**
    * Trigger data synchronization when the mission context or operational period stabilizes.
-   * This ensures staged resources are visible immediately upon page load.
    */
+  const lastFetchedIncidentId = useRef(null);
+  const lastFetchedOpId = useRef(null);
+
   useEffect(() => {
-    if (incidentId || operationalPeriodId) fetchDashboardData();
-  }, [incidentId, operationalPeriodId, fetchDashboardData]);
+    const initFetch = async () => {
+      // Requirement: Resolve timing issues and race conditions during page initialization. 
+      // Logic from AdminPage: specifically trigger a fetch as soon as incidentId is available. 
+      // Staged logistical resources (vehicles/responders) are incident-wide assets and 
+      // should appear even if the specific operational period is still hydrating or null.
+      const isNewContext = lastFetchedIncidentId.current !== incidentId || 
+                           lastFetchedOpId.current !== operationalPeriodId;
+
+      if (incidentId && fetchDashboardData && isNewContext) {
+        console.debug(`[Planning] Context detected (Inc: ${incidentId}, OP: ${operationalPeriodId}). Synchronizing session claims...`);
+        
+        // Mark the current context as fetched immediately to prevent concurrent duplicate 
+        // requests while the async session refresh is in progress.
+        lastFetchedIncidentId.current = incidentId;
+        lastFetchedOpId.current = operationalPeriodId;
+        
+        // Explicitly refresh the session to ensure JWT claims (like incident_id) 
+        // are propagated for RLS verification before the initial fetch.
+        await supabase.auth.refreshSession();
+
+        // Admin-page logic: Fire fetches sequentially to resolve timing issues 
+        // where staged logistical resources (which are incident-wide) appear 
+        // missing on initial load due to aggregate dashboard filtering or 
+        // state overwrite race conditions.
+        await fetchDashboardData();
+
+        if (fetchTable) {
+          await fetchTable('vehicles');
+          await fetchTable('responders');
+        }
+      }
+    };
+
+    initFetch();
+  }, [incidentId, operationalPeriodId, fetchDashboardData, fetchTable]);
 
   /**
    * Handle team assignment
@@ -308,8 +367,10 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               <strong style={{ color: '#1e293b', fontSize: '10px', textTransform: 'uppercase', marginBottom: '2px' }}>Vehicles</strong>
               <div style={{ fontSize: '12px', color: '#475569' }}>
-                Staged: {(vehicles || []).filter(v => v.status?.toLowerCase() === 'staged').length}, Attached: {(vehicles || []).filter(v => v.status?.toLowerCase() === 'attached').length}, 
-                Active: {(vehicles || []).filter(v => ['assigned', 'deployed'].includes(v.status?.toLowerCase())).length}, Total: {(vehicles || []).length}
+                {/* Requirement: Use robust status checking for statistics to handle potential nulls or casing variations */}
+                Staged: {(vehicles || []).filter(v => String(v.status || '').toLowerCase() === 'staged').length}, 
+                Attached: {(vehicles || []).filter(v => String(v.status || '').toLowerCase() === 'attached').length}, 
+                Active: {(vehicles || []).filter(v => ['assigned', 'deployed'].includes(String(v.status || '').toLowerCase())).length}, Total: {(vehicles || []).length}
               </div>
             </div>
           </div>

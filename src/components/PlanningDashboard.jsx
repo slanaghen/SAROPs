@@ -61,7 +61,7 @@ const PlanningDashboard = ({
   const [vehicleFilter, setVehicleFilter] = useState('');
   const [teamFilter, setTeamFilter] = useState('');
   const [assignmentFilter, setAssignmentFilter] = useState('');
-  const [viewMode, setViewMode] = useState('All');
+  const [viewMode, setViewMode] = useState(() => localStorage.getItem('sarops_view_mode') || 'All');
   const [draggedItem, setDraggedItem] = useState(null); // { id, type }
   const [dropTarget, setDropTarget] = useState(null); // { id, type }
 
@@ -377,6 +377,8 @@ const PlanningDashboard = ({
       ...team,
       equipment: team.equipment || [],
       responder_ids: team.current_responders?.map(r => r.responder_id) || [],
+      // Requirement: Ensure vehicle associations are mapped to the form state when editing a team.
+      vehicle_ids: team.current_vehicles?.map(v => v.vehicle_id) || [],
     });
     setShowTeamForm(true);
   };
@@ -533,12 +535,24 @@ const PlanningDashboard = ({
         const toRemove = originalIds.filter(id => !finalResponderIds.includes(id));
         const existing = finalResponderIds.filter(id => originalIds.includes(id));
 
-        // Reconcile membership and update roles. 
+        // Reconcile membership and update roles.
         // attachResponderToTeam is now safe to call for existing members thanks to the hook fix.
         await Promise.all([
           ...toAdd.map(id => attachResponderToTeam?.(id, formData.team_id, roles[id])),
           ...existing.map(id => attachResponderToTeam?.(id, formData.team_id, roles[id])),
           ...toRemove.map(id => detachResponderFromTeam?.(id, formData.team_id))
+        ]);
+
+        // 3. Reconcile vehicles (Requirement: Ensure vehicle attachments persist during team updates)
+        const finalVehIds = formData.vehicle_ids || [];
+        const originalVehIds = (formData.current_vehicles || []).map(v => v.vehicle_id);
+        
+        const vehToAdd = finalVehIds.filter(id => !originalVehIds.includes(id));
+        const vehToRemove = originalVehIds.filter(id => !finalVehIds.includes(id));
+
+        await Promise.all([
+          ...vehToAdd.map(id => attachVehicleToTeam?.(id, formData.team_id)),
+          ...vehToRemove.map(id => attachVehicleToTeam?.(id, null))
         ]);
 
         setSuccessMessage('Team updated');
@@ -549,6 +563,12 @@ const PlanningDashboard = ({
           responder_ids: finalResponderIds, 
           responder_roles: formData.responder_roles 
         });
+
+        // Requirement: Link selected vehicles to the newly created team.
+        if (formData.vehicle_ids?.length > 0) {
+          await Promise.all(formData.vehicle_ids.map(id => attachVehicleToTeam?.(id, newTeam.team_id)));
+        }
+
         setSuccessMessage('Team created');
       }
       if (stayOpen) {
@@ -746,7 +766,10 @@ const PlanningDashboard = ({
             className="status-update-select" 
             style={{ width: 'auto', minWidth: '140px', height: '32px' }}
             value={viewMode}
-            onChange={(e) => setViewMode(e.target.value)}
+          onChange={(e) => {
+            setViewMode(e.target.value);
+            localStorage.setItem('sarops_view_mode', e.target.value);
+          }}
           >
             <option value="All">Incident (All)</option>
             <option value="Operations">Operations (Active)</option>
@@ -781,7 +804,7 @@ const PlanningDashboard = ({
         {/* Available Responders Section */}
         <div className="section responders-section">
           <div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h2>Responders ({availableRespondersList.length})</h2>
+            <h2>Personnel Pool (Staged) ({availableRespondersList.length})</h2>
             <div>
               <button className="btn btn-primary" onClick={() => openEditResponderForm(null)} style={{ fontSize: '14px' }}>
                 New Responder
@@ -858,7 +881,7 @@ const PlanningDashboard = ({
         {/* Available Vehicles Section */}
         <div className="section vehicles-section">
           <div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h2>Staged Vehicles ({availableVehiclesList.length})</h2>
+            <h2>Vehicle Pool (Staged) ({availableVehiclesList.length})</h2>
             <div>
               <button className="btn btn-primary" onClick={openNewVehicleForm} style={{ fontSize: '14px' }}>
                 New Vehicle
@@ -1095,6 +1118,7 @@ const PlanningDashboard = ({
           onSave={handleSaveTeam}
           initialData={teamForm}
           responders={responders}
+          vehicles={vehicles}
           loading={loading}
           error={error}
           commandStaffExists={commandStaffExists}

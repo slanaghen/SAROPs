@@ -89,7 +89,7 @@ describe('TeamFormModal', () => {
     expect(within(table).getByText('Responder 1')).toBeInTheDocument();
 
     // Responder 1 should be removed from the pool (the available responder list)
-    const pool = screen.getByText(/Staged Responders/i).closest('.responder-pool');
+    const pool = screen.getByText(/Personnel Pool/i).closest('.responder-pool');
     expect(within(pool).queryByText('Responder 1')).not.toBeInTheDocument();
   });
 
@@ -224,7 +224,7 @@ describe('TeamFormModal', () => {
     render(<TeamFormModal {...propsWithMember} />);
 
     const memberChip = screen.getByText('Responder 1').closest('[draggable="true"]');
-    const pool = screen.getByText(/Staged Responders/i).closest('.responder-pool');
+    const pool = screen.getByText(/Personnel Pool/i).closest('.responder-pool');
 
     const dataTransfer = { setData: vi.fn(), getData: vi.fn().mockReturnValue('r1') };
     fireEvent.dragStart(memberChip, { dataTransfer });

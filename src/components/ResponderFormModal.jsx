@@ -131,7 +131,13 @@ const ResponderFormModal = ({
 
           <div className="form-row">
             <label htmlFor="res_status">Status</label>
-            <select id="res_status" name="status" value={formData.status || 'Staged'} onChange={handleInputChange}>
+            <select 
+              id="res_status" 
+              name="status" 
+              value={formData.status || 'Staged'} 
+              onChange={handleInputChange}
+              disabled={!formData?.responder_id}
+            >
               {RESPONDER_STATUS_LIST.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>

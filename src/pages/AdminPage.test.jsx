@@ -404,7 +404,6 @@ describe('AdminPage Authentication Gate', () => {
         p_phone: '',
         p_type: 'SAR',
         p_skills: '',
-        p_vehicles: '',
         p_display_density: 'comfortable',
       }));
     });

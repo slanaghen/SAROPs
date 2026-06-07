@@ -94,8 +94,8 @@ const Login = ({ onLoginSuccess }) => {
         }
       }
 
-      // Ensure form-entered vehicles override profile vehicles in the user record passed to the success handler
-      onLoginSuccess(selectedIncidentId, { ...data, vehicles: vehicles || data.vehicles }, responderRecord);
+      // Pass the form-entered vehicles to the success handler. The user profile no longer contains a vehicles field.
+      onLoginSuccess(selectedIncidentId, { ...data, vehicles: vehicles || '' }, responderRecord);
     } catch (err) {
       setError(err.message || 'Login failed');
     } finally {

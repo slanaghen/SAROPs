@@ -8,11 +8,15 @@ SAROps is a Progressive Web App for emergency services incident management. This
 - React + Vite scaffold ready for development
 
 ## Development
-Install dependencies:
 
+Install frameworks, start services, install npm dependencies
 ```bash
-cd SAROps
+cd SAROps/scripts
+SAROPs-Install.sh
+SAROPs-Start-Services.sh
+cd ..
 npm install
+reinit-db.sh
 ```
 
 Run locally:

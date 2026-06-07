@@ -30,7 +30,7 @@ const LoginPage = () => {
             cell_phone: userRecord.cell_phone || '',
             special_skills: userRecord.special_skills || '',
             responder_type: userRecord.responder_type || 'SAR',
-            vehicles: userRecord.vehicles || ''
+            vehicles: ''
           }
         } 
       });

@@ -357,8 +357,11 @@ const AdminPage = () => {
   useEffect(() => {
     if (isAdmin) {
       refreshDashboardData();
+      // Ensure vehicles are specifically fetched to resolve the reported 
+      // timing issue where they appear missing on initial page load.
+      fetchTable('vehicles');
     }
-  }, [isAdmin, refreshDashboardData]);
+  }, [isAdmin, incidentId, refreshDashboardData, fetchTable]);
 
   const handleSaveUser = async (formData, stayOpen = false) => {
     setLoading(true);
@@ -378,7 +381,6 @@ const AdminPage = () => {
           p_phone: formData.cell_phone,
           p_type: formData.responder_type,
           p_skills: formData.special_skills,
-          p_vehicles: formData.vehicles,
           p_display_density: formData.display_density,
         });
         if (updateError) throw updateError;
@@ -395,7 +397,6 @@ const AdminPage = () => {
           p_phone: formData.cell_phone,
           p_type: formData.responder_type,
           p_skills: formData.special_skills,
-          p_vehicles: formData.vehicles,
           p_display_density: formData.display_density,
         });
         if (insertError) throw insertError;

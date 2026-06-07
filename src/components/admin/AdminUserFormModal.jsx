@@ -14,7 +14,6 @@ const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
     cell_phone: '',
     responder_type: 'SAR',
     special_skills: '',
-    vehicles: '',
     display_density: 'comfortable',
   });
 
@@ -33,7 +32,6 @@ const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
         cell_phone: initialData.cell_phone || '',
         responder_type: initialData.responder_type || 'SAR',
         special_skills: initialData.special_skills || '',
-        vehicles: initialData.vehicles || '',
         display_density: initialData.display_density || 'comfortable',
       });
     } else {
@@ -49,7 +47,6 @@ const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
         cell_phone: '',
         responder_type: 'SAR',
         special_skills: '',
-        vehicles: '',
         display_density: 'comfortable',
       });
     }
@@ -202,11 +199,6 @@ const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
           <div className="form-row">
             <label htmlFor="user_skills">Capabilities</label>
             <textarea id="user_skills" name="special_skills" value={formData.special_skills} onChange={handleChange} placeholder="EMT, Rope Rescue, K9 Handler" style={{ minHeight: '80px' }} />
-          </div>
-
-          <div className="form-row">
-            <label htmlFor="user_vehicles">Vehicles</label>
-            <textarea id="user_vehicles" name="vehicles" value={formData.vehicles} onChange={handleChange} placeholder="3121, UTV, boat, snowmobile, helicopter, ..." style={{ minHeight: '80px' }} />
           </div>
         </div>
       </form>

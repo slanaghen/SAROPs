@@ -281,63 +281,14 @@ const TeamFormModal = ({
         <div className="form-row responders-selector">
           <label>Team Members (Drag & Drop Members)</label>
           <div className="drag-drop-composition" style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
-            {/* Left Panel: Available Chips */}
-            <div 
-              className="responder-pool" 
-              onDrop={handleDropOnPool} // Add drop handler for the pool
-              onDragOver={(e) => e.preventDefault()} // Allow drops on the pool
-              style={{ flex: 1, maxHeight: '55vh', background: '#f8fafc', padding: '12px', borderRadius: '12px', border: '1px dashed #cbd5e1', overflowY: 'auto' }}
-            >
-              <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '12px' }}>Personnel Pool (Staged)</label>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '20px' }}>
-                {availableResponders.filter(r => !(teamForm.responder_ids || []).includes(r.responder_id)).map(r => (
-                  <div 
-                    key={r.responder_id}
-                    draggable
-                    onDragStart={(e) => e.dataTransfer.setData('responderId', r.responder_id)}
-                    className="chip team-chip"
-                    style={{ cursor: 'grab', padding: '4px 8px', background: '#fff', border: '1px solid #d9d9d9', borderRadius: '6px', fontSize: '12px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}
-                  >
-                    <div style={{ fontWeight: 600 }}>{r.name}</div>
-                    <div style={{ opacity: 0.7, fontSize: '10px' }}>
-                      {r.agency} {r.special_skills ? `| ${r.special_skills}` : ''}
-                    </div> 
-                  </div>
-                ))}
-                {availableResponders.filter(r => !(teamForm.responder_ids || []).includes(r.responder_id)).length === 0 && (
-                  <p style={{ fontSize: '12px', color: '#94a3b8' }}>No staged responders available.</p>
-                )}
-              </div>
-
-              <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '12px' }}>Vehicle Pool (Staged)</label>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                {availableVehicles.filter(v => !(teamForm.vehicle_ids || []).includes(v.vehicle_id)).map(v => (
-                  <div 
-                    key={v.vehicle_id}
-                    draggable
-                    onDragStart={(e) => e.dataTransfer.setData('vehicleId', v.vehicle_id)}
-                    onClick={() => onEditVehicle?.(v)}
-                    className="chip vehicle-chip"
-                    style={{ cursor: 'grab', padding: '4px 8px', background: '#fff', border: '1px solid #d9d9d9', borderRadius: '6px', fontSize: '12px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}
-                  >
-                    <div style={{ fontWeight: 600 }}>{v.designation}</div>
-                    <div style={{ opacity: 0.7, fontSize: '10px' }}>{v.type}</div> 
-                  </div>
-                ))}
-                {availableVehicles.filter(v => !(teamForm.vehicle_ids || []).includes(v.vehicle_id)).length === 0 && (
-                  <p style={{ fontSize: '12px', color: '#94a3b8' }}>No staged vehicles available.</p>
-                )}
-              </div>
-
-              <small className="form-hint" style={{ marginTop: '16px', display: 'block' }}>Drag a chip and drop it on the table to add a member.</small>
-            </div>
-
-            {/* Middle Panel: Composition Table */}
-            <div style={{ flex: 1.2, maxHeight: '55vh', overflowY: 'auto' }}>
+            {/* Column 1: Personnel Management (Tactical + Pool) */}
+            <div style={{ flex: 1.2, display: 'flex', flexDirection: 'column', gap: '16px', alignSelf: 'stretch' }}>
+              {/* Top: Team Members Table */}
+              <div style={{ flex: 1, maxHeight: '35vh', overflowY: 'auto' }}>
               <table className="operations-table" style={{ width: '100%', minWidth: 'auto', border: '1px solid #e2e8f0', background: '#fff' }}>
                 <thead>
                   <tr style={{ background: '#f8fafc' }}>
-                    <th style={{ width: '60%', textAlign: 'left', padding: '4px 10px', fontSize: '12px' }}>Team Composition</th>
+                    <th style={{ width: '55%', textAlign: 'left', padding: '4px 10px', fontSize: '12px' }}>Team Members</th>
                     <th style={{ width: '40%', textAlign: 'left', padding: '4px 10px', fontSize: '12px' }}>Role / Position</th>
                   </tr>
                 </thead>
@@ -449,16 +400,49 @@ const TeamFormModal = ({
                   </tr>
                 </tbody>
               </table>
+              </div>
+
+              {/* Bottom: Personnel Pool (Staged) */}
+              <div 
+                className="responder-pool" 
+                onDrop={handleDropOnPool} 
+                onDragOver={(e) => e.preventDefault()} 
+                style={{ flex: 0.6, maxHeight: '20vh', background: '#f8fafc', padding: '12px', borderRadius: '12px', border: '1px dashed #cbd5e1', overflowY: 'auto' }}
+              >
+                <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '12px' }}>Personnel Pool (Staged)</label>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                  {availableResponders.filter(r => !(teamForm.responder_ids || []).includes(r.responder_id)).map(r => (
+                    <div 
+                      key={r.responder_id}
+                      draggable
+                      onDragStart={(e) => e.dataTransfer.setData('responderId', r.responder_id)}
+                      className="chip team-chip"
+                      style={{ cursor: 'grab', padding: '4px 8px', background: '#fff', border: '1px solid #d9d9d9', borderRadius: '6px', fontSize: '12px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}
+                    >
+                      <div style={{ fontWeight: 600 }}>{r.name}</div>
+                      <div style={{ opacity: 0.7, fontSize: '10px' }}>
+                        {r.agency} {r.special_skills ? `| ${r.special_skills}` : ''}
+                      </div> 
+                    </div>
+                  ))}
+                  {availableResponders.filter(r => !(teamForm.responder_ids || []).includes(r.responder_id)).length === 0 && (
+                    <p style={{ fontSize: '12px', color: '#94a3b8' }}>No staged personnel available.</p>
+                  )}
+                </div>
+                <small className="form-hint" style={{ marginTop: '16px', display: 'block' }}>Drag personnel to the table.</small>
+              </div>
             </div>
 
-            {/* Right Panel: Team Vehicles */}
+            {/* Column 2: Vehicle Management (Assigned + Pool) */}
+            <div style={{ flex: 0.8, display: 'flex', flexDirection: 'column', gap: '16px', alignSelf: 'stretch' }}>
+              {/* Top: Team Vehicles List */}
             <div 
               className="vehicle-drop-zone"
               onDrop={handleDropVehicle}
               onDragOver={(e) => e.preventDefault()}
-              style={{ flex: 0.8, maxHeight: '55vh', background: '#f8fafc', padding: '12px', borderRadius: '12px', border: '1px dashed #cbd5e1', overflowY: 'auto' }}
+              style={{ flex: 1, maxHeight: '35vh', background: '#f8fafc', padding: '12px', borderRadius: '12px', border: '1px dashed #cbd5e1', overflowY: 'auto' }}
             >
-              <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '12px' }}>Staged Vehicles</label>
+              <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '12px' }}>Team Vehicles</label>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 {(teamForm.vehicle_ids || []).map(id => {
                   const v = vehicles.find(veh => veh.vehicle_id === id);
@@ -481,9 +465,39 @@ const TeamFormModal = ({
                   <p style={{ fontSize: '11px', color: '#94a3b8', fontStyle: 'italic' }}>Drop staged vehicle chips here...</p>
                 )}
               </div>
+              </div>
+
+              {/* Bottom: Vehicle Pool (Staged) */}
+            <div 
+              className="vehicle-pool" 
+              onDrop={handleDropOnPool}
+              onDragOver={(e) => e.preventDefault()}
+              style={{ flex: 0.6, maxHeight: '20vh', background: '#f8fafc', padding: '12px', borderRadius: '12px', border: '1px dashed #cbd5e1', overflowY: 'auto' }}
+            >
+              <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '12px' }}>Vehicle Pool (Staged)</label>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {availableVehicles.filter(v => !(teamForm.vehicle_ids || []).includes(v.vehicle_id)).map(v => (
+                  <div 
+                    key={v.vehicle_id}
+                    draggable
+                    onDragStart={(e) => e.dataTransfer.setData('vehicleId', v.vehicle_id)}
+                    onClick={() => onEditVehicle?.(v)}
+                    className="chip vehicle-chip"
+                    style={{ cursor: 'grab', padding: '4px 8px', background: '#fff', border: '1px solid #d9d9d9', borderRadius: '6px', fontSize: '12px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}
+                  >
+                    <div style={{ fontWeight: 600 }}>{v.designation}</div>
+                    <div style={{ opacity: 0.7, fontSize: '10px' }}>{v.type}</div> 
+                  </div>
+                ))}
+                {availableVehicles.filter(v => !(teamForm.vehicle_ids || []).includes(v.vehicle_id)).length === 0 && (
+                  <p style={{ fontSize: '12px', color: '#94a3b8' }}>No staged vehicles available.</p>
+                )}
+              </div>
+              <small className="form-hint" style={{ marginTop: '16px', display: 'block' }}>Drag vehicles to the team vehicles list.</small>
             </div>
           </div>
         </div>
+      </div>
 
         <div className="form-row">
           <label htmlFor="team_equipment">Equipment</label>
