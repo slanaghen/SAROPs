@@ -40,7 +40,6 @@ const PlanningDashboard = ({
   checkOutResponder,
   attachResponderToTeam,
   attachVehicleToTeam,
-  attachResponderToVehicle,
   detachResponderFromTeam,
   deleteTeam,
 }) => {
@@ -134,52 +133,6 @@ const PlanningDashboard = ({
         }
       }
     } 
-    // Vehicle <-> Team logic
-    else if ((draggedItem.type === 'vehicle' && type === 'team') || (draggedItem.type === 'team' && type === 'vehicle')) {
-      const vehicleId = draggedItem.type === 'vehicle' ? draggedItem.id : id;
-      const teamId = draggedItem.type === 'team' ? draggedItem.id : id;
-      const vehicle = (vehicles || []).find(v => v.vehicle_id === vehicleId);
-      const team = (teams || []).find(t => t.team_id === teamId);
-
-      if (vehicle && team) {
-        handleDragEnd();
-        setLoading(true);
-        try {
-          if (attachVehicleToTeam) {
-            await attachVehicleToTeam(vehicleId, teamId);
-            setSuccessMessage(`Vehicle "${vehicle.designation}" attached to team "${team.team_name_number}"`);
-            setTimeout(() => setSuccessMessage(null), 3000);
-          }
-        } catch (err) {
-          setError(err.message || 'Failed to attach vehicle to team');
-        } finally {
-          setLoading(false);
-        }
-      }
-    }
-    // Responder <-> Vehicle logic (Designating a driver)
-    else if ((draggedItem.type === 'responder' && type === 'vehicle') || (draggedItem.type === 'vehicle' && type === 'responder')) {
-      const responderId = draggedItem.type === 'responder' ? draggedItem.id : id;
-      const vehicleId = draggedItem.type === 'vehicle' ? draggedItem.id : id;
-      const responder = (responders || []).find(r => r.responder_id === responderId);
-      const vehicle = (vehicles || []).find(v => v.vehicle_id === vehicleId);
-
-      if (responder && vehicle) {
-        handleDragEnd();
-        setLoading(true);
-        try {
-          if (attachResponderToVehicle) {
-            await attachResponderToVehicle(responderId, vehicleId);
-            setSuccessMessage(`Responder "${responder.name}" designated as driver for "${vehicle.designation}"`);
-            setTimeout(() => setSuccessMessage(null), 3000);
-          }
-        } catch (err) {
-          setError(err.message || 'Failed to designate driver');
-        } finally {
-          setLoading(false);
-        }
-      }
-    }
     // Responder <-> Team logic
     else if ((draggedItem.type === 'responder' && type === 'team') || (draggedItem.type === 'team' && type === 'responder')) {
       const responderId = draggedItem.type === 'responder' ? draggedItem.id : id;
@@ -198,6 +151,29 @@ const PlanningDashboard = ({
           }
         } catch (err) {
           setError(err.message || 'Failed to attach responder to team');
+        } finally {
+          setLoading(false);
+        }
+      }
+    }
+    // Vehicle <-> Team logic (Requirement: Allow drag-and-drop vehicle assignment)
+    else if ((draggedItem.type === 'vehicle' && type === 'team') || (draggedItem.type === 'team' && type === 'vehicle')) {
+      const vehicleId = draggedItem.type === 'vehicle' ? draggedItem.id : id;
+      const teamId = draggedItem.type === 'team' ? draggedItem.id : id;
+      const vehicle = (vehicles || []).find(v => v.vehicle_id === vehicleId);
+      const team = (teams || []).find(t => t.team_id === teamId);
+
+      if (vehicle && team) {
+        handleDragEnd();
+        setLoading(true);
+        try {
+          if (attachVehicleToTeam) {
+            await attachVehicleToTeam(vehicleId, teamId);
+            setSuccessMessage(`Vehicle "${vehicle.designation}" attached to team "${team.team_name_number}"`);
+            setTimeout(() => setSuccessMessage(null), 3000);
+          }
+        } catch (err) {
+          setError(err.message || 'Failed to attach vehicle to team');
         } finally {
           setLoading(false);
         }
@@ -225,17 +201,17 @@ const PlanningDashboard = ({
 
   const isResponderHighlighted = (responderId) => {
     if (!draggedItem) return false;
-    // Highlight if we are dragging a responder over a team/vehicle or vice versa
-    if (draggedItem.id === responderId && draggedItem.type === 'responder' && (dropTarget?.type === 'team' || dropTarget?.type === 'vehicle')) return true;
-    if (dropTarget?.id === responderId && (draggedItem.type === 'team' || draggedItem.type === 'vehicle')) return true;
+    // Highlight if we are dragging a responder over a team or vice versa
+    if (draggedItem.id === responderId && draggedItem.type === 'responder' && (dropTarget?.type === 'team')) return true;
+    if (dropTarget?.id === responderId && (draggedItem.type === 'team')) return true;
     return false;
   };
 
   const isVehicleHighlighted = (vehicleId) => {
     if (!draggedItem) return false;
-    // Highlight if we are dragging a vehicle over a team/responder or vice versa
-    if (draggedItem.id === vehicleId && draggedItem.type === 'vehicle' && (dropTarget?.type === 'team' || dropTarget?.type === 'responder')) return true;
-    if (dropTarget?.id === vehicleId && (draggedItem.type === 'team' || draggedItem.type === 'responder')) return true;
+    // Highlight if we are dragging a vehicle over a team or vice versa
+    if (draggedItem.id === vehicleId && draggedItem.type === 'vehicle' && (dropTarget?.type === 'team')) return true;
+    if (dropTarget?.id === vehicleId && (draggedItem.type === 'team')) return true;
     return false;
   };
 
@@ -274,7 +250,7 @@ const PlanningDashboard = ({
       if (!term) return true;
       
       return (
-        v.designation.toLowerCase().includes(term) ||
+        (v.designation || '').toLowerCase().includes(term) ||
         (v.type && v.type.toLowerCase().includes(term))
       );
     });
@@ -292,10 +268,18 @@ const PlanningDashboard = ({
       if (!term) return true;
 
       const leaderName = getResponderName(t.leader_responder_id).toLowerCase();
+
+      // Requirement: Include vehicle information in the filter query
+      const vehicleMatch = (t.current_vehicles || []).some(v => 
+        (v.designation || '').toLowerCase().includes(term) ||
+        (v.type || '').toLowerCase().includes(term)
+      );
+
       return (
         t.team_name_number.toLowerCase().includes(term) ||
         t.type.toLowerCase().includes(term) ||
-        leaderName.includes(term)
+        leaderName.includes(term) ||
+        vehicleMatch
       );
     });
   }, [teams, teamFilter, viewMode, responders]);
@@ -315,11 +299,18 @@ const PlanningDashboard = ({
       const term = assignmentFilter.toLowerCase().trim();
       if (!term) return true;
 
+      // Requirement: Include vehicle information in the filter query
+      const vehicleMatch = (asn.current_vehicles || []).some(v => 
+        (v.designation || '').toLowerCase().includes(term) ||
+        (v.type || '').toLowerCase().includes(term)
+      );
+
       return (
         asn.title.toLowerCase().includes(term) ||
         (asn.resource_type && asn.resource_type.toLowerCase().includes(term)) ||
         (asn.description && asn.description.toLowerCase().includes(term)) ||
-        (asn.segment && asn.segment.toLowerCase().includes(term))
+        (asn.segment && asn.segment.toLowerCase().includes(term)) ||
+        vehicleMatch
       );
     });
   }, [assignments, assignmentFilter, viewMode, operationalPeriodId]);
@@ -409,7 +400,6 @@ const PlanningDashboard = ({
       designation: '',
       type: '',
       status: 'Staged',
-      responder_id: ''
     });
     setShowVehicleForm(true);
   };
@@ -418,7 +408,6 @@ const PlanningDashboard = ({
     console.log('📝 Opening Vehicle Editor for:', vehicle.designation);
     setVehicleForm({
       ...vehicle,
-      responder_id: vehicle.responder_id || '',
       status: vehicle.status || 'Staged'
     });
     setShowVehicleForm(true);
@@ -557,16 +546,34 @@ const PlanningDashboard = ({
 
         setSuccessMessage('Team updated');
       } else if (createTeam) {
-        await createTeam({ 
-          ...formData, 
+        // Construct clean payload for teams table to avoid database errors
+        const payload = {
           team_name_number: finalTeamName,
-          responder_ids: finalResponderIds, 
-          responder_roles: formData.responder_roles 
-        });
+          type: formData.type || 'Other',
+          sartopo_color_hex: formData.sartopo_color_hex || '#ff0000',
+          status: formData.status || 'Staged',
+          leader_responder_id: formData.leader_responder_id,
+          equipment: formData.equipment,
+        };
 
-        // Requirement: Link selected vehicles to the newly created team.
-        if (formData.vehicle_ids?.length > 0) {
-          await Promise.all(formData.vehicle_ids.map(id => attachVehicleToTeam?.(id, newTeam.team_id)));
+        // Requirement: Capture the returned newTeam record to perform membership and vehicle linkage.
+        const newTeam = await createTeam(payload);
+
+        if (newTeam?.team_id) {
+          // 1. Process initial responder attachments
+          const roles = formData.responder_roles || {};
+          if (finalResponderIds.length > 0 && attachResponderToTeam) {
+            await Promise.all(finalResponderIds.map(id => 
+              attachResponderToTeam(id, newTeam.team_id, roles[id] || '')
+            ));
+          }
+
+          // 2. Requirement: Link selected vehicles to the newly created team.
+          if (formData.vehicle_ids?.length > 0 && attachVehicleToTeam) {
+            await Promise.all(formData.vehicle_ids.map(id => 
+              attachVehicleToTeam(id, newTeam.team_id)
+            ));
+          }
         }
 
         setSuccessMessage('Team created');
@@ -593,10 +600,33 @@ const PlanningDashboard = ({
     try {
       setLoading(true);
 
+      // Auto-generate assignment title if blank (Requirement: next sequential AA, AB...)
+      // Note: AA, AB pattern is the standard nomenclature for Assignment segments.
+      let finalTitle = formData.title?.trim();
+      if (!finalTitle) {
+        const division = formData.segment?.trim() || 'A';
+        const usedSuffixes = new Set(
+          (assignments || [])
+            .filter(a => a.segment === division)
+            .map(a => (a.title && a.title.startsWith(division)) ? a.title.slice(division.length) : null)
+            .filter(s => s && s.length === 1)
+        );
+
+        let nextSuffix = 'A';
+        for (let i = 65; i <= 90; i++) {
+          const s = String.fromCharCode(i);
+          if (!usedSuffixes.has(s)) {
+            nextSuffix = s;
+            break;
+          }
+        }
+        finalTitle = `${division}${nextSuffix}`;
+      }
+
       // Cleanse payload to prevent PostgREST errors with joined/calculated fields (like 'team_name')
       const payload = {
         op_period_id: formData.op_period_id,
-        title: formData.title || '',
+        title: finalTitle,
         status: formData.status || 'Planned',
         segment: formData.segment || '',
         resource_type: formData.resource_type || '',
@@ -804,7 +834,7 @@ const PlanningDashboard = ({
         {/* Available Responders Section */}
         <div className="section responders-section">
           <div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h2>Personnel Pool (Staged) ({availableRespondersList.length})</h2>
+            <h2>Staged Responders ({availableRespondersList.length})</h2>
             <div>
               <button className="btn btn-primary" onClick={() => openEditResponderForm(null)} style={{ fontSize: '14px' }}>
                 New Responder
@@ -881,7 +911,7 @@ const PlanningDashboard = ({
         {/* Available Vehicles Section */}
         <div className="section vehicles-section">
           <div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h2>Vehicle Pool (Staged) ({availableVehiclesList.length})</h2>
+            <h2>Staged Vehicles ({availableVehiclesList.length})</h2>
             <div>
               <button className="btn btn-primary" onClick={openNewVehicleForm} style={{ fontSize: '14px' }}>
                 New Vehicle
@@ -915,6 +945,7 @@ const PlanningDashboard = ({
                   key={vehicle.vehicle_id}
                   className={`responder-card ${isVehicleHighlighted(vehicle.vehicle_id) ? 'selected' : ''} ${draggedItem?.id === vehicle.vehicle_id ? 'dragging' : ''} ${vehicle.status?.toLowerCase() === 'staged' ? 'staged-resource' : ''}`}
                   draggable="true"
+                  onClick={() => openEditVehicleForm(vehicle)}
                   onDragStart={(e) => handleDragStart(e, vehicle.vehicle_id, 'vehicle')}
                   onDragEnd={handleDragEnd}
                   onDragOver={(e) => handleDragOver(e, 'vehicle')}
@@ -925,7 +956,7 @@ const PlanningDashboard = ({
                   tabIndex={0}
                 >
                   <div className="responder-header">
-                    <div className="responder-name">{vehicle.designation}</div>
+                    <div className="responder-name clickable-name">{vehicle.designation}</div>
                     <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginLeft: 'auto' }}>
                       <span className={`status-indicator ${vehicle.status?.toLowerCase() || ''}`}>
                         {vehicle.status}
@@ -934,11 +965,6 @@ const PlanningDashboard = ({
                   </div>
                   <div className="responder-agency-meta">
                     {vehicle.type}
-                    {vehicle.responder_id && (
-                      <span style={{ marginLeft: '8px', color: '#1e293b', fontWeight: 600 }}>
-                        | Driver: {getResponderName(vehicle.responder_id)}
-                      </span>
-                    )}
                   </div>
                 </div>
               ))}
@@ -1122,6 +1148,7 @@ const PlanningDashboard = ({
           loading={loading}
           error={error}
           commandStaffExists={commandStaffExists}
+          onEditVehicle={openEditVehicleForm}
         />
       )}
 
@@ -1156,8 +1183,7 @@ const PlanningDashboard = ({
           isOpen={showVehicleForm}
           onClose={() => setShowVehicleForm(false)}
           onSave={handleSaveVehicle}
-          initialData={vehicleForm.vehicle_id ? vehicleForm : null}
-          responders={responders}
+          initialData={vehicleForm || {}}
           loading={loading}
           error={error}
         />

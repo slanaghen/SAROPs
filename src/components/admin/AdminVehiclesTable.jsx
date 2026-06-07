@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 
 const AdminVehiclesTable = ({ 
-  allVehicles = [], allIncidents = [], allResponders = [], fetching = false, isVehiclesExpanded, setIsVehiclesExpanded, 
+  allVehicles = [], allIncidents = [], fetching = false, isVehiclesExpanded, setIsVehiclesExpanded, 
   handleCheckOutVehicle, handleDeleteVehicle, handleEditVehicle, handleNewVehicle 
 }) => {
   const [sortConfig, setSortConfig] = useState({ key: 'designation', direction: 'asc' });
@@ -55,7 +55,6 @@ const AdminVehiclesTable = ({
                   Type {sortConfig.key === 'type' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
                 </th>
                 <th>Incident</th>
-                <th>Driver</th>
                 <th onClick={() => requestSort('status')} style={{ cursor: 'pointer' }}>
                   Status {sortConfig.key === 'status' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
                 </th>
@@ -64,9 +63,9 @@ const AdminVehiclesTable = ({
             </thead>
             <tbody>
               {fetching ? (
-                <tr><td colSpan="6" className="empty-row">Loading vehicles...</td></tr>
+                <tr><td colSpan="5" className="empty-row">Loading vehicles...</td></tr>
               ) : sortedVehicles.length === 0 ? (
-                <tr><td colSpan="6" className="empty-row">No vehicles found in database.</td></tr>
+                <tr><td colSpan="5" className="empty-row">No vehicles found in database.</td></tr>
               ) : (
                 sortedVehicles.map(v => (
                   <tr key={v.vehicle_id}>
@@ -74,9 +73,6 @@ const AdminVehiclesTable = ({
                     <td>{v.type || '—'}</td>
                     <td style={{ fontSize: '12px' }}>
                       {allIncidents.find(inc => inc.incident_id === v.incident_id)?.name || v.incident_id}
-                    </td>
-                    <td style={{ fontSize: '12px' }}>
-                      {allResponders.find(r => r.responder_id === v.responder_id)?.name || '—'}
                     </td>
                     <td>
                       <span className={`status-indicator ${v.status?.toLowerCase()}`}>{v.status}</span>

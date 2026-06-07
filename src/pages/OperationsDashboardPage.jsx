@@ -23,7 +23,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   const {
     teams, assignments, responders, vehicles, opPeriod, loading, error, setError, setLoading, stats,
     fetchDashboardData, updateResourceStatus, assignTeamToAssignment, unassignTeam,
-    createTeam, createAssignment, deleteAssignment, deleteTeam,
+    createTeam, createAssignment, deleteAssignment, deleteTeam, attachVehicleToTeam,
     detachTeam: disbandTeam, updateTeam, updateAssignment,
     attachResponderToTeam, detachResponderFromTeam
   } = usePlanningDashboard(supabase, operationalPeriodId);
@@ -122,6 +122,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
         teamStatus: matchingTeam?.status || asnItem.team_status || '',
         hasBoth: !!(asnItem.team_id || matchingTeam),
         teamId: asnItem.team_id,
+        vehicleSearch: (matchingTeam?.current_vehicles || asnItem.current_vehicles || []).map(v => `${v.designation} ${v.type}`).join(' ').toLowerCase()
       };
     });
 
@@ -140,6 +141,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       teamSize: tItem.member_count || tItem.current_responders?.length || 0,
       leaderId: tItem.leader_responder_id || null,
       hasBoth: false, teamId: tItem.team_id,
+      vehicleSearch: (tItem.current_vehicles || []).map(v => `${v.designation} ${v.type}`).join(' ').toLowerCase()
     }));
 
     let result = [...assignmentRows, ...teamOnlyRows];
@@ -345,8 +347,8 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       if (targetRow?.hasBoth) return;
     }
 
-    // Responders can only be dropped onto teams
-    if (draggedItem.type === 'responder' && type !== 'team') return;
+    // Responders and Vehicles can only be dropped onto teams
+    if (['responder', 'vehicle'].includes(draggedItem.type) && type !== 'team') return;
 
     e.preventDefault();
   };
@@ -360,8 +362,8 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       if (targetRow?.hasBoth) return;
     }
 
-    // Prevent highlighting assignments when dragging a responder
-    if (draggedItem.type === 'responder' && type !== 'team') return;
+    // Prevent highlighting assignments when dragging logistical resources
+    if (['responder', 'vehicle'].includes(draggedItem.type) && type !== 'team') return;
 
     setDropTarget({ id, type });
   };
@@ -387,6 +389,11 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       else if (draggedItem.type === 'responder' && targetType === 'team') {
         const teamId = getRawUuid(targetId);
         if (teamId) await attachResponderToTeam(draggedItem.id, teamId);
+      }
+      // Vehicle -> Team attachment
+      else if (draggedItem.type === 'vehicle' && targetType === 'team') {
+        const teamId = getRawUuid(targetId);
+        if (teamId) await attachVehicleToTeam(draggedItem.id, teamId);
       }
     } catch (err) {
        // Error is handled by hook
@@ -458,7 +465,6 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
         designation: formData.designation,
         type: formData.type,
         status: formData.status,
-        responder_id: formData.responder_id || null,
         incident_id: formData.incident_id || incidentId
       };
 
@@ -532,19 +538,28 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
           ...vehToRemove.map(id => supabase.from('vehicles').update({ team_id: null }).eq('vehicle_id', id))
         ]);
       } else {
-        const newTeam = await createTeam({ 
-          ...payload, 
-          op_period_id: operationalPeriodId, 
-          responder_ids: formData.responder_ids, 
-          responder_roles: formData.responder_roles 
-        });
+        // The createTeam hook already injects op_period_id and refreshes tactical views.
+        // We construct a clean payload for the teams table here.
+        const newTeam = await createTeam(payload);
+
+        if (newTeam?.team_id) {
+          // 1. Process initial responder attachments
+          const finalIds = formData.responder_ids || [];
+          const roles = formData.responder_roles || {};
+          if (finalIds.length > 0 && attachResponderToTeam) {
+             await Promise.all(finalIds.map(id => 
+               attachResponderToTeam(id, newTeam.team_id, roles[id] || '')
+             ));
+          }
         
-        // Process initial vehicle assignments for new team
-        if (formData.vehicle_ids?.length > 0) {
-          await supabase.from('vehicles').update({ team_id: newTeam.team_id }).in('vehicle_id', formData.vehicle_ids);
+          // 2. Requirement: Process initial vehicle assignments using the in() operator for arrays.
+          if (formData.vehicle_ids?.length > 0) {
+            await supabase.from('vehicles').update({ team_id: newTeam.team_id }).in('vehicle_id', formData.vehicle_ids);
+          }
+
+          if (pendingAssignmentId) await assignTeamToAssignment(newTeam.team_id, pendingAssignmentId);
         }
 
-        if (pendingAssignmentId) await assignTeamToAssignment(newTeam.team_id, pendingAssignmentId);
       }
 
       setPendingAssignmentId(null);
@@ -562,9 +577,32 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     const targetTeamId = !!formData.assignment_id ? formData.team_id : (pendingTeamId || null);
     
     try {
+      // Auto-generate assignment title if blank (Requirement: next sequential AA, AB...)
+      // This ensures assignments follow the standard [Division][Suffix] SAR pattern.
+      let finalTitle = formData.title?.trim();
+      if (!finalTitle) {
+        const division = formData.segment?.trim() || 'A';
+        const usedSuffixes = new Set(
+          (assignments || [])
+            .filter(a => a.segment === division)
+            .map(a => (a.title && a.title.startsWith(division)) ? a.title.slice(division.length) : null)
+            .filter(s => s && s.length === 1)
+        );
+
+        let nextSuffix = 'A';
+        for (let i = 65; i <= 90; i++) {
+          const s = String.fromCharCode(i);
+          if (!usedSuffixes.has(s)) {
+            nextSuffix = s;
+            break;
+          }
+        }
+        finalTitle = `${division}${nextSuffix}`;
+      }
+
       const payload = {
         op_period_id: operationalPeriodId,
-        title: formData.title || '',
+        title: finalTitle,
         status: pendingTeamId ? 'Assigned' : (formData.status || 'Planned'),
         segment: formData.segment || '',
         resource_type: formData.resource_type || '',

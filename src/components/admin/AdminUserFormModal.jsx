@@ -15,6 +15,7 @@ const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
     responder_type: 'SAR',
     special_skills: '',
     display_density: 'comfortable',
+    vehicles: '',
   });
 
   const isEditing = !!initialData?.email;
@@ -33,6 +34,7 @@ const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
         responder_type: initialData.responder_type || 'SAR',
         special_skills: initialData.special_skills || '',
         display_density: initialData.display_density || 'comfortable',
+        vehicles: initialData.vehicles || '',
       });
     } else {
       // Reset form for new user
@@ -48,6 +50,7 @@ const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
         responder_type: 'SAR',
         special_skills: '',
         display_density: 'comfortable',
+        vehicles: '',
       });
     }
   }, [isOpen, initialData, isEditing]);
@@ -199,6 +202,11 @@ const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
           <div className="form-row">
             <label htmlFor="user_skills">Capabilities</label>
             <textarea id="user_skills" name="special_skills" value={formData.special_skills} onChange={handleChange} placeholder="EMT, Rope Rescue, K9 Handler" style={{ minHeight: '80px' }} />
+          </div>
+
+          <div className="form-row">
+            <label htmlFor="user_vehicles">Default Vehicles (Comma-separated)</label>
+            <input id="user_vehicles" type="text" name="vehicles" value={formData.vehicles} onChange={handleChange} placeholder="3121, UTV, Boat" />
           </div>
         </div>
       </form>

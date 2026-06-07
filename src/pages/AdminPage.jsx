@@ -312,7 +312,7 @@ const AdminPage = () => {
       // Log administrative check-in
       await supabase.from('action_logs').insert({
         incident_id: selectedActivationId,
-        action: `Admin activated session and checked in: ${finalResponder.name || myProfile.name || myProfile.username}`,
+        action: `Admin activated session and checked in as Staff: ${finalResponder.name || myProfile.name || myProfile.username}`,
         user_name: finalResponder.name || myProfile.name || myProfile.username
       });
 
@@ -333,7 +333,8 @@ const AdminPage = () => {
       if (refreshDashboardData) await refreshDashboardData();
 
       setSuccess(`Session activated for "${selectedInc.name}". Your responder identity has been established.`);
-      // Immediately transition to the operations view for the activated incident context
+      // Requirement: Command Staff/Admin users should be directed to the Operations dashboard 
+      // immediately upon establishing incident context, rather than the responder dashboard.
       navigate('/operations');
     } catch (err) {
       setError(err.message || "Failed to activate session.");
@@ -382,6 +383,7 @@ const AdminPage = () => {
           p_type: formData.responder_type,
           p_skills: formData.special_skills,
           p_display_density: formData.display_density,
+          p_vehicles: formData.vehicles,
         });
         if (updateError) throw updateError;
         setSuccess(`User ${formData.email} updated successfully.`);
@@ -398,6 +400,7 @@ const AdminPage = () => {
           p_type: formData.responder_type,
           p_skills: formData.special_skills,
           p_display_density: formData.display_density,
+          p_vehicles: formData.vehicles,
         });
         if (insertError) throw insertError;
         setSuccess(`User ${formData.email} added successfully.`);
@@ -472,7 +475,6 @@ const AdminPage = () => {
         designation: formData.designation,
         type: formData.type,
         status: formData.status,
-        responder_id: formData.responder_id || null,
         incident_id: formData.incident_id || incidentId
       };
 
@@ -1167,7 +1169,6 @@ const AdminPage = () => {
       <AdminVehiclesTable
         allVehicles={allVehicles}
         allIncidents={allIncidents}
-        allResponders={allResponders}
         fetching={fetching}
         isVehiclesExpanded={isVehiclesExpanded}
         setIsVehiclesExpanded={setIsVehiclesExpanded}

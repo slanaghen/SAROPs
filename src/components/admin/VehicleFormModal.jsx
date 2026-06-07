@@ -2,12 +2,11 @@ import React, { useState, useEffect } from 'react';
 import BaseModal from '../BaseModal';
 import { RESPONDER_STATUS_LIST } from '../operationalConstants';
 
-const VehicleFormModal = ({ isOpen, onClose, onSave, initialData, responders, loading, error }) => {
+const VehicleFormModal = ({ isOpen, onClose, onSave, initialData, loading, error }) => {
   const [formData, setFormData] = useState({
     designation: '',
     type: '',
     status: 'Staged',
-    responder_id: '',
   });
 
   useEffect(() => {
@@ -17,7 +16,6 @@ const VehicleFormModal = ({ isOpen, onClose, onSave, initialData, responders, lo
         designation: initialData.designation || '',
         type: initialData.type || '',
         status: initialData.status || 'Staged',
-        responder_id: initialData.responder_id || '',
         incident_id: initialData.incident_id
       });
     } else {
@@ -25,7 +23,6 @@ const VehicleFormModal = ({ isOpen, onClose, onSave, initialData, responders, lo
         designation: '',
         type: '',
         status: 'Staged',
-        responder_id: '',
       });
     }
   }, [initialData, isOpen]);
@@ -64,16 +61,6 @@ const VehicleFormModal = ({ isOpen, onClose, onSave, initialData, responders, lo
         <div className="form-row">
           <label htmlFor="type">Vehicle Type</label>
           <input id="type" name="type" value={formData.type} onChange={handleChange} placeholder="e.g. UTV, Boat, Snowmobile" />
-        </div>
-
-        <div className="form-row">
-          <label htmlFor="responder_id">Driver</label>
-          <select id="responder_id" name="responder_id" value={formData.responder_id} onChange={handleChange}>
-            <option value="">— Unassigned —</option>
-            {responders.map(r => (
-              <option key={r.responder_id} value={r.responder_id}>{r.name} ({r.agency})</option>
-            ))}
-          </select>
         </div>
 
         <div className="form-row">

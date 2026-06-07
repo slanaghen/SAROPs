@@ -30,13 +30,10 @@ Resources (Personnel and Equipment) follow a progression from a global pool to s
 *   **Team Attachment**: A Responder can be attached to one **Team** at a time.
     *   When attached to a `Staged` team, the Responder is `Attached`.
     *   When the Team is assigned to a task, the Responder is `Assigned`.
-*   **Vehicle Designation**: A Responder can be designated as the **Driver** for one or more **Vehicles**.
 
 ### Vehicles (Equipment)
 *   **Incident Level**: Vehicles (UTVs, Boats, Helicopters, etc.) are checked into an **Incident** and start in `Staged` status.
-*   **Driver Association**: A Vehicle can have a designated **Driver** (Responder).
 *   **Team Attachment**: A Vehicle can be attached to a **Team**.
-    *   **Automated Attachment**: If a Vehicle with a designated Driver is attached to a Team, the system automatically attaches the **Driver** to that same Team.
 
 ---
 
@@ -73,7 +70,6 @@ A defined objective or search area.
 | **Assignment** | Has One | **Team** | A task is performed by one team. |
 | **Team** | Has Many | **Responders** | Personnel assigned to the unit. |
 | **Team** | Has Many | **Vehicles** | Equipment assigned to the unit. |
-| **Responder** | Drives | **Vehicle** | Designation for equipment operation. |
 | **Responder** | Member Of | **Team** | Personnel tactical assignment. |
 | **Vehicle** | Member Of | **Team** | Equipment tactical assignment. |
 
@@ -92,7 +88,6 @@ graph TD
         OP --> Team[Team]
         Team --> Resp[Responder]
         Team --> Veh[Vehicle]
-        Resp -.->|Designated Driver| Veh
     end
 
     %% Status Synchronization

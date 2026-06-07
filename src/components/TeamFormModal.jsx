@@ -20,6 +20,8 @@ const TeamFormModal = ({
   commandStaffExists = false
 }) => {
   const getInitialState = (data) => {
+    // Requirement: Ensure data is a valid object to prevent spread/property access crashes.
+    if (!data) data = {};
     const roles = { ...(data.responder_roles || {}) };
     if (data.current_responders) {
       data.current_responders.forEach(r => {
@@ -409,7 +411,7 @@ const TeamFormModal = ({
                 onDragOver={(e) => e.preventDefault()} 
                 style={{ flex: 0.6, maxHeight: '20vh', background: '#f8fafc', padding: '12px', borderRadius: '12px', border: '1px dashed #cbd5e1', overflowY: 'auto' }}
               >
-                <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '12px' }}>Personnel Pool (Staged)</label>
+                <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '12px' }}>Staged Responders</label>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                   {availableResponders.filter(r => !(teamForm.responder_ids || []).includes(r.responder_id)).map(r => (
                     <div 
@@ -457,7 +459,9 @@ const TeamFormModal = ({
                       style={{ cursor: 'grab', padding: '6px 10px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '6px', fontSize: '12px' }}
                     >
                       <div style={{ fontWeight: 600 }}>{v.designation}</div>
-                      <div style={{ opacity: 0.7, fontSize: '10px' }}>{v.type}</div>
+                      <div style={{ opacity: 0.7, fontSize: '10px' }}>
+                        {v.type}
+                      </div>
                     </div>
                   );
                 })}
@@ -474,7 +478,7 @@ const TeamFormModal = ({
               onDragOver={(e) => e.preventDefault()}
               style={{ flex: 0.6, maxHeight: '20vh', background: '#f8fafc', padding: '12px', borderRadius: '12px', border: '1px dashed #cbd5e1', overflowY: 'auto' }}
             >
-              <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '12px' }}>Vehicle Pool (Staged)</label>
+              <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '12px' }}>Staged Vehicles</label>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                 {availableVehicles.filter(v => !(teamForm.vehicle_ids || []).includes(v.vehicle_id)).map(v => (
                   <div 
@@ -486,7 +490,9 @@ const TeamFormModal = ({
                     style={{ cursor: 'grab', padding: '4px 8px', background: '#fff', border: '1px solid #d9d9d9', borderRadius: '6px', fontSize: '12px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}
                   >
                     <div style={{ fontWeight: 600 }}>{v.designation}</div>
-                    <div style={{ opacity: 0.7, fontSize: '10px' }}>{v.type}</div> 
+                    <div style={{ opacity: 0.7, fontSize: '10px' }}>
+                      {v.type}
+                    </div> 
                   </div>
                 ))}
                 {availableVehicles.filter(v => !(teamForm.vehicle_ids || []).includes(v.vehicle_id)).length === 0 && (

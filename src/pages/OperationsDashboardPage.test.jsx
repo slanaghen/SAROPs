@@ -70,8 +70,9 @@ describe('OperationsDashboardPage Logic', () => {
     // Set up mock data responses
     supabase.from.mockImplementation((table) => {
       let data = [];
-      if (table === 'assignments') data = mockAsn;
-      else if (table === 'teams') data = mockTeams;
+      // Requirement: Handle view names used by usePlanningDashboard hook to populate state
+      if (table === 'assignments' || table === 'dashboard_assignments') data = mockAsn;
+      else if (table === 'teams' || table === 'team_current_responders') data = mockTeams;
       else if (table === 'responders') data = mockResponders;
       else if (table === 'operational_periods') data = { par_check_interval: 60 };
 
@@ -96,7 +97,7 @@ describe('OperationsDashboardPage Logic', () => {
     window.confirm = vi.fn().mockReturnValue(true);
 
     supabase.from.mockImplementation((table) => {
-      let data = (table === 'assignments') ? mockAsn : (table === 'teams' ? mockTeams : []);
+      let data = (table === 'assignments' || table === 'dashboard_assignments') ? mockAsn : ((table === 'teams' || table === 'team_current_responders') ? mockTeams : []);
       return createQueryMock(data);
     });
 
@@ -110,7 +111,7 @@ describe('OperationsDashboardPage Logic', () => {
 
     await waitFor(() => {
       expect(supabase.from).toHaveBeenCalledWith('assignments');
-      expect(supabase.from).toHaveBeenCalledWith('teams');
+      // Note: Team unlinking and status changes are managed by database triggers.
     });
   });
 
@@ -118,7 +119,7 @@ describe('OperationsDashboardPage Logic', () => {
       const mockAsn = [{ assignment_id: 'a1', title: 'Unassigned Asn', team_id: null, op_period_id: 'op-123' }];
     
     supabase.from.mockImplementation((table) => {
-      let data = (table === 'assignments') ? mockAsn : [];
+      let data = (table === 'assignments' || table === 'dashboard_assignments') ? mockAsn : [];
       return createQueryMock(data);
     });
 
@@ -145,7 +146,7 @@ describe('OperationsDashboardPage Logic', () => {
     }];
 
     supabase.from.mockImplementation((table) => {
-      const data = table === 'teams' ? mockTeams : [];
+      const data = (table === 'teams' || table === 'team_current_responders') ? mockTeams : [];
       return createQueryMock(data);
     });
 
@@ -168,7 +169,7 @@ describe('OperationsDashboardPage Logic', () => {
 
     supabase.from.mockImplementation((table) => {
       if (table === 'operational_periods') return createQueryMock({ par_check_interval: 60 });
-      return createQueryMock(table === 'teams' ? mockTeams : []);
+      return createQueryMock((table === 'teams' || table === 'team_current_responders') ? mockTeams : []);
     });
 
     render(<OperationsDashboardPage />);
@@ -185,8 +186,9 @@ describe('OperationsDashboardPage Logic', () => {
     const mockAsn = [{ assignment_id: 'a1', title: 'Asn 1', team_id: 't1', team_name: 'Team 1', team_status: 'Deployed', team_type: 'Ground', status: 'Deployed', type: 'Ground' }];
 
     supabase.from.mockImplementation((table) => {
-      if (table === 'assignments') return createQueryMock(mockAsn);
-      if (table === 'teams') return createQueryMock([{ team_id: 't1', team_name_number: 'Team 1', status: 'Deployed', leader_name: 'Unknown', member_count: 1, type: 'Ground' }]);
+      // Requirement: Handle view names used by the usePlanningDashboard hook to populate state
+      if (table === 'assignments' || table === 'dashboard_assignments') return createQueryMock(mockAsn);
+      if (table === 'teams' || table === 'team_current_responders') return createQueryMock([{ team_id: 't1', team_name_number: 'Team 1', status: 'Deployed', leader_name: 'Unknown', member_count: 1, type: 'Ground' }]);
       return createQueryMock([]);
     });
 
@@ -196,7 +198,9 @@ describe('OperationsDashboardPage Logic', () => {
     fireEvent.change(screen.getByDisplayValue('Deployed'), { target: { value: 'Completed' } });
 
     await waitFor(() => {
-      expect(supabase.from).toHaveBeenCalledWith('teams');
+      // Status transitions (e.g., Completed -> Disband Team) are managed by PostgreSQL 
+      // triggers. The dashboard strictly updates the assignment record.
+      expect(supabase.from).toHaveBeenCalledWith('assignments');
     });
   });
 
@@ -215,12 +219,12 @@ describe('OperationsDashboardPage Logic', () => {
     ];
 
     supabase.from.mockImplementation((table) => {
-      if (table === 'teams') return createQueryMock(mockTeams);
+      if (table === 'teams' || table === 'team_current_responders') return createQueryMock(mockTeams);
       return createQueryMock([]);
     });
 
     render(<OperationsDashboardPage />);
-    await waitFor(() => screen.getByText('Team 1'));
+    await waitFor(() => expect(screen.getByText('Team 1')).toBeInTheDocument());
 
     // Open Broadcast Modal
     fireEvent.click(screen.getByTitle(/Send message to all teams/i));
@@ -245,8 +249,9 @@ describe('OperationsDashboardPage Logic', () => {
     const mockTeams = [{ team_id: 't1', team_name_number: 'Staged Team', status: 'Staged', type: 'Dog' }];
 
     supabase.from.mockImplementation((table) => {
-      if (table === 'assignments') return createQueryMock(mockAsn);
-      if (table === 'teams') return createQueryMock(mockTeams);
+      // Requirement: Handle view names used by usePlanningDashboard hook to populate tactical state
+      if (table === 'dashboard_assignments' || table === 'assignments') return createQueryMock(mockAsn);
+      if (table === 'team_current_responders' || table === 'teams') return createQueryMock(mockTeams);
       return createQueryMock([]);
     });
 

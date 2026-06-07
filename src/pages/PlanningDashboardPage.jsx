@@ -39,46 +39,9 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
     updateTeam,
     attachResponderToTeam,
     detachResponderFromTeam,
+    attachVehicleToTeam,
     deleteTeam,
   } = usePlanningDashboard(supabase, operationalPeriodId);
-
-  const attachVehicleToTeam = async (vehicleId, teamId) => {
-    // Find the vehicle in local state to check for a designated driver
-    const vehicle = (vehicles || []).find(v => v.vehicle_id === vehicleId);
-
-    // 1. Link the vehicle to the team. 
-    // Database trigger 'trigger_sync_vehicle_status_on_team_link' handles updating the vehicle status.
-    const { error: vehError } = await supabase
-      .from('vehicles')
-      .update({ team_id: teamId })
-      .eq('vehicle_id', vehicleId);
-    
-    if (vehError) throw vehError;
-
-    // 2. If the vehicle has a designated driver, add them to the team as well.
-    // Database triggers handle the responder status update ('Attached') and membership validation.
-    if (vehicle?.responder_id && attachResponderToTeam) {
-      await attachResponderToTeam(vehicle.responder_id, teamId);
-    }
-
-    // Requirement: Ensure JWT claims are synchronized before refreshing data 
-    // to prevent RLS-induced missing records during mutations.
-    await supabase.auth.refreshSession();
-    await fetchDashboardData();
-    // Specific table fetch must happen last to ensure logistical resources are updated.
-    if (fetchTable) await fetchTable('vehicles');
-  };
-
-  const attachResponderToVehicle = async (responderId, vehicleId) => {
-    const { error } = await supabase
-      .from('vehicles')
-      .update({ responder_id: responderId })
-      .eq('vehicle_id', vehicleId);
-    if (error) throw error;
-    await supabase.auth.refreshSession();
-    await fetchDashboardData();
-    if (fetchTable) await fetchTable('vehicles');
-  };
 
   // Helper to calculate the next available Assignment name based on division
   const getNextAssignmentName = (division) => {
@@ -131,8 +94,11 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
 
     if (error) throw error;
     await supabase.auth.refreshSession();
-    // Sequential await ensures aggregate statistics and specific logistical records 
-    // are both current without race conditions clobbering incident-wide lists.
+    // Admin-page logic: Fire fetches sequentially to resolve timing issues 
+    // where staged logistical resources (incident-wide) appear missing 
+    // due to aggregate dashboard filtering or state overwrite race conditions.
+    // Broader tactical data must be awaited first, followed by specific 
+    // logistical source-of-truth refreshes.
     await fetchDashboardData();
     if (fetchTable) await fetchTable('responders');
   };
@@ -154,6 +120,7 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
 
     if (error) throw error;
     await supabase.auth.refreshSession();
+    // Requirement: Ensure incident-wide equipment pool is updated immediately.
     await fetchDashboardData();
     if (fetchTable) await fetchTable('vehicles');
   };
@@ -235,10 +202,8 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
         // are propagated for RLS verification before the initial fetch.
         await supabase.auth.refreshSession();
 
-        // Admin-page logic: Fire fetches sequentially to resolve timing issues 
-        // where staged logistical resources (which are incident-wide) appear 
-        // missing on initial load due to aggregate dashboard filtering or 
-        // state overwrite race conditions.
+        // Sequential synchronization: broader tactical data first, 
+        // followed by the specific incident-wide logistical pool refreshes.
         await fetchDashboardData();
 
         if (fetchTable) {
@@ -323,7 +288,6 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
             updateTeam={updateTeam}
             attachResponderToTeam={attachResponderToTeam}
             attachVehicleToTeam={attachVehicleToTeam}
-            attachResponderToVehicle={attachResponderToVehicle}
             detachResponderFromTeam={detachResponderFromTeam}
             deleteTeam={deleteTeam}
           />
