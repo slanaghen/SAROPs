@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import BaseModal from '../BaseModal';
 
+import { useToast } from '../../context/ToastContext';
 const AdminTeamFormModal = ({ isOpen, onClose, onSave, initialData, loading, error, responders }) => {
   const [formData, setFormData] = useState({
     team_id: '',
@@ -13,6 +14,7 @@ const AdminTeamFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
   });
 
   const isEditing = !!initialData?.team_id;
+  const { addToast } = useToast();
 
   useEffect(() => {
     if (isEditing && initialData) {
@@ -108,7 +110,6 @@ const AdminTeamFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
           Equipment (comma-separated)
           <input type="text" name="equipment" value={formData.equipment} onChange={handleChange} placeholder="GPS, Radio, First Aid Kit" />
         </label>
-        {error && <p className="alert alert-error" style={{ marginTop: '12px' }}>{error}</p>}
       </form>
     </BaseModal>
   );

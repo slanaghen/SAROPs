@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useIncident } from '../context/IncidentContext';
+import { useToast } from '../context/ToastContext';
 import '../styles.css';
 
 /**
@@ -13,7 +14,7 @@ const ActionLogPage = () => {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [manualAction, setManualAction] = useState('');
-  const [error, setError] = useState(null);
+  const { addToast } = useToast();
 
   const fetchLogs = async () => {
     if (!incidentId) return;
@@ -28,7 +29,7 @@ const ActionLogPage = () => {
       if (fetchError) throw fetchError;
       setLogs(data || []);
     } catch (err) {
-      setError('Failed to load action logs');
+      addToast('Failed to load action logs: ' + err.message, 'error');
     } finally {
       setLoading(false);
     }
@@ -55,7 +56,7 @@ const ActionLogPage = () => {
       setManualAction('');
       fetchLogs();
     } catch (err) {
-      setError('Failed to add log entry');
+      addToast('Failed to add log entry: ' + err.message, 'error');
     }
   };
 
@@ -73,20 +74,20 @@ const ActionLogPage = () => {
       <h1>Incident Action Log</h1>
       
       <div className="section-card" style={{ marginBottom: '20px' }}>
-        <form onSubmit={handleAddManualLog} style={{ display: 'flex', gap: '10px' }}>
+        <form onSubmit={handleAddManualLog} data-lpignore="true" style={{ display: 'flex', gap: '10px' }}>
           <input 
             type="text" 
             className="form-control"
             value={manualAction} 
             onChange={(e) => setManualAction(e.target.value)} 
+            autoComplete="off"
+            data-lpignore="true"
             placeholder="Manually record an action (e.g., 'CP moved to base of mountain')..."
             style={{ flex: 1, padding: '8px 12px', borderRadius: '4px', border: '1px solid #ddd' }}
           />
           <button type="submit" className="btn btn-primary btn-sm">Add to Log</button>
         </form>
       </div>
-
-      {error && <div className="alert alert-error">{error}</div>}
 
       <div className="operations-table-wrapper">
         <table className="operations-table">

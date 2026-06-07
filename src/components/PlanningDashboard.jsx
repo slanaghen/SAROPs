@@ -5,6 +5,7 @@ import AssignmentFormModal from './AssignmentFormModal';
 import ResponderFormModal from './ResponderFormModal';
 import VehicleFormModal from './admin/VehicleFormModal';
 
+import { useToast } from '../context/ToastContext';
 /**
  * PlanningDashboard Component
  * 
@@ -43,9 +44,8 @@ const PlanningDashboard = ({
   detachResponderFromTeam,
   deleteTeam,
 }) => {
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [successMessage, setSuccessMessage] = useState(null);
+  const { addToast } = useToast();
+  const [loading, setLoading] = useState(false); // Local loading state for individual actions
   const [showTeamForm, setShowTeamForm] = useState(false);
   const [showAssignmentForm, setShowAssignmentForm] = useState(false);
   const [showResponderForm, setShowResponderForm] = useState(false);
@@ -122,12 +122,12 @@ const PlanningDashboard = ({
         setLoading(true);
         try {
           if (onTeamAssigned) {
-            await onTeamAssigned({ teamId, assignmentId, team, assignment });
+            await onTeamAssigned({ teamId, assignmentId, team, assignment }); // Hook handles its own error
           }
-          setSuccessMessage(`Team "${team.team_name_number}" assigned to "${assignment.title}"`);
-          setTimeout(() => setSuccessMessage(null), 3000);
+          addToast(`Team "${team.team_name_number}" assigned to "${assignment.title}"`, 'success');
+          // No local success message needed, toast handles it
         } catch (err) {
-          setError(err.message || 'Failed to assign team');
+          addToast(err.message || 'Failed to assign team', 'error');
         } finally {
           setLoading(false);
         }
@@ -144,13 +144,13 @@ const PlanningDashboard = ({
         handleDragEnd();
         setLoading(true);
         try {
-          if (attachResponderToTeam) {
-            await attachResponderToTeam(responderId, teamId);
-            setSuccessMessage(`Responder "${responder.name}" attached to team "${team.team_name_number}"`);
-            setTimeout(() => setSuccessMessage(null), 3000);
+          if (attachResponderToTeam) { // Hook handles its own error
+            await attachResponderToTeam(responderId, teamId); 
+            addToast(`Responder "${responder.name}" attached to team "${team.team_name_number}"`, 'success');
+            // No local success message needed, toast handles it
           }
         } catch (err) {
-          setError(err.message || 'Failed to attach responder to team');
+          addToast(err.message || 'Failed to attach responder to team', 'error');
         } finally {
           setLoading(false);
         }
@@ -167,13 +167,13 @@ const PlanningDashboard = ({
         handleDragEnd();
         setLoading(true);
         try {
-          if (attachVehicleToTeam) {
-            await attachVehicleToTeam(vehicleId, teamId);
-            setSuccessMessage(`Vehicle "${vehicle.designation}" attached to team "${team.team_name_number}"`);
-            setTimeout(() => setSuccessMessage(null), 3000);
+          if (attachVehicleToTeam) { // Hook handles its own error
+            await attachVehicleToTeam(vehicleId, teamId); 
+            addToast(`Vehicle "${vehicle.designation}" attached to team "${team.team_name_number}"`, 'success');
+            // No local success message needed, toast handles it
           }
         } catch (err) {
-          setError(err.message || 'Failed to attach vehicle to team');
+          addToast(err.message || 'Failed to attach vehicle to team', 'error');
         } finally {
           setLoading(false);
         }
@@ -441,17 +441,15 @@ const PlanningDashboard = ({
       if (rIds.length > 0 && updateResponder) {
         // Update each responder's status to 'Staged'
         await Promise.all(rIds.map(id => updateResponder(id, { status: 'Staged' })));
-        // Note: history closure and status are now synchronized through these updates
+        // Note: history closure and status are now synchronized through these updates (hook handles its own error)
       }
 
       if (deleteTeam) {
-        await deleteTeam(team.team_id);
-        
-        setSuccessMessage(`Team "${team.team_name_number}" released`);
-        setTimeout(() => setSuccessMessage(null), 3000);
+        await deleteTeam(team.team_id); // Hook handles its own error
+        addToast(`Team "${team.team_name_number}" released.`, 'success');
       }
     } catch (err) {
-      setError(err.message || 'Failed to release team');
+      addToast(err.message || 'Failed to release team', 'error');
     } finally {
       setLoading(false);
     }
@@ -464,12 +462,11 @@ const PlanningDashboard = ({
       setLoading(true);
       if (deleteAssignment) {
         await deleteAssignment(assignment.assignment_id);
-        
-        setSuccessMessage(`Assignment "${assignment.title}" deleted`);
-        setTimeout(() => setSuccessMessage(null), 3000);
+        addToast(`Assignment "${assignment.title}" deleted.`, 'success');
+        // No local success message needed, toast handles it
       }
     } catch (err) {
-      setError(err.message || 'Failed to delete assignment');
+      addToast(err.message || 'Failed to delete assignment', 'error');
     } finally {
       setLoading(false);
     }
@@ -477,8 +474,7 @@ const PlanningDashboard = ({
 
   const handleSaveTeam = async (formData, stayOpen = false) => {
     if (!formData.leader_responder_id) {
-      setError('A team leader must be selected in order to save a team.');
-      return;
+      throw new Error('A team leader must be selected in order to save a team.'); // Error handled by catch block
     }
 
     try {
@@ -506,8 +502,7 @@ const PlanningDashboard = ({
         : currentResponders;
 
       if (formData.team_id && updateTeam) {
-        // 1. Update core team details
-        await updateTeam(formData.team_id, {
+        const payload = {
           team_name_number: finalTeamName,
           type: formData.type,
           sartopo_color_hex: formData.sartopo_color_hex || '#ff0000',
@@ -515,38 +510,11 @@ const PlanningDashboard = ({
           status: formData.status,
           leader_responder_id: formData.leader_responder_id,
           equipment: formData.equipment,
-        });
-
-        // 2. Reconcile responder attachments
-        const originalIds = (formData.current_responders || []).map(r => r.responder_id);
-        const roles = formData.responder_roles || {};
-        const toAdd = finalResponderIds.filter(id => !originalIds.includes(id));
-        const toRemove = originalIds.filter(id => !finalResponderIds.includes(id));
-        const existing = finalResponderIds.filter(id => originalIds.includes(id));
-
-        // Reconcile membership and update roles.
-        // attachResponderToTeam is now safe to call for existing members thanks to the hook fix.
-        await Promise.all([
-          ...toAdd.map(id => attachResponderToTeam?.(id, formData.team_id, roles[id])),
-          ...existing.map(id => attachResponderToTeam?.(id, formData.team_id, roles[id])),
-          ...toRemove.map(id => detachResponderFromTeam?.(id, formData.team_id))
-        ]);
-
-        // 3. Reconcile vehicles (Requirement: Ensure vehicle attachments persist during team updates)
-        const finalVehIds = formData.vehicle_ids || [];
-        const originalVehIds = (formData.current_vehicles || []).map(v => v.vehicle_id);
-        
-        const vehToAdd = finalVehIds.filter(id => !originalVehIds.includes(id));
-        const vehToRemove = originalVehIds.filter(id => !finalVehIds.includes(id));
-
-        await Promise.all([
-          ...vehToAdd.map(id => attachVehicleToTeam?.(id, formData.team_id)),
-          ...vehToRemove.map(id => attachVehicleToTeam?.(id, null))
-        ]);
-
-        setSuccessMessage('Team updated');
+          responder_ids: finalResponderIds
+        };
+        await updateTeam(formData.team_id, payload, formData.responder_roles, formData.vehicle_ids);
+        addToast('Team updated.', 'success');
       } else if (createTeam) {
-        // Construct clean payload for teams table to avoid database errors
         const payload = {
           team_name_number: finalTeamName,
           type: formData.type || 'Other',
@@ -554,43 +522,18 @@ const PlanningDashboard = ({
           status: formData.status || 'Staged',
           leader_responder_id: formData.leader_responder_id,
           equipment: formData.equipment,
+          responder_ids: finalResponderIds
         };
-
-        // Requirement: Capture the returned newTeam record to perform membership and vehicle linkage.
-        const newTeam = await createTeam(payload);
-
-        if (newTeam?.team_id) {
-          // 1. Process initial responder attachments
-          const roles = formData.responder_roles || {};
-          if (finalResponderIds.length > 0 && attachResponderToTeam) {
-            await Promise.all(finalResponderIds.map(id => 
-              attachResponderToTeam(id, newTeam.team_id, roles[id] || '')
-            ));
-          }
-
-          // 2. Requirement: Link selected vehicles to the newly created team.
-          if (formData.vehicle_ids?.length > 0 && attachVehicleToTeam) {
-            await Promise.all(formData.vehicle_ids.map(id => 
-              attachVehicleToTeam(id, newTeam.team_id)
-            ));
-          }
-        }
-
-        setSuccessMessage('Team created');
+        await createTeam(payload, formData.responder_roles, formData.vehicle_ids);
+        addToast('Team created.', 'success');
       }
       if (stayOpen) {
         openNewTeamForm();
       } else {
         setShowTeamForm(false);
       }
-      setTimeout(() => setSuccessMessage(null), 3000);
     } catch (err) {
-      const message = err.message || 'Failed to save team';
-      if (message.includes('row-level security')) {
-        setError('Permission denied: You do not have permission to create teams. Please check database RLS policies.');
-      } else {
-        setError(message);
-      }
+      addToast(err.message || 'Failed to save team.', 'error');
     } finally {
       setLoading(false);
     }
@@ -646,11 +589,11 @@ const PlanningDashboard = ({
       };
 
       if (formData.assignment_id && updateAssignment) {
-        await updateAssignment(formData.assignment_id, payload);
-        setSuccessMessage('Assignment updated');
+        await updateAssignment(formData.assignment_id, payload); // Hook handles its own error
+        addToast('Assignment updated.', 'success');
       } else if (createAssignment) {
-        await createAssignment(payload);
-        setSuccessMessage('Assignment created');
+        await createAssignment(payload); // Hook handles its own error
+        addToast('Assignment created.', 'success');
       }
       if (stayOpen) {
         openNewAssignmentForm();
@@ -659,12 +602,7 @@ const PlanningDashboard = ({
       }
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (err) {
-      const message = err.message || 'Failed to save assignment';
-      if (message.includes('row-level security')) {
-        setError('Permission denied: You do not have permission to create or update assignments. Please check database RLS policies.');
-      } else {
-        setError(message);
-      }
+      addToast(err.message || 'Failed to save assignment.', 'error');
     } finally {
       setLoading(false);
     }
@@ -681,17 +619,17 @@ const PlanningDashboard = ({
       } = formData;
 
       if (formData.responder_id && updateResponder) {
-        await updateResponder(formData.responder_id, {
+        await updateResponder(formData.responder_id, { // Hook handles its own error
           name, agency, identifier, cell_phone, responder_type,
           access_level, status, special_skills
         });
-        setSuccessMessage('Responder updated');
+        addToast('Responder updated.', 'success');
       } else if (!formData.responder_id && createResponder) {
         await createResponder({
           name, agency, identifier, cell_phone, responder_type,
           access_level, status: 'Staged', special_skills
         });
-        setSuccessMessage('Responder created');
+        addToast('Responder created.', 'success');
       } else {
         throw new Error('Missing responder identifier or service function');
       }
@@ -701,9 +639,8 @@ const PlanningDashboard = ({
       } else {
         setShowResponderForm(false);
       }
-      setTimeout(() => setSuccessMessage(null), 3000);
-    } catch (err) {
-      setError(err.message || 'Failed to save responder');
+    } catch (err) { // Error is handled by the hook's setError
+      addToast(err.message || 'Failed to save responder', 'error');
     } finally {
       setLoading(false);
     }
@@ -713,12 +650,12 @@ const PlanningDashboard = ({
     try {
       setLoading(true);
       if (formData.vehicle_id && updateVehicle) {
-        await updateVehicle(formData.vehicle_id, formData);
-        setSuccessMessage('Vehicle updated');
+        await updateVehicle(formData.vehicle_id, formData); // Hook handles its own error
+        addToast('Vehicle updated.', 'success');
       } else if (createVehicle) {
         // Force Staged status for new vehicles from planning board
-        await createVehicle({ ...formData, status: 'Staged' });
-        setSuccessMessage('Vehicle added to staging');
+        await createVehicle({ ...formData, status: 'Staged' }); // Hook handles its own error
+        addToast('Vehicle added to staging.', 'success');
       } else {
         throw new Error('Vehicle service function not provided');
       }
@@ -728,9 +665,8 @@ const PlanningDashboard = ({
       } else {
         setShowVehicleForm(false);
       }
-      setTimeout(() => setSuccessMessage(null), 3000);
-    } catch (err) {
-      setError(err.message || 'Failed to save vehicle');
+    } catch (err) { // Error is handled by the hook's setError
+      addToast(err.message || 'Failed to save vehicle', 'error');
     } finally {
       setLoading(false);
     }
@@ -742,13 +678,12 @@ const PlanningDashboard = ({
     try {
       setLoading(true);
       if (checkOutResponder) {
-        await checkOutResponder(responder.responder_id, responder.name);
-        setSuccessMessage('Responder checked out');
+        await checkOutResponder(responder.responder_id, responder.name); // Hook handles its own error
+        addToast('Responder checked out.', 'success');
       }
       setShowResponderForm(false);
-      setTimeout(() => setSuccessMessage(null), 3000);
     } catch (err) {
-      setError(err.message || 'Failed to check out responder');
+      addToast(err.message || 'Failed to check out responder', 'error');
     } finally {
       setLoading(false);
     }
@@ -765,21 +700,14 @@ const PlanningDashboard = ({
     try {
       setLoading(true);
       if (isMember && detachResponderFromTeam) {
-        await detachResponderFromTeam(responder.responder_id, activeTeam.team_id);
-        setSuccessMessage(`${responder.name} removed`);
+        await detachResponderFromTeam(responder.responder_id, activeTeam.team_id); // Hook handles its own error
+        addToast(`${responder.name} removed from team.`, 'success');
       } else if (!isMember && attachResponderToTeam) {
-        await attachResponderToTeam(responder.responder_id, activeTeam.team_id);
-        setSuccessMessage(`${responder.name} attached`);
+        await attachResponderToTeam(responder.responder_id, activeTeam.team_id); // Hook handles its own error
+        addToast(`${responder.name} attached to team.`, 'success');
       }
-      // update activeTeam reference after refresh by relying on parent state updates
-      setTimeout(() => setSuccessMessage(null), 2500);
     } catch (err) {
-      const message = err.message || 'Failed to update team members';
-      if (message.includes('row-level security')) {
-        setError('Permission denied: You do not have permission to modify team members. Please check database RLS policies.');
-      } else {
-        setError(message);
-      }
+      addToast(err.message || 'Failed to update team members.', 'error');
     } finally {
       setLoading(false);
     }
@@ -808,28 +736,6 @@ const PlanningDashboard = ({
         </div>
       </div>
 
-      {/* Messages */}
-      {error && (
-        <div className="alert alert-error" role="alert">
-          <span className="alert-icon">⚠️</span>
-          <span className="alert-message">{error}</span>
-          <button 
-            className="alert-close" 
-            onClick={() => setError(null)}
-            aria-label="Close error"
-          >
-            ✕
-          </button>
-        </div>
-      )}
-
-      {successMessage && (
-        <div className="alert alert-success" role="alert">
-          <span className="alert-icon">✓</span>
-          <span className="alert-message">{successMessage}</span>
-        </div>
-      )}
-
       <div className="dashboard-container" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '20px', maxHeight: 'calc(100vh - 160px)', overflowY: 'auto', paddingBottom: '20px' }}>
         {/* Available Responders Section */}
         <div className="section responders-section">
@@ -847,6 +753,7 @@ const PlanningDashboard = ({
               type="text" 
               placeholder="Search name, ID, agency or skills..." 
               value={responderFilter}
+              data-lpignore="true"
               onChange={(e) => setResponderFilter(e.target.value)}
               style={{ flex: 1, padding: '6px 10px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
             />
@@ -924,6 +831,7 @@ const PlanningDashboard = ({
               type="text" 
               placeholder="Search designation or type..." 
               value={vehicleFilter}
+              data-lpignore="true"
               onChange={(e) => setVehicleFilter(e.target.value)}
               style={{ flex: 1, padding: '6px 10px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
             />
@@ -986,6 +894,7 @@ const PlanningDashboard = ({
               type="text" 
               placeholder="Search team or leader..." 
               value={teamFilter}
+              data-lpignore="true"
               onChange={(e) => setTeamFilter(e.target.value)}
               style={{ flex: 1, padding: '6px 10px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
             />
@@ -1072,6 +981,7 @@ const PlanningDashboard = ({
               type="text" 
               placeholder="Search assignment..." 
               value={assignmentFilter}
+              data-lpignore="true"
               onChange={(e) => setAssignmentFilter(e.target.value)}
               style={{ flex: 1, padding: '6px 10px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
             />
@@ -1146,7 +1056,6 @@ const PlanningDashboard = ({
           responders={responders}
           vehicles={vehicles}
           loading={loading}
-          error={error}
           commandStaffExists={commandStaffExists}
           onEditVehicle={openEditVehicleForm}
         />
@@ -1160,7 +1069,6 @@ const PlanningDashboard = ({
           onSave={handleSaveAssignment}
           initialData={assignmentForm}
           loading={loading}
-          error={error}
         />
       )}
 
@@ -1173,7 +1081,6 @@ const PlanningDashboard = ({
           onCheckOut={handleCheckOutResponder}
           initialData={responderForm}
           loading={loading}
-          error={error}
         />
       )}
 
@@ -1185,7 +1092,6 @@ const PlanningDashboard = ({
           onSave={handleSaveVehicle}
           initialData={vehicleForm || {}}
           loading={loading}
-          error={error}
         />
       )}
 

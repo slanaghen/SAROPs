@@ -3,6 +3,7 @@ import BaseModal from './BaseModal';
 import { useIncident } from '../context/IncidentContext';
 import { TEAM_TYPES, STAFF_PREDEFINED_ROLES } from '../constants/operationalConstants';
 import { normalizeResourceTypeName } from '../utils/dataNormalization';
+import { useToast } from '../context/ToastContext';
 
 /**
  * Shared Modal for creating and editing Teams.
@@ -16,30 +17,36 @@ const TeamFormModal = ({
   vehicles = [],
   onEditVehicle,
   loading = false,
-  error = null,
   commandStaffExists = false
 }) => {
   const getInitialState = (data) => {
     // Requirement: Ensure data is a valid object to prevent spread/property access crashes.
     if (!data) data = {};
     const roles = { ...(data.responder_roles || {}) };
-    if (data.current_responders) {
-      data.current_responders.forEach(r => {
-        roles[r.responder_id] = r.role || '';
-      });
-    }
+
+    // Requirement: Robustly extract member IDs from nested view data or flat arrays.
+    // Views use 'current_responders' (objects), mutations use 'responder_ids' (UUIDs).
+    const currentResponders = data.current_responders || [];
+    const derivedIds = currentResponders.map(r => r.responder_id);
+    
+    currentResponders.forEach(r => {
+      roles[r.responder_id] = r.role || '';
+    });
+
     return {
       ...data,
       status: data.team_id ? (data.status || 'Staged') : 'Staged',
       type: normalizeResourceTypeName(data.type),
       equipment: Array.isArray(data.equipment) ? data.equipment.join(', ') : (data.equipment || ''),
       responder_roles: roles,
+      responder_ids: data.responder_ids || derivedIds || [],
       vehicle_ids: data.current_vehicles?.map(v => v.vehicle_id) || data.vehicle_ids || []
     };
   };
 
   const [teamForm, setTeamForm] = useState(() => getInitialState(initialData));
   const { incidentData } = useIncident();
+  const { addToast } = useToast();
 
   const isStaffTeam = teamForm.type === 'Staff';
 
@@ -229,8 +236,6 @@ const TeamFormModal = ({
         </>
       }
     >
-        {error && <div className="alert alert-error" style={{ marginBottom: '16px' }}>{error}</div>}
-
         <div style={{ display: 'flex', gap: '20px', marginBottom: '16px', alignItems: 'flex-start' }}>
           <div className="form-row" style={{ flex: 0.8, minWidth: 0 }}>
             <label htmlFor="team_name">Team Name</label>

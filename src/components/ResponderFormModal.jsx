@@ -4,7 +4,7 @@ import {
   RESPONDER_TYPES, 
   RESPONDER_STATUS_LIST, 
   ACCESS_LEVELS
-} from './operationalConstants';
+} from './operationalConstants'; // No local error/success state
 
 /**
  * Shared Modal for editing Responder details.
@@ -16,7 +16,6 @@ const ResponderFormModal = ({
   onCheckOut,
   initialData = {},
   loading = false,
-  error = null,
   isAdminMode = false
 }) => {
   const [formData, setFormData] = useState(initialData || {});
@@ -76,8 +75,6 @@ const ResponderFormModal = ({
         </>
       }
     >
-      {error && <div className="alert alert-error" style={{ marginBottom: '16px' }}>{error}</div>}
-
       <div className="modal-scroll-wrapper" style={{ maxHeight: '65vh', overflowY: 'auto', paddingRight: '8px' }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0 12px' }}>
           <div className="form-row" style={{ gridColumn: '1 / -1' }}>

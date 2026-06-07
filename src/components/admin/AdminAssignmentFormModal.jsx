@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import BaseModal from '../BaseModal';
 
+import { useToast } from '../../context/ToastContext';
 const AdminAssignmentFormModal = ({ isOpen, onClose, onSave, initialData, loading, error }) => {
   const [formData, setFormData] = useState({
     assignment_id: '',
@@ -21,6 +22,7 @@ const AdminAssignmentFormModal = ({ isOpen, onClose, onSave, initialData, loadin
   });
 
   const isEditing = !!initialData?.assignment_id;
+  const { addToast } = useToast();
 
   useEffect(() => {
     if (isEditing && initialData) {

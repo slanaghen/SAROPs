@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { PDFDocument } from 'pdf-lib';
 import { supabase } from '../lib/supabase';
 import useResponderTeamAndAssignment from '../hooks/useResponderTeamAndAssignment';
+import { useToast } from '../context/ToastContext';
 import { useIncident } from '../context/IncidentContext';
 import '../styles.css';
 
@@ -39,6 +40,7 @@ const PDFsPage = () => {
   const [selectedPdf, setSelectedPdf] = useState('');
   const [pdfUrl, setPdfUrl] = useState('');
   const [fieldNames, setFieldNames] = useState([]);
+  const { addToast } = useToast();
   const [isParsing, setIsParsing] = useState(false);
 
   // Mapping of common ICS/SAR form fields to available data points.
@@ -119,7 +121,7 @@ const PDFsPage = () => {
         currentBlobUrl = URL.createObjectURL(blob);
         setPdfUrl(currentBlobUrl);
       } catch (err) {
-        console.error('Error extracting PDF fields:', err);
+        addToast('Error extracting PDF fields: ' + err.message, 'error');
         setPdfUrl(selectedPdf); // Fallback to original if processing fails
         setFieldNames([]);
       } finally {

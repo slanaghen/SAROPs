@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import BaseModal from '../BaseModal';
 import { supabase } from '../../lib/supabase';
+import { useToast } from '../../context/ToastContext';
 
 const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, error, success, isProfileSettings = false }) => {
   const [formData, setFormData] = useState({
@@ -17,6 +18,7 @@ const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
     display_density: 'comfortable',
     vehicles: '',
   });
+  const { addToast } = useToast();
 
   const isEditing = !!initialData?.email;
 
@@ -94,8 +96,6 @@ const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
     >
       <form id="user-form" onSubmit={(e) => { e.preventDefault(); handleSave(false); }}>
         <div className="modal-scroll-wrapper" style={{ maxHeight: '65vh', overflowY: 'auto', paddingRight: '8px' }}>
-          {error && <div className="alert alert-error" style={{ marginBottom: '16px' }}>{error}</div>}
-          {success && <div className="save-message" style={{ marginBottom: '16px' }}>{success}</div>}
 
           <div className="form-row">
             <label htmlFor="user_email">Email Address</label>
@@ -105,6 +105,7 @@ const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
               name="email"
               value={formData.email}
               onChange={handleChange}
+              data-lpignore="true"
               placeholder="admin@agency.gov"
               required
               disabled={isEditing}
@@ -118,6 +119,7 @@ const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
               type="text"
               name="username"
               value={formData.username}
+              data-lpignore="true"
               onChange={handleChange}
               disabled={isEditing}
             />
@@ -141,22 +143,22 @@ const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
           <div style={{ display: 'flex', gap: '16px', marginBottom: '16px' }}>
             <div className="form-row" style={{ flex: 1 }}>
               <label htmlFor="user_name">Full Name</label>
-              <input id="user_name" type="text" name="name" value={formData.name} onChange={handleChange} placeholder="John Doe" />
+              <input id="user_name" type="text" name="name" value={formData.name} onChange={handleChange} data-lpignore="true" placeholder="John Doe" />
             </div>
             <div className="form-row" style={{ flex: 1 }}>
               <label htmlFor="user_agency">Agency</label>
-              <input id="user_agency" type="text" name="agency" value={formData.agency} onChange={handleChange} placeholder="SAR Agency" />
+              <input id="user_agency" type="text" name="agency" value={formData.agency} onChange={handleChange} data-lpignore="true" placeholder="SAR Agency" />
             </div>
           </div>
 
           <div style={{ display: 'flex', gap: '16px', marginBottom: '16px' }}>
             <div className="form-row" style={{ flex: 1 }}>
               <label htmlFor="user_id">Identifier</label>
-              <input id="user_id" type="text" name="identifier" value={formData.identifier} onChange={handleChange} placeholder="JD-1" />
+              <input id="user_id" type="text" name="identifier" value={formData.identifier} onChange={handleChange} data-lpignore="true" placeholder="JD-1" />
             </div>
             <div className="form-row" style={{ flex: 1 }}>
               <label htmlFor="user_phone">Phone Number</label>
-              <input id="user_phone" type="tel" name="cell_phone" value={formData.cell_phone} onChange={handleChange} placeholder="555-123-4567" />
+              <input id="user_phone" type="tel" name="cell_phone" value={formData.cell_phone} onChange={handleChange} data-lpignore="true" placeholder="555-123-4567" />
             </div>
           </div>
 
@@ -201,12 +203,12 @@ const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
 
           <div className="form-row">
             <label htmlFor="user_skills">Capabilities</label>
-            <textarea id="user_skills" name="special_skills" value={formData.special_skills} onChange={handleChange} placeholder="EMT, Rope Rescue, K9 Handler" style={{ minHeight: '80px' }} />
+            <textarea id="user_skills" name="special_skills" value={formData.special_skills} onChange={handleChange} data-lpignore="true" placeholder="EMT, Rope Rescue, K9 Handler" style={{ minHeight: '80px' }} />
           </div>
 
           <div className="form-row">
             <label htmlFor="user_vehicles">Default Vehicles (Comma-separated)</label>
-            <input id="user_vehicles" type="text" name="vehicles" value={formData.vehicles} onChange={handleChange} placeholder="3121, UTV, Boat" />
+            <input id="user_vehicles" type="text" name="vehicles" value={formData.vehicles} onChange={handleChange} data-lpignore="true" placeholder="3121, UTV, Boat" />
           </div>
         </div>
       </form>

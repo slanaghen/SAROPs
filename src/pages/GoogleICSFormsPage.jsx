@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { useIncident } from '../context/IncidentContext';
+import { useToast } from '../context/ToastContext';
 import '../styles.css';
 
 /**
@@ -97,8 +98,7 @@ const GoogleICSFormsPage = () => {
   const [namedRanges, setNamedRanges] = useState([]);
   const [loading, setLoading] = useState(false);
   const [transferring, setTransferring] = useState(false);
-  const [error, setError] = useState(null);
-  const [success, setSuccess] = useState(null);
+  const { addToast } = useToast();
   const [associations, setAssociations] = useState({});
   const [assignments, setAssignments] = useState([]);
   const [selectedAssignmentId, setSelectedAssignmentId] = useState('');
@@ -210,14 +210,12 @@ const GoogleICSFormsPage = () => {
   const handleLoad = async () => {
     const spreadsheetId = extractSpreadsheetId(sheetUrl);
     if (!spreadsheetId) {
-      setError('Invalid URL. Please provide a full Google Sheets URL (e.g., https://docs.google.com/spreadsheets/d/SPREADSHEET_ID/edit)');
+      addToast('Invalid URL. Please provide a full Google Sheets URL (e.g., https://docs.google.com/spreadsheets/d/SPREADSHEET_ID/edit)', 'error');
       setNamedRanges([]);
       return;
     }
 
     setLoading(true);
-    setError(null);
-    setSuccess(null);
     setNamedRanges([]);
 
     try {
@@ -248,7 +246,7 @@ const GoogleICSFormsPage = () => {
       const ranges = data.namedRanges || [];
       
       if (ranges.length === 0) {
-        setError('No named ranges found in this spreadsheet. Check the "Data -> Named ranges" menu in your Google Sheet.');
+        addToast('No named ranges found in this spreadsheet. Check the "Data -> Named ranges" menu in your Google Sheet.', 'error');
       } else {
         const names = ranges.map(r => r.name).sort((a, b) => a.localeCompare(b));
         setNamedRanges(names);
@@ -256,9 +254,9 @@ const GoogleICSFormsPage = () => {
     } catch (err) {
       console.error('Error loading named ranges:', err);
       if (err.message === 'Failed to fetch') {
-        setError('Could not connect to the proxy server. Please ensure the backend service is running on port 3001.');
+        addToast('Could not connect to the proxy server. Please ensure the backend service is running on port 3001.', 'error');
       } else {
-        setError(err.message);
+        addToast(err.message, 'error');
       }
     } finally {
       setLoading(false);
@@ -268,13 +266,11 @@ const GoogleICSFormsPage = () => {
   const handleTransfer = async () => {
     const spreadsheetId = extractSpreadsheetId(sheetUrl);
     if (!spreadsheetId || Object.keys(associations).length === 0) {
-      setError('Please load a spreadsheet and map at least one field before transferring.');
+      addToast('Please load a spreadsheet and map at least one field before transferring.', 'error');
       return;
     }
 
     setTransferring(true);
-    setError(null);
-    setSuccess(null);
 
     try {
       const selectedAsn = assignments.find(a => a.assignment_id === selectedAssignmentId);
@@ -340,11 +336,10 @@ const GoogleICSFormsPage = () => {
       });
 
       if (!response.ok) throw new Error('Transfer failed. Please ensure the backend proxy is configured for write access.');
-      
-      setSuccess(`Data successfully transferred: ${Object.keys(valuesToUpdate).length} fields updated in Google Sheets.`);
+      addToast(`Data successfully transferred: ${Object.keys(valuesToUpdate).length} fields updated in Google Sheets.`, 'success');
     } catch (err) {
-      console.error('Transfer error:', err);
-      setError(err.message);
+      console.error('Transfer error:', err); 
+      addToast(err.message, 'error');
     } finally {
       setTransferring(false);
     }
@@ -392,18 +387,6 @@ const GoogleICSFormsPage = () => {
           </div>
         </div>
       </div>
-
-      {error && (
-        <div className="alert alert-error" style={{ marginBottom: '24px' }}>
-          {error}
-        </div>
-      )}
-
-      {success && (
-        <div className="alert alert-success" style={{ marginBottom: '24px' }}>
-          {success}
-        </div>
-      )}
 
       <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap', alignItems: 'flex-start' }}>
         {/* Left Side: Named Ranges */}

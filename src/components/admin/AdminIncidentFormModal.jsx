@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import BaseModal from '../BaseModal';
 
+import { useToast } from '../../context/ToastContext';
 const AdminIncidentFormModal = ({ isOpen, onClose, onSave, initialData, loading, error }) => {
   const [formData, setFormData] = useState({
     incident_id: '',
@@ -12,6 +13,7 @@ const AdminIncidentFormModal = ({ isOpen, onClose, onSave, initialData, loading,
   });
 
   const isEditing = !!initialData?.incident_id;
+  const { addToast } = useToast();
 
   useEffect(() => {
     if (isEditing && initialData) {
@@ -77,7 +79,6 @@ const AdminIncidentFormModal = ({ isOpen, onClose, onSave, initialData, loading,
           Notes
           <textarea name="notes" value={formData.notes} onChange={handleChange} placeholder="Optional notes or summary about the incident" />
         </label>
-        {error && <p className="alert alert-error" style={{ marginTop: '12px' }}>{error}</p>}
       </form>
     </BaseModal>
   );

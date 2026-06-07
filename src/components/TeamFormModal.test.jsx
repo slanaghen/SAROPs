@@ -242,4 +242,19 @@ describe('TeamFormModal', () => {
     fireEvent.drop(within(compositionTable).getByText(/Drop chips here/i), { dataTransfer });
     expect(within(compositionTable).getAllByText('Responder 1')).toHaveLength(1);
   });
+
+  it('correctly initializes member list from nested current_responders view data', () => {
+    const viewDataProps = {
+      ...defaultProps,
+      initialData: {
+        team_id: 't1',
+        current_responders: [
+          { responder_id: 'r1', name: 'Responder 1', role: 'Medic' }
+        ]
+      }
+    };
+    render(<TeamFormModal {...viewDataProps} />);
+    expect(screen.getByText('Responder 1')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Medic')).toBeInTheDocument();
+  });
 });

@@ -3,6 +3,7 @@ import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import GoogleICSFormsPage from './GoogleICSFormsPage';
 import { useIncident } from '../context/IncidentContext';
 import { supabase } from '../lib/supabase';
+import { useToast } from '../context/ToastContext';
 
 vi.mock('../context/IncidentContext', () => ({
   useIncident: vi.fn(),
@@ -18,13 +19,19 @@ vi.mock('../lib/supabase', () => ({
   },
 }));
 
+vi.mock('../context/ToastContext', () => ({
+  useToast: vi.fn(),
+}));
+
 describe('GoogleICSFormsPage', () => {
   const mockApiKey = 'MOCK_GOOGLE_KEY';
+  const mockAddToast = vi.fn();
   
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv('VITE_GOOGLE_SHEETS_API_KEY', mockApiKey);
     global.fetch = vi.fn();
+    vi.mocked(useToast).mockReturnValue({ addToast: mockAddToast });
 
     vi.mocked(useIncident).mockReturnValue({
       incidentData: { opPeriodId: 'op-123', opNumber: '1', name: 'Test Incident' },
@@ -78,7 +85,8 @@ describe('GoogleICSFormsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /Load/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/API key not valid/i)).toBeInTheDocument();
+      // Requirement: Since error alerts were replaced by Toasts, verify functional behavior
+      expect(mockAddToast).toHaveBeenCalledWith(expect.stringMatching(/API key not valid/i), 'error');
     });
   });
 

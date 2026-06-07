@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 
 const AdminVehiclesTable = ({ 
-  allVehicles = [], allIncidents = [], fetching = false, isVehiclesExpanded, setIsVehiclesExpanded, 
+  allVehicles = [], allIncidents = [], allTeams = [], fetching = false, isVehiclesExpanded, setIsVehiclesExpanded, 
   handleCheckOutVehicle, handleDeleteVehicle, handleEditVehicle, handleNewVehicle 
 }) => {
   const [sortConfig, setSortConfig] = useState({ key: 'designation', direction: 'asc' });
@@ -10,15 +10,21 @@ const AdminVehiclesTable = ({
     let items = [...allVehicles];
     if (sortConfig.key) {
       items.sort((a, b) => {
-        let aVal = (a[sortConfig.key] || '').toString().toLowerCase();
-        let bVal = (b[sortConfig.key] || '').toString().toLowerCase();
+        let aVal, bVal;
+        if (sortConfig.key === 'team_name') {
+          aVal = (allTeams.find(t => t.team_id === a.team_id)?.team_name_number || '').toLowerCase();
+          bVal = (allTeams.find(t => t.team_id === b.team_id)?.team_name_number || '').toLowerCase();
+        } else {
+          aVal = (a[sortConfig.key] || '').toString().toLowerCase();
+          bVal = (b[sortConfig.key] || '').toString().toLowerCase();
+        }
         if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
         if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
         return 0;
       });
     }
     return items;
-  }, [allVehicles, sortConfig]);
+  }, [allVehicles, allTeams, sortConfig]);
 
   const requestSort = (key) => {
     let direction = 'asc';
@@ -55,6 +61,9 @@ const AdminVehiclesTable = ({
                   Type {sortConfig.key === 'type' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
                 </th>
                 <th>Incident</th>
+                <th onClick={() => requestSort('team_name')} style={{ cursor: 'pointer' }}>
+                  Team {sortConfig.key === 'team_name' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+                </th>
                 <th onClick={() => requestSort('status')} style={{ cursor: 'pointer' }}>
                   Status {sortConfig.key === 'status' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
                 </th>
@@ -63,9 +72,9 @@ const AdminVehiclesTable = ({
             </thead>
             <tbody>
               {fetching ? (
-                <tr><td colSpan="5" className="empty-row">Loading vehicles...</td></tr>
+                <tr><td colSpan="6" className="empty-row">Loading vehicles...</td></tr>
               ) : sortedVehicles.length === 0 ? (
-                <tr><td colSpan="5" className="empty-row">No vehicles found in database.</td></tr>
+                <tr><td colSpan="6" className="empty-row">No vehicles found in database.</td></tr>
               ) : (
                 sortedVehicles.map(v => (
                   <tr key={v.vehicle_id}>
@@ -73,6 +82,9 @@ const AdminVehiclesTable = ({
                     <td>{v.type || '—'}</td>
                     <td style={{ fontSize: '12px' }}>
                       {allIncidents.find(inc => inc.incident_id === v.incident_id)?.name || v.incident_id}
+                    </td>
+                    <td>
+                      {allTeams.find(t => t.team_id === v.team_id)?.team_name_number || '—'}
                     </td>
                     <td>
                       <span className={`status-indicator ${v.status?.toLowerCase()}`}>{v.status}</span>

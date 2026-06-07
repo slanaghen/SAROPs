@@ -10,6 +10,7 @@ import BaseModal from '../components/BaseModal';
 import OperationsTable from '../components/OperationsTable';
 import OperationsMap from '../components/OperationsMap';
 import VehicleFormModal from '../components/admin/VehicleFormModal';
+import { useToast } from '../context/ToastContext';
 import { checkIsParOverdue, formatTimeSince } from '../utils/operationalUtils';
 
 const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
@@ -26,7 +27,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     createTeam, createAssignment, deleteAssignment, deleteTeam, attachVehicleToTeam,
     detachTeam: disbandTeam, updateTeam, updateAssignment,
     attachResponderToTeam, detachResponderFromTeam
-  } = usePlanningDashboard(supabase, operationalPeriodId);
+  } = usePlanningDashboard(supabase, operationalPeriodId); // Hook manages its own error state
 
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
   const [assignmentFilter, setAssignmentFilter] = useState('');
@@ -50,6 +51,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   const [showBroadcastModal, setShowBroadcastModal] = useState(false);
   const [broadcastMessage, setBroadcastMessage] = useState('');
   const [currentTime, setCurrentTime] = useState(Date.now());
+  const { addToast } = useToast();
 
   const contentWrapperRef = useRef(null);
 
@@ -117,7 +119,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
         teamType: matchingTeam?.type || asnItem.team_type || '',
         teamLeader: matchingTeam?.leader_name || asnItem.leader_name || leaderById[matchingTeam?.leader_responder_id || asnItem.leader_responder_id] || '',
         leaderIdentifier: matchingTeam?.leader_identifier || asnItem.leader_identifier || leaderIdentifierById[matchingTeam?.leader_responder_id || asnItem.leader_responder_id] || '—',
-        teamSize: matchingTeam?.member_count || asnItem.member_count || matchingTeam?.current_responders?.length || 0,
+        teamSize: asnItem.team_id ? (matchingTeam?.member_count ?? asnItem.member_count ?? matchingTeam?.current_responders?.length ?? 0) : null,
         leaderId: matchingTeam?.leader_responder_id || asnItem.leader_responder_id || null,
         teamStatus: matchingTeam?.status || asnItem.team_status || '',
         hasBoth: !!(asnItem.team_id || matchingTeam),
@@ -138,7 +140,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       teamName: tItem.team_name_number, teamType: tItem.type, teamStatus: tItem.status,
       teamLeader: tItem.leader_name || leaderById[tItem.leader_responder_id] || 'Unknown',
       leaderIdentifier: tItem.leader_identifier || leaderIdentifierById[tItem.leader_responder_id] || '—',
-      teamSize: tItem.member_count || tItem.current_responders?.length || 0,
+      teamSize: tItem.member_count ?? tItem.current_responders?.length ?? 0,
       leaderId: tItem.leader_responder_id || null,
       hasBoth: false, teamId: tItem.team_id,
       vehicleSearch: (tItem.current_vehicles || []).map(v => `${v.designation} ${v.type}`).join(' ').toLowerCase()
@@ -228,10 +230,9 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   const handleStatusUpdate = async (assignmentId, teamId, newStatus) => {
     try {
       await updateResourceStatus(assignmentId, teamId, newStatus);
-    } catch (err) {
-      console.error('Failed to update status:', err);
-      // Use the local setError state from the planning hook
-      setError(err.message || 'Permission denied or update failed. Please verify your access level.');
+    } catch (err) { // Error is handled by the hook's setError
+      console.error('Failed to update status:', err); 
+      addToast(err.message || 'Permission denied or update failed. Please verify your access level.', 'error');
     }
   };
 
@@ -244,7 +245,6 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
 
     try {
       setLoading(true);
-      setError(null);
       const now = new Date().toISOString();
 
       const { error: resetErr } = await supabase
@@ -259,8 +259,9 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
 
       await recordAction(`Manual PAR reset for team "${teamName}" (ID: ${teamId}). Fields modified: last_par_check="${now}", par_status="OK".`);
       await fetchDashboardData();
+      addToast('PAR reset successfully.', 'success');
     } catch (err) {
-      setError(err.message || 'Failed to reset PAR');
+      addToast(err.message || 'Failed to reset PAR', 'error');
     } finally {
       setLoading(false);
     }
@@ -284,9 +285,10 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       // handles releasing responders to "Staged" and closing history logs.
       await supabase.from('teams').update({ status: 'Disbanded', last_par_check: null }).eq('team_id', teamId);
       await recordAction(`Disbanded team "${teamName}" (ID: ${teamId}, Type: ${teamType}). Fields modified: status="Disbanded", last_par_check=null. All members released back to "Staged" status.`);
+      addToast('Team disbanded successfully.', 'success');
       await fetchDashboardData();
     } catch (err) {
-      setError(err.message || 'Failed to disband team');
+      addToast(err.message || 'Failed to disband team', 'error');
     } finally {
       setLoading(false);
     }
@@ -299,7 +301,6 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     if (!broadcastMessage.trim() || teams.length === 0) return;
 
     setLoading(true);
-    setError(null);
 
     try {
       const staffTeam = teams.find(t => t.type === 'Staff');
@@ -312,12 +313,12 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       });
 
       if (broadcastErr) throw broadcastErr;
-
       await recordAction(`Sent broadcast message to ${teams.length} teams. Message: "${broadcastMessage.trim()}"`);
       setBroadcastMessage('');
+      addToast('Broadcast message sent.', 'success');
       setShowBroadcastModal(false);
     } catch (err) {
-      setError(err.message || 'Failed to send broadcast message');
+      addToast(err.message || 'Failed to send broadcast message', 'error');
     } finally {
       setLoading(false);
     }
@@ -434,28 +435,16 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
 
   const openEditTeamForm = async (team) => {
     if (!team) return;
-    setLoading(true);
-    try {
-      // Requirement: Fetch both current membership and vehicle attachments for reconciliation
-      const [membersRes, vehiclesRes] = await Promise.all([
-        supabase.from('team_responders').select('responder_id, role').eq('team_id', team.team_id),
-        supabase.from('vehicles').select('vehicle_id').eq('team_id', team.team_id)
-      ]);
-
-      const members = membersRes.data || [];
-      const currentVehicles = vehiclesRes.data || [];
-
-      setTeamForm({
-        ...team,
-        current_responders: members,
-        responder_ids: members.map(m => m.responder_id),
-        current_vehicles: currentVehicles,
-        vehicle_ids: currentVehicles.map(v => v.vehicle_id)
-      });
-      setShowTeamForm(true);
-    } finally {
-      setLoading(false);
-    }
+    // Requirement: Use the enriched metadata already present in the team object 
+    // provided by the tactical view. This prevents "stale" or "empty" member 
+    // lists caused by redundant/delayed junction table fetches.
+    setTeamForm({
+      ...team,
+      equipment: team.equipment || [],
+      responder_ids: team.current_responders?.map(r => r.responder_id) || [],
+      vehicle_ids: team.current_vehicles?.map(v => v.vehicle_id) || [],
+    });
+    setShowTeamForm(true);
   };
 
   const handleSaveVehicle = async (formData) => {
@@ -482,7 +471,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       setShowVehicleForm(false);
       setEditingVehicle(null);
     } catch (err) {
-      setError(err.message || 'Failed to save vehicle');
+      addToast(err.message || 'Failed to save vehicle', 'error');
     } finally {
       setLoading(false);
     }
@@ -520,46 +509,21 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
         equipment: formData.equipment || []
       };
 
+      // Ensure leader is included in responder_ids for consistency
+      const currentResponders = formData.responder_ids || [];
+      const finalResponderIds = (formData.leader_responder_id && !currentResponders.includes(formData.leader_responder_id))
+        ? [...currentResponders, formData.leader_responder_id]
+        : currentResponders;
+
+      // Requirement: Utilize robust hook logic to handle resource reconciliation.
+      // Ensure we pass finalResponderIds (which includes the leader) to persist the full composition.
       if (formData.team_id) {
-        const finalIds = formData.responder_ids || [];
-        const roles = formData.responder_roles || {};
-        const originalIds = teamById[formData.team_id]?.current_responders?.map(r => r.responder_id) || [];
-        // Reconciliation is now handled within updateTeam
-        await updateTeam(formData.team_id, payload, originalIds, finalIds, roles);
-
-        // Reconcile vehicles
-        const finalVehIds = formData.vehicle_ids || [];
-        const originalVehIds = teamById[formData.team_id]?.current_vehicles?.map(v => v.vehicle_id) || [];
-        const vehToAdd = finalVehIds.filter(id => !originalVehIds.includes(id));
-        const vehToRemove = originalVehIds.filter(id => !finalVehIds.includes(id));
-
-        await Promise.all([
-          ...vehToAdd.map(id => supabase.from('vehicles').update({ team_id: formData.team_id }).eq('vehicle_id', id)),
-          ...vehToRemove.map(id => supabase.from('vehicles').update({ team_id: null }).eq('vehicle_id', id))
-        ]);
+        await updateTeam(formData.team_id, { ...payload, responder_ids: finalResponderIds }, formData.responder_roles, formData.vehicle_ids);
       } else {
-        // The createTeam hook already injects op_period_id and refreshes tactical views.
-        // We construct a clean payload for the teams table here.
-        const newTeam = await createTeam(payload);
-
-        if (newTeam?.team_id) {
-          // 1. Process initial responder attachments
-          const finalIds = formData.responder_ids || [];
-          const roles = formData.responder_roles || {};
-          if (finalIds.length > 0 && attachResponderToTeam) {
-             await Promise.all(finalIds.map(id => 
-               attachResponderToTeam(id, newTeam.team_id, roles[id] || '')
-             ));
-          }
-        
-          // 2. Requirement: Process initial vehicle assignments using the in() operator for arrays.
-          if (formData.vehicle_ids?.length > 0) {
-            await supabase.from('vehicles').update({ team_id: newTeam.team_id }).in('vehicle_id', formData.vehicle_ids);
-          }
-
-          if (pendingAssignmentId) await assignTeamToAssignment(newTeam.team_id, pendingAssignmentId);
+        const newTeam = await createTeam({ ...payload, responder_ids: finalResponderIds }, formData.responder_roles, formData.vehicle_ids);
+        if (newTeam?.team_id && pendingAssignmentId) {
+          await assignTeamToAssignment(newTeam.team_id, pendingAssignmentId);
         }
-
       }
 
       setPendingAssignmentId(null);
@@ -569,6 +533,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
         setShowTeamForm(false);
       }
     } catch (err) {
+      addToast(err.message || 'Failed to save team.', 'error');
       setPendingAssignmentId(null);
     }
   };
@@ -634,6 +599,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
         setShowAssignmentForm(false);
       }
     } catch (err) {
+      addToast(err.message || 'Failed to save assignment.', 'error');
       setPendingTeamId(null);
     }
   };
@@ -737,12 +703,6 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
 
       {loading && !rows.length && <div className="operations-message">Loading operations summary…</div>}
 
-      {error && (
-        <div className="operations-error" role="alert">
-          {error}
-        </div>
-      )}
-
       {!error && (
         <div 
           ref={contentWrapperRef} 
@@ -837,7 +797,6 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
           responders={responders}
           vehicles={vehicles}
           loading={loading}
-          error={error}
           commandStaffExists={commandStaffExists}
         />
       )}
@@ -850,7 +809,6 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
           onSave={handleSaveAssignment}
           initialData={assignmentForm}
           loading={loading}
-          error={error}
         />
       )}
 
@@ -874,6 +832,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
                 border: '1px solid #cbd5e1', marginBottom: '20px', fontSize: '14px',
                 fontFamily: 'inherit', boxSizing: 'border-box'
               }}
+              data-lpignore="true"
               placeholder="Enter message for all teams..."
               value={broadcastMessage}
               onChange={(e) => setBroadcastMessage(e.target.value)}

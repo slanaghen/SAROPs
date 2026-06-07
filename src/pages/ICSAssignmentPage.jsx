@@ -31,24 +31,22 @@ const ICSAssignmentPage = () => {
     
     if (staffTeam?.current_responders) {
       staffTeam.current_responders.forEach(member => {
-        const fullResponder = responders?.find(r => r.responder_id === member.responder_id);
-        if (!fullResponder) return;
-
         const role = member.role?.toLowerCase() || '';
-        const data = { name: fullResponder.name, agency: fullResponder.agency };
+        // Use name and agency directly from the team member metadata provided by the database view
+        const data = { name: member.name, agency: member.agency };
 
-        if (role === 'incident commander') mapping.ic = data;
-        else if (role === 'safety') mapping.safety = data;
-        else if (role === 'pio') mapping.pio = data;
-        else if (role === 'liaison') mapping.liaison = data;
-        else if (role === 'operations') mapping.ops = data;
-        else if (role === 'planning') mapping.planning = data;
-        else if (role === 'logistics') mapping.logistics = data;
+        if (role.includes('commander')) mapping.ic = data;
+        else if (role.includes('safety')) mapping.safety = data;
+        else if (role.includes('pio') || role.includes('public info')) mapping.pio = data;
+        else if (role.includes('liaison')) mapping.liaison = data;
+        else if (role.includes('operations')) mapping.ops = data;
+        else if (role.includes('planning')) mapping.planning = data;
+        else if (role.includes('logistics')) mapping.logistics = data;
         else if (role.includes('admin') || role.includes('finance')) mapping.admin = data;
       });
     }
     return mapping;
-  }, [teams, responders]);
+  }, [teams]);
   
 
   const OrgBox = ({ title, field }) => {
@@ -57,7 +55,8 @@ const ICSAssignmentPage = () => {
       <div className="ics-box">
         <div className="ics-box-title">{title}</div>
 
-        <div className="ics-box-input" style={{ 
+        {/* Renaming class and adding data-lpignore prevents password managers from misidentifying display boxes as input fields */}
+        <div className="ics-box-display" data-lpignore="true" style={{ 
           background: '#fff', 
           border: '1px solid #e2e8f0', 
           borderRadius: '6px', 
@@ -93,7 +92,8 @@ const ICSAssignmentPage = () => {
         <p className="subtitle">Assign personnel to Command and General Staff positions.</p>
       </div>
       
-      <div className="ics-hierarchy">
+      {/* data-lpignore on the container prevents the LastPass extension from crashing while parsing the chart structure */}
+      <div className="ics-hierarchy" data-lpignore="true">
         {loading && <p style={{ color: '#64748b', fontSize: '13px', marginBottom: '10px' }}>Loading organization data...</p>}
         {hookError && <div className="alert alert-error" style={{ marginBottom: '10px' }}>{hookError}</div>}
 

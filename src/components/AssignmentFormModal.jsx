@@ -3,6 +3,7 @@ import BaseModal from './BaseModal';
 import { RESOURCE_TYPES } from '../constants/operationalConstants';
 import { normalizeResourceTypeName } from '../utils/dataNormalization';
 
+import { useToast } from '../context/ToastContext';
 /**
  * Shared Modal for creating and editing Assignments.
  */
@@ -11,8 +12,7 @@ const AssignmentFormModal = ({
   onClose,
   onSave,
   initialData = {},
-  loading = false,
-  error = null
+  loading = false
 }) => {
   const [formData, setFormData] = useState(initialData || {});
 
@@ -23,6 +23,7 @@ const AssignmentFormModal = ({
       resource_type: normalizeResourceTypeName(initialData?.resource_type)
     });
   }, [initialData, isOpen]);
+  const { addToast } = useToast();
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -48,8 +49,6 @@ const AssignmentFormModal = ({
         </>
       }
     >
-      {error && <div className="alert alert-error" style={{ marginBottom: '16px' }}>{error}</div>}
-
       <div className="modal-scroll-wrapper" style={{ maxHeight: '65vh', overflowY: 'auto', paddingRight: '8px' }}>
         <div className="form-row">
           <label htmlFor="asn_name">Assignment Title</label>

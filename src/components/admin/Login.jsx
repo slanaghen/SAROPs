@@ -188,7 +188,7 @@ const Login = ({ onLoginSuccess }) => {
             <label>Username <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required /></label>
             <label>Password <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required /></label>
             <label>Check Into Incident
-              <select value={selectedIncidentId} onChange={(e) => setSelectedIncidentId(e.target.value)}>
+              <select value={selectedIncidentId} onChange={(e) => setSelectedIncidentId(e.target.value)} data-lpignore="true">
                 <option value="">— Don't check in —</option>
                 <option value="NEW_INCIDENT">+ Start New Incident</option>
                 {incidents.map((inc) => (
@@ -197,7 +197,7 @@ const Login = ({ onLoginSuccess }) => {
               </select>
             </label>
             <label>Checking in with Vehicle(s)?
-              <input type="text" value={vehicles} onChange={(e) => setVehicles(e.target.value)} placeholder="e.g. 3121, UTV, Boat" />
+              <input type="text" value={vehicles} onChange={(e) => setVehicles(e.target.value)} data-lpignore="true" placeholder="e.g. 3121, UTV, Boat" />
               <small className="form-hint" style={{ color: '#64748b', fontSize: '11px', display: 'block', marginTop: '4px' }}>Optional: List vehicle designations separated by commas.</small>
             </label>
             <button type="submit" className="btn btn-primary" disabled={loading} style={{ width: '100%', marginTop: '20px' }}>Login</button>

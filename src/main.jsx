@@ -17,6 +17,8 @@ import QRCodesPage from './pages/QRCodesPage';
 import GoogleICSFormsPage from './pages/GoogleICSFormsPage';
 import SettingsPage from './pages/SettingsPage';
 import { IncidentProvider, useIncident } from './context/IncidentContext';
+import { ToastProvider } from './context/ToastContext';
+import ToastContainer from './components/ToastContainer';
 
 const OperationsDashboardPage = lazy(() => import('./pages/OperationsDashboardPage'));
 
@@ -71,8 +73,11 @@ const router = createBrowserRouter([
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <IncidentProvider>
-      <RouterProvider router={router} />
-    </IncidentProvider>
+    <ToastProvider>
+      <IncidentProvider>
+        <RouterProvider router={router} />
+        <ToastContainer />
+      </IncidentProvider>
+    </ToastProvider>
   </React.StrictMode>
 );

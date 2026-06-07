@@ -19,7 +19,7 @@ export const useTeamActions = ({
   setResponderStatus
 }) => {
   
-  const createTeam = useCallback(async (teamPayload) => {
+  const createTeam = useCallback(async (teamPayload, responderRoles = {}, vehicleIds = []) => {
     try {
       setLoading(true);
 

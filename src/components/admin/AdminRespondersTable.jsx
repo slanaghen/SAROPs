@@ -3,6 +3,7 @@ import React, { useState, useMemo } from 'react';
 const AdminRespondersTable = ({
   allResponders = [],
   allIncidents = [],
+  allTeams = [],
   isRespondersExpanded,
   setIsRespondersExpanded,
   handleCheckOutResponder,
@@ -21,6 +22,9 @@ const AdminRespondersTable = ({
         if (sortConfig.key === 'incident_number') {
           aVal = (allIncidents.find(i => i.incident_id === a.incident_id)?.number || '').toLowerCase();
           bVal = (allIncidents.find(i => i.incident_id === b.incident_id)?.number || '').toLowerCase();
+        } else if (sortConfig.key === 'team_name') {
+          aVal = (allTeams.find(t => t.current_responders?.some(r => r.responder_id === a.responder_id))?.team_name_number || '').toLowerCase();
+          bVal = (allTeams.find(t => t.current_responders?.some(r => r.responder_id === b.responder_id))?.team_name_number || '').toLowerCase();
         } else {
           aVal = (a[sortConfig.key] || '').toString().toLowerCase();
           bVal = (b[sortConfig.key] || '').toString().toLowerCase();
@@ -32,7 +36,7 @@ const AdminRespondersTable = ({
       });
     }
     return items;
-  }, [allResponders, allIncidents, sortConfig]);
+  }, [allResponders, allIncidents, allTeams, sortConfig]);
 
   const requestSort = (key) => {
     let direction = 'asc';
@@ -80,6 +84,9 @@ const AdminRespondersTable = ({
                 <th onClick={() => requestSort('incident_number')} style={{ cursor: 'pointer' }}>
                   Inc # {sortConfig.key === 'incident_number' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
                 </th>
+                <th onClick={() => requestSort('team_name')} style={{ cursor: 'pointer' }}>
+                  Team {sortConfig.key === 'team_name' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+                </th>
                 <th onClick={() => requestSort('checkin_datetime')} style={{ cursor: 'pointer' }}>
                   Check-In Time {sortConfig.key === 'checkin_datetime' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
                 </th>
@@ -92,12 +99,15 @@ const AdminRespondersTable = ({
             <tbody>
               {allResponders.length === 0 ? (
                 <tr>
-                  <td colSpan="6" className="empty-row">No responders found in database.</td>
+                  <td colSpan="7" className="empty-row">No responders found in database.</td>
                 </tr>
               ) : (
                 sortedResponders.map(res => {
                   const isCheckedOut = !!res.checkout_datetime;
                   const incident = allIncidents.find(i => i.incident_id === res.incident_id);
+                  const team = allTeams.find(t => 
+                    t.current_responders?.some(r => r.responder_id === res.responder_id)
+                  );
                   return (
                     <tr key={res.responder_id}>
                       <td style={{ color: '#000' }}>
@@ -106,6 +116,7 @@ const AdminRespondersTable = ({
                       <td style={{ color: '#000' }}>{res.agency || '—'}</td>
                       <td style={{ color: '#000' }}>{res.identifier || '—'}</td>
                       <td style={{ color: '#000' }}>#{incident?.number || '—'}</td>
+                      <td style={{ color: '#000' }}>{team?.team_name_number || '—'}</td>
                       <td style={{ color: '#000' }}>{new Date(res.checkin_datetime).toLocaleString()}</td>
                       <td style={{ color: '#000' }}>
                         <span className={`status-indicator ${(res.status || 'unknown').toLowerCase()}`}>

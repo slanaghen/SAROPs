@@ -9,6 +9,12 @@ import {
   buildSecureSartopoUrl, 
   downloadAndSyncSartopoData 
 } from '../services/sartopoService';
+import { 
+  getCachedMap, 
+  setCachedMap, 
+  mergeMapUpdates 
+} from '../utils/indexedDBCache';
+import { useToast } from '../context/ToastContext';
 
 const SARTopoDataPage = () => {
   const { incidentId, isActive, incidentData, responderName } = useIncident();
@@ -29,6 +35,7 @@ const SARTopoDataPage = () => {
   const [showUploadGeometry, setShowUploadGeometry] = useState(false); // New state for upload filter
   const [showAllDownloadObjects, setShowAllDownloadObjects] = useState(false); // New state for download filter
   const [showDownloadGeometry, setShowDownloadGeometry] = useState(false);
+  const { addToast } = useToast();
   const [isAutoRefreshEnabled, setIsAutoRefreshEnabled] = useState(false);
 
   const sartopoConfig = useMemo(() => getSartopoConfig(sartopoId), [sartopoId]);
@@ -108,8 +115,16 @@ const SARTopoDataPage = () => {
   // Hydrate features from database on mount or incident change to ensure persistent reference data
   useEffect(() => {
     const hydrateMapData = async () => {
-      if (!incidentId || features) return;
+      if (!incidentId || !sartopoId || features) return;
       
+      // Try local IndexedDB first (fastest path)
+      const localCache = await getCachedMap(sartopoId);
+      if (localCache?.features) {
+        setFeatures(localCache.features);
+        return;
+      }
+
+      // Fallback to Supabase cloud hydration
       const { data, error: fetchErr } = await supabase
         .from('incidents')
         .select('sartopo_map_data')
@@ -137,21 +152,34 @@ const SARTopoDataPage = () => {
     if (isInitialFetch) setFeatures(null);
 
     try {
+      // 1. Requirement: Check local cache for existing features to enable incremental merging
+      const localCache = await getCachedMap(sartopoId);
+      const baseData = localCache?.features || features;
+      const baseFeatures = baseData?.result?.state?.features || baseData?.features || [];
+
       const result = await downloadAndSyncSartopoData({
         supabase,
         incidentId,
         opPeriodId: incidentData.opPeriodId,
         sartopoConfig,
-        lastFetchTime,
+        lastFetchTime, // Incremental 'since' parameter passed here
         userName: responderName || 'SARTopo Sync'
       });
 
       if (!result) return;
-      const { mergedMapData, fetchedAt, syncCount, syncedTitles } = result;
+      const { mergedMapData: updates, fetchedAt, syncCount, syncedTitles } = result;
 
-      setFeatures(mergedMapData);
+      // 2. Perform local merge
+      const updateFeatures = updates?.features || updates?.result?.state?.features || [];
+      const finalFeatures = mergeMapUpdates(baseFeatures, updateFeatures);
+      const finalPayload = { ...updates, features: finalFeatures };
+
+      setFeatures(finalPayload);
       setLastFetchTime(fetchedAt);
       setSyncedAssignmentNames(syncedTitles);
+
+      // 3. Persist to local IndexedDB for future incremental syncs
+      await setCachedMap(sartopoId, finalPayload, fetchedAt);
 
       // Persist sync metadata to database for global visibility
       await supabase
@@ -177,7 +205,7 @@ const SARTopoDataPage = () => {
       const existingTitleMap = new Map(existingSaropsAsns?.filter(a => a.title).map(a => [a.title.trim().toLowerCase(), a]) || []);
 
       // Prepare display list for SARTopo Assignments div
-      const displayList = mergedMapData.features
+      const displayList = finalFeatures
         .filter(f => f.properties?.class === 'Assignment')
         .map(f => {
           const title = (f.properties?.title || f.properties?.name)?.trim().toLowerCase();
@@ -190,7 +218,7 @@ const SARTopoDataPage = () => {
       setSartopoAssignmentDisplayList(displayList);
       if (!isInitialFetch && syncCount > 0) alert(`Sync complete: ${syncCount} assignments updated.`);
     } catch (err) {
-      console.error('Fetch error:', err);
+      addToast(err.message || 'Error fetching SARTopo data.', 'error');
       setError(err.message || 'Error fetching SARTopo data.');
     } finally {
       setLoading(false);
@@ -222,13 +250,17 @@ const SARTopoDataPage = () => {
       // Ensure we are strictly exporting SARTopo-originated features
       // The gt filter in the query handles the incremental logic
       const assignmentsToExport = (assignments || []).filter(asn => asn.origin === 'SARTopo' && asn.sartopo_id);
+      if (assignmentsToExport.length === 0) return;
 
-      let baseData = features;
+      // Try local IndexedDB baseline first to avoid re-fetching for reconciliation
+      const localCache = await getCachedMap(sartopoId);
+      let baseData = localCache?.features || features;
       let fetchedFeatures = baseData?.result?.state?.features || baseData?.features || [];
 
       // Fallback: If local UI state is empty or missing metadata for target assignments, 
       // attempt to use persisted map data from the incident record.
-      const isStateIncomplete = !baseData || fetchedFeatures.length === 0 || 
+      const isStateIncomplete = !baseData || 
+                                fetchedFeatures.length === 0 || 
                                 assignmentsToExport.some(asn => !fetchedFeatures.some(f => f.id === asn.sartopo_id));
 
       if (isStateIncomplete && assignmentsToExport.length > 0 && incidentId) {
@@ -263,7 +295,7 @@ const SARTopoDataPage = () => {
       }
 
       if (fetchedFeatures.length === 0 && assignmentsToExport.length > 0) {
-        alert('Metadata reconciliation failed: No base map data found. Please click "Download from SARTopo" first to load geometry and fields.');
+        addToast('Metadata reconciliation failed: No base map data found. Please click "Download from SARTopo" first to load geometry and fields.', 'error');
         return;
       }
 
@@ -295,7 +327,7 @@ const SARTopoDataPage = () => {
       setIsMapUploadExpanded(true);
       
       if (assignmentsToExport.length === 0 && lastUploadTime > 0) {
-        alert('No SARTopo assignments have been updated since the last export.');
+        addToast('No SARTopo assignments have been updated since the last export.', 'info');
       }
 
       return geojson;
@@ -379,16 +411,23 @@ const SARTopoDataPage = () => {
     try {
       const { id: mapId } = sartopoConfig;
 
-      // Step 1: Reconciliation Baseline - Perform a live fetch of the remote state.
-      // Requirement: Ensure we are reconciling SAROps changes against the absolute latest remote data.
-      const path = `/api/v1/map/${mapId}/since/0`;
+      // Step 1: Incremental Baseline Reconciliation
+      // Instead of fetching since/0, we fetch only the changes since our last known high-water mark.
+      const path = `/api/v1/map/${mapId}/since/${lastFetchTime}`;
       const { url: baselineUrl } = await buildSecureUrl('GET', path);
       
       const baselineRes = await fetch(baselineUrl);
       if (!baselineRes.ok) throw new Error(`Failed to fetch baseline map for reconciliation: ${baselineRes.status}`);
       
-      const currentMapData = await baselineRes.json();
-      const fetchedFeatures = currentMapData?.features || currentMapData?.result?.state?.features || [];
+      const diffMapData = await baselineRes.json();
+      const updates = diffMapData?.features || diffMapData?.result?.state?.features || [];
+      
+      // Merge the diff into our cached state
+      const localCache = await getCachedMap(sartopoId);
+      const baseData = localCache?.features || features;
+      const baseFeatures = baseData?.result?.state?.features || baseData?.features || [];
+      const fetchedFeatures = mergeMapUpdates(baseFeatures, updates);
+      const currentMapData = { ...diffMapData, features: fetchedFeatures };
 
       if (fetchedFeatures.length === 0) {
         throw new Error('Reconciliation baseline is missing from the database. Please click "Download from SARTopo" first.');
@@ -396,6 +435,7 @@ const SARTopoDataPage = () => {
 
       // Update local state to keep UI in sync with the baseline we are using
       setFeatures(currentMapData);
+      await setCachedMap(sartopoId, currentMapData, lastFetchTime);
 
       const sartopoFeatureLookup = new Map(fetchedFeatures.map(f => [f.id, f]));
       const updatedSartopoFeatures = [...fetchedFeatures]; // Work copy to accumulate property updates
@@ -465,13 +505,13 @@ const SARTopoDataPage = () => {
           console.log(`[SARTopo] Received response status for "${asn.title}": ${response.status}`);
 
           if (!response.ok) {
-            const errorText = await response.text();
+            const errorText = await response.text(); // Get detailed error from SARTopo
             if (response.status === 401) {
               const hasEnvKey = !!apiKey;
               const msg = `401 Unauthorized: SARTopo requires a Sync Key to authorize writes. ${!hasEnvKey ? 'VITE_SARTOPO_API_CREDENTIAL_SECRET is not configured in your .env file. ' : ''}Ensure your Map ID includes a "?k=" or "?readCode=" parameter, or verify your global Sync Key has write access.`;
               throw new Error(msg);
             }
-            throw new Error(`SARTopo API returned ${response.status}: ${errorText}`);
+            throw new Error(`SARTopo API returned ${response.status}: ${errorText}`); // Propagate the error
           }
           successCount++;
           successfulAssignments.push(asn.title || 'Unknown');
@@ -514,10 +554,10 @@ const SARTopoDataPage = () => {
       }
 
       if (failCount === 0) {
-        alert(`Successfully uploaded ${successCount} assignments to SARTopo: ${successfulAssignments.join(', ')}`);
+        addToast(`Successfully uploaded ${successCount} assignments to SARTopo: ${successfulAssignments.join(', ')}`, 'success');
       } else {
-        setError(`Uploaded ${successCount} assignments: ${successfulAssignments.join(', ')}. Failed to upload ${failCount} assignments: ${failedAssignments.join(', ')}`);
-      }
+        addToast(`Uploaded ${successCount} assignments: ${successfulAssignments.join(', ')}. Failed to upload ${failCount} assignments: ${failedAssignments.join(', ')}`, 'error');
+      } // Error is handled by the hook's setError
     } catch (err) {
       console.error('Overall upload process failed:', err);
       setError(err.message || 'Error during SARTopo upload process.');
@@ -622,11 +662,6 @@ const SARTopoDataPage = () => {
           </div>
         </div>
 
-        {error && (
-          <div className="alert alert-error" style={{ marginTop: '20px' }}>
-            {error}
-          </div>
-        )}
       </div>
 
       <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-start', marginBottom: '24px' }}>

@@ -4,11 +4,29 @@ import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import SARTopoDataPage from './SARTopoDataPage';
 import { useIncident } from '../context/IncidentContext';
 import { supabase } from '../lib/supabase';
+import { useToast } from '../context/ToastContext';
 
 expect.extend(matchers);
 
 vi.mock('../context/IncidentContext', () => ({
   useIncident: vi.fn(),
+}));
+
+vi.mock('../context/ToastContext', () => ({
+  useToast: vi.fn(),
+}));
+
+vi.mock('../utils/indexedDBCache', () => ({
+  getCachedMap: vi.fn().mockResolvedValue(null),
+  setCachedMap: vi.fn().mockResolvedValue(undefined),
+  mergeMapUpdates: vi.fn((baseFeatures = [], updateFeatures = []) => {
+    const featureMap = new Map((baseFeatures || []).map(f => [f.id, f]));
+    (updateFeatures || []).forEach(update => {
+      if (update?.id) featureMap.set(update.id, update);
+    });
+    return Array.from(featureMap.values());
+  }),
+  clearMapCache: vi.fn().mockResolvedValue(undefined),
 }));
 
 /**
@@ -48,8 +66,11 @@ vi.mock('../lib/supabase', () => ({
 }));
 const mockOpPeriodId = 'op-123';
 describe('SARTopoDataPage', () => {
+  const mockAddToast = vi.fn();
+
   beforeEach(() => {
     vi.clearAllMocks();
+    mockAddToast.mockClear();
     localStorage.clear();
     vi.stubGlobal('alert', vi.fn());
 
@@ -93,6 +114,10 @@ describe('SARTopoDataPage', () => {
       responderName: 'Steve',
       // Add other necessary properties if they are accessed by the component
       // e.g., setResponderStatus: vi.fn(), setCurrentTeamStatus: vi.fn(), etc.
+    });
+
+    vi.mocked(useToast).mockReturnValue({
+      addToast: mockAddToast
     });
   });
 
@@ -159,7 +184,11 @@ describe('SARTopoDataPage', () => {
     const fetchBtn = await screen.findByText('Download from SARTopo');
     fireEvent.click(fetchBtn);
 
-    expect(await screen.findByText(/SARTopo returned an error page/i)).toBeInTheDocument();
+    // Requirement: Since the error alert div was removed in favor of Toasts, 
+    // we verify the notification system was called instead of looking for DOM text.
+    await waitFor(() => {
+      expect(mockAddToast).toHaveBeenCalledWith(expect.stringMatching(/SARTopo returned an error page/i), 'error');
+    });
   });
 
   it('renders features as JSON when fetch is successful', async () => {

@@ -4,6 +4,7 @@ import { useIncident } from '../context/IncidentContext';
 import { checkIsParOverdue, formatTimeSince } from '../utils/operationalUtils';
 import useResponderTeamAndAssignment from '../hooks/useResponderTeamAndAssignment'; // The new hook
 import { removeResponderFromTeam } from '../services/responderService';
+import { useToast } from '../context/ToastContext';
 import OperationsMap from '../components/OperationsMap';
 import '../styles/ResponderDashboard.css'; // New CSS file for styling
 
@@ -49,6 +50,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
   const [icsRole, setIcsRole] = useState(null);
   const [staffTeamId, setStaffTeamId] = useState(null);
   const [currentTime, setCurrentTime] = useState(Date.now());
+  const { addToast } = useToast();
   const [allTeams, setAllTeams] = useState([]); // For staff messaging dropdown
   const [selectedTeamForMessaging, setSelectedTeamForMessaging] = useState(''); // For staff messaging dropdown
 
@@ -401,7 +403,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       setResponderStatus('Staged'); // Optimistic update for current responder
       setCurrentTeamStatus(null);
       setCurrentAssignmentStatus(null);
-      refreshAllData();
+      refreshAllData(); // Hook handles its own error
     } catch (err) {
       console.error('Error leaving team:', err);
       alert('Failed to leave team: ' + (err.message || 'Unknown error'));
@@ -427,7 +429,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       if (!data || data.length === 0) throw new Error('PAR update blocked: You must be a member of the team to perform this action.');
       
       refreshAllData();
-    } catch (err) {
+    } catch (err) { // Error is handled by the hook's setError
       console.error('Error sending PAR:', err);
     }
   };
@@ -450,7 +452,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       if (!data || data.length === 0) throw new Error('Update blocked: You must be a member of the assigned team to modify this assignment.');
       refreshAllData();
     } catch (err) {
-      console.error('Error updating mission data:', err);
+      console.error('Error updating mission data:', err); // Error is handled by the hook's setError
       alert('Failed to update mission data: ' + err.message);
     } finally {
       setIsUpdatingAsnData(false);
@@ -483,7 +485,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       setCurrentAssignmentStatus(null);
 
       refreshAllData();
-    } catch (err) {
+    } catch (err) { // Error is handled by the hook's setError
       console.error('Error completing assignment:', err);
       alert('Failed to complete assignment: ' + err.message);
     } finally {
@@ -517,7 +519,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       setResponderStatus('Staged');
       setCurrentTeamStatus(null);
       setCurrentAssignmentStatus(null);
-      refreshAllData();
+      refreshAllData(); // Error is handled by the hook's setError
     } catch (err) {
       console.error('Error cancelling assignment:', err);
       alert('Failed to cancel assignment: ' + err.message);
@@ -547,7 +549,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       setCurrentAssignmentStatus('Deployed');
 
       refreshAllData();
-    } catch (err) {
+    } catch (err) { // Error is handled by the hook's setError
       console.error('Error deploying assignment:', err);
       alert('Deployment failed: ' + (err.message || 'Permission denied'));
     }

@@ -5,6 +5,7 @@ import { BrowserRouter } from 'react-router-dom';
 import AdminPage from './AdminPage';
 import { useIncident } from '../context/IncidentContext';
 import { useAdminData } from '../hooks/useAdminData';
+import { useToast } from '../context/ToastContext';
 import { supabase } from '../lib/supabase'; // Import the actual supabase object to mock it
 
 const mockNavigate = vi.fn();
@@ -21,6 +22,10 @@ vi.mock('../context/IncidentContext', () => ({
 
 vi.mock('../hooks/useAdminData', () => ({
   useAdminData: vi.fn(),
+}));
+
+vi.mock('../context/ToastContext', () => ({
+  useToast: vi.fn(),
 }));
 
 vi.mock('../lib/supabase', () => ({
@@ -52,6 +57,8 @@ afterEach(() => {
 });
 
 describe('AdminPage Authentication Gate', () => {
+  const mockAddToast = vi.fn();
+
   beforeEach(() => {
     vi.clearAllMocks();
     // Re-establish default mock implementations that are lost when implementations are overridden in individual tests.
@@ -87,6 +94,9 @@ describe('AdminPage Authentication Gate', () => {
       loading: false,
       refresh: vi.fn(),
       refreshAll: vi.fn(),
+    });
+    vi.mocked(useToast).mockReturnValue({
+      addToast: mockAddToast
     });
   });
 
@@ -915,7 +925,7 @@ describe('AdminPage Authentication Gate', () => {
         undefined, // sartopo_id
         60 // par_check_interval
       );
-      expect(screen.getByText(/Session activated for "New Incident"/i)).toBeInTheDocument();
+      expect(mockAddToast).toHaveBeenCalledWith(expect.stringContaining('Session activated'), 'success');
       expect(mockNavigate).toHaveBeenCalledWith('/operations');
     });
   });
@@ -963,7 +973,7 @@ describe('AdminPage Authentication Gate', () => {
     fireEvent.click(screen.getByRole('button', { name: /Join Incident/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/RPC Activation Error/i)).toBeInTheDocument();
+      expect(mockAddToast).toHaveBeenCalledWith(expect.stringContaining('RPC Activation Error'), 'error');
     });
   });
 
@@ -991,6 +1001,6 @@ describe('AdminPage Authentication Gate', () => {
     fireEvent.click(applyBtn);
 
     expect(mockSetOpsRate).toHaveBeenCalledWith(45000);
-    expect(screen.getByText(/refresh intervals updated successfully/i)).toBeInTheDocument();
+    expect(mockAddToast).toHaveBeenCalledWith('System refresh intervals updated successfully.', 'success');
   });
 });

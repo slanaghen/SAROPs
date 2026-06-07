@@ -3,6 +3,7 @@ import React, { useState, useMemo } from 'react';
 const AdminAssignmentsTable = ({
   allAssignments = [],
   allIncidents = [],
+  allTeams = [],
   isAssignmentsExpanded,
   setIsAssignmentsExpanded,
   handleEditAssignment,
@@ -22,6 +23,9 @@ const AdminAssignmentsTable = ({
         if (sortConfig.key === 'incident_number') {
           aVal = (a.incident_number || allIncidents.find(i => i.incident_id === (opA?.incident_id || a.incident_id))?.number || '').toString().toLowerCase();
           bVal = (b.incident_number || allIncidents.find(i => i.incident_id === (opB?.incident_id || b.incident_id))?.number || '').toString().toLowerCase();
+        } else if (sortConfig.key === 'team_name') {
+          aVal = (a.team_name || (a.team_id ? allTeams.find(t => t.team_id === a.team_id)?.team_name_number : '') || '').toString().toLowerCase();
+          bVal = (b.team_name || (b.team_id ? allTeams.find(t => t.team_id === b.team_id)?.team_name_number : '') || '').toString().toLowerCase();
         } else {
           aVal = (a[sortConfig.key] || '').toString().toLowerCase();
           bVal = (b[sortConfig.key] || '').toString().toLowerCase();
@@ -33,7 +37,7 @@ const AdminAssignmentsTable = ({
       });
     }
     return items;
-  }, [allAssignments, allIncidents, sortConfig]);
+  }, [allAssignments, allIncidents, allTeams, sortConfig]);
 
   const requestSort = (key) => {
     let direction = 'asc';
@@ -78,6 +82,9 @@ const AdminAssignmentsTable = ({
                 <th onClick={() => requestSort('incident_number')} style={{ cursor: 'pointer' }}>
                   Inc # {sortConfig.key === 'incident_number' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
                 </th>
+                <th onClick={() => requestSort('team_name')} style={{ cursor: 'pointer' }}>
+                  Team {sortConfig.key === 'team_name' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+                </th>
                 <th onClick={() => requestSort('status')} style={{ cursor: 'pointer' }}>
                   Status {sortConfig.key === 'status' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
                 </th>
@@ -87,7 +94,7 @@ const AdminAssignmentsTable = ({
             <tbody>
               {allAssignments.length === 0 ? (
                 <tr>
-                  <td colSpan="5" className="empty-row">No assignments found in database.</td>
+                  <td colSpan="6" className="empty-row">No assignments found in database.</td>
                 </tr>
               ) : (
                 sortedAssignments.map((asn, index) => {
@@ -97,6 +104,10 @@ const AdminAssignmentsTable = ({
                     ? allIncidents.find(inc => inc.incident_id === recordIncidentId)?.number 
                     : null);
 
+                  const teamName = asn.team_name || (asn.team_id 
+                    ? allTeams.find(t => t.team_id === asn.team_id)?.team_name_number 
+                    : null);
+
                   return (
                     <tr key={asn.assignment_id || `asn-${index}`}>
                       <td style={{ color: '#000' }}>
@@ -104,6 +115,7 @@ const AdminAssignmentsTable = ({
                       </td>
                       <td style={{ color: '#000' }}>{asn.resource_type || '—'}</td>
                       <td style={{ color: '#000' }}>{incidentNumber ? `#${incidentNumber}` : '—'}</td>
+                      <td style={{ color: '#000' }}>{teamName || '—'}</td>
                       <td style={{ color: '#000' }}>
                         <span className={`status-indicator ${asn.status.toLowerCase()}`}>
                           {asn.status}

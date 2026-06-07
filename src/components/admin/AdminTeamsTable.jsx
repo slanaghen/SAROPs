@@ -3,6 +3,7 @@ import React, { useState, useMemo } from 'react';
 const AdminTeamsTable = ({
   allTeams = [],
   allIncidents = [],
+  allAssignments = [],
   isTeamsExpanded,
   setIsTeamsExpanded,
   handleDisbandTeam,
@@ -23,6 +24,9 @@ const AdminTeamsTable = ({
         if (sortConfig.key === 'incident_number') {
           aVal = (a.incident_number || allIncidents.find(i => i.incident_id === (opA?.incident_id || a.incident_id))?.number || '').toString().toLowerCase();
           bVal = (b.incident_number || allIncidents.find(i => i.incident_id === (opB?.incident_id || b.incident_id))?.number || '').toString().toLowerCase();
+        } else if (sortConfig.key === 'assignment_title') {
+          aVal = (allAssignments.find(asn => asn.team_id === a.team_id)?.title || '').toLowerCase();
+          bVal = (allAssignments.find(asn => asn.team_id === b.team_id)?.title || '').toLowerCase();
         } else {
           aVal = (a[sortConfig.key] || '').toString().toLowerCase();
           bVal = (b[sortConfig.key] || '').toString().toLowerCase();
@@ -34,7 +38,7 @@ const AdminTeamsTable = ({
       });
     }
     return items;
-  }, [allTeams, allIncidents, sortConfig]);
+  }, [allTeams, allIncidents, allAssignments, sortConfig]);
 
   const requestSort = (key) => {
     let direction = 'asc';
@@ -79,6 +83,9 @@ const AdminTeamsTable = ({
                 <th onClick={() => requestSort('incident_number')} style={{ cursor: 'pointer' }}>
                   Inc # {sortConfig.key === 'incident_number' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
                 </th>
+                <th onClick={() => requestSort('assignment_title')} style={{ cursor: 'pointer' }}>
+                  Assignment {sortConfig.key === 'assignment_title' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+                </th>
                 <th onClick={() => requestSort('status')} style={{ cursor: 'pointer' }}>
                   Status {sortConfig.key === 'status' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
                 </th>
@@ -88,7 +95,7 @@ const AdminTeamsTable = ({
             <tbody>
               {allTeams.length === 0 ? (
                 <tr>
-                  <td colSpan="5" className="empty-row">No teams found in database.</td>
+                  <td colSpan="6" className="empty-row">No teams found in database.</td>
                 </tr>
               ) : (
                 sortedTeams.map(team => {
@@ -97,6 +104,8 @@ const AdminTeamsTable = ({
                   const incidentNumber = team.incident_number || (recordIncidentId 
                     ? allIncidents.find(inc => inc.incident_id === recordIncidentId)?.number 
                     : null);
+                  
+                  const assignment = allAssignments.find(asn => asn.team_id === team.team_id);
 
                   return (
                     <tr key={team.team_id}>
@@ -105,6 +114,7 @@ const AdminTeamsTable = ({
                       </td>
                       <td style={{ color: '#000' }}>{team.type}</td>
                       <td style={{ color: '#000' }}>{incidentNumber ? `#${incidentNumber}` : '—'}</td>
+                      <td style={{ color: '#000' }}>{assignment?.title || '—'}</td>
                       <td style={{ color: '#000' }}>
                         <span className={`status-indicator ${team.status.toLowerCase()}`}>
                           {team.status}

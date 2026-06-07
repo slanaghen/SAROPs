@@ -2,12 +2,12 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import AdminUserFormModal from '../components/admin/AdminUserFormModal';
 import '../styles/IncidentEditPage.css';
+import { useToast } from '../context/ToastContext';
 
 const SettingsPage = () => {
   const [userProfile, setUserProfile] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [success, setSuccess] = useState(null);
+  const { addToast } = useToast();
 
   const fetchMyProfile = useCallback(async () => {
     setLoading(true);
@@ -26,8 +26,8 @@ const SettingsPage = () => {
 
       if (fetchError) throw fetchError;
       setUserProfile(data);
-    } catch (err) {
-      setError('Failed to load profile settings');
+    } catch (err) { // Error is handled by the hook's setError
+      addToast('Failed to load profile settings: ' + err.message, 'error');
       console.error(err);
     } finally {
       setLoading(false);
@@ -39,10 +39,6 @@ const SettingsPage = () => {
   }, [fetchMyProfile]);
 
   const handleSaveProfile = async (formData, stayOpen = false) => {
-    setLoading(true);
-    setError(null);
-    setSuccess(null);
-
     try {
       const { error: updateError } = await supabase.rpc('admin_add_user', {
         p_email: formData.email,
@@ -60,10 +56,10 @@ const SettingsPage = () => {
       });
 
       if (updateError) throw updateError;
-      setSuccess('Profile updated successfully.');
+      addToast('Profile updated successfully.', 'success');
       await fetchMyProfile();
-    } catch (err) {
-      setError(err.message || 'Failed to update profile.');
+    } catch (err) { // Error is handled by the hook's setError
+      addToast(err.message || 'Failed to update profile.', 'error');
     } finally {
       setLoading(false);
     }
@@ -86,8 +82,6 @@ const SettingsPage = () => {
             onSave={handleSaveProfile}
             initialData={userProfile}
             loading={loading}
-            error={error}
-            success={success}
             isProfileSettings={true}
           />
         </div>

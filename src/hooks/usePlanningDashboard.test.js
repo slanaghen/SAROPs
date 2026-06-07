@@ -16,6 +16,10 @@ vi.mock('../context/IncidentContext', () => ({
   })),
 }));
 
+vi.mock('../context/ToastContext', () => ({
+  useToast: vi.fn(() => ({ addToast: vi.fn(), removeToast: vi.fn() })),
+}));
+
 vi.mock('../services/responderService', async (importOriginal) => {
   const actual = await importOriginal();
   return {
@@ -89,10 +93,9 @@ describe('usePlanningDashboard Hook', () => {
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
       insert: vi.fn().mockReturnThis(),
-      // maybeSingle resolves to null for the initial uniqueness check, then to the data for the insert result.
+      // maybeSingle resolves to null for the initial uniqueness check.
       maybeSingle: vi.fn()
-        .mockResolvedValueOnce({ data: null, error: null })
-        .mockResolvedValue({ data: newTeam, error: null }),
+        .mockResolvedValue({ data: null, error: null }),
       single: vi.fn().mockResolvedValue({ data: newTeam, error: null }),
     };
 

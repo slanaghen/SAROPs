@@ -22,6 +22,7 @@ import AdminAssignmentsTable from '../components/admin/AdminAssignmentsTable';
 import AdminIncidentsTable from '../components/admin/AdminIncidentsTable';
 import AdminVehiclesTable from '../components/admin/AdminVehiclesTable';
 import VehicleFormModal from '../components/admin/VehicleFormModal';
+import { useToast } from '../context/ToastContext';
 
 const AdminPage = () => {
   const navigate = useNavigate();
@@ -38,9 +39,8 @@ const AdminPage = () => {
     loading: fetching, refresh: fetchTable, refreshAll: refreshDashboardData
   } = useAdminData();
 
+  const { addToast } = useToast();
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [success, setSuccess] = useState(null);
   const [isRespondersExpanded, setIsRespondersExpanded] = useState(true);
   const [isVehiclesExpanded, setIsVehiclesExpanded] = useState(true);
 
@@ -141,8 +141,6 @@ const AdminPage = () => {
     if (!window.confirm(confirmMsg)) return;
 
     setLoading(true);
-    setError(null);
-    setSuccess(null);
 
     try {
       // Execute the seeding logic via RPC. Ensure the seed-data-specific.sql 
@@ -153,14 +151,14 @@ const AdminPage = () => {
       await recordAction?.('Admin triggered specific development data seeding (15 assignments, 31 responders).');
 
       await refreshDashboardData();
-      setSuccess('Database successfully seeded with test data.');
+      addToast('Database successfully seeded with test data.', 'success');
     } catch (err) {
       let userFriendlyMessage = err.message;
       // Specifically catch the "missing function" error to provide a setup hint
       if (err.message?.includes('seed_data_specific') && err.message?.includes('schema cache')) {
         userFriendlyMessage = 'The database function "seed_data_specific" is not defined. Please run the seeding SQL script in your Supabase SQL Editor.';
       }
-      setError('Failed to seed database: ' + userFriendlyMessage);
+      addToast('Failed to seed database: ' + userFriendlyMessage, 'error');
     } finally {
       setLoading(false);
     }
@@ -187,7 +185,7 @@ const AdminPage = () => {
         });
       } catch (err) {
         console.error('Failed to deactivate session:', err);
-        setError("Deactivation encountered an error. Context has been reset locally.");
+        addToast("Deactivation encountered an error. Context has been reset locally.", 'error');
       }
     }
 
@@ -212,7 +210,7 @@ const AdminPage = () => {
       // Refresh Supabase session to clear operational JWT claims (incident_id)
       await supabase.auth.refreshSession();
       
-      setSuccess("Successfully left incident. You can now select a new context.");
+      addToast("Successfully left incident. You can now select a new context.", 'success');
     } catch (localErr) {
       console.error('Failed to clear local context:', localErr);
     } finally {
@@ -229,8 +227,6 @@ const AdminPage = () => {
     if (!selectedActivationId) return;
 
     setLoading(true);
-    setError(null);
-    setSuccess(null);
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -332,12 +328,12 @@ const AdminPage = () => {
       // Refresh local data so the Incidents table immediately reflects the highlighted active session
       if (refreshDashboardData) await refreshDashboardData();
 
-      setSuccess(`Session activated for "${selectedInc.name}". Your responder identity has been established.`);
+      addToast(`Session activated for "${selectedInc.name}". Your responder identity has been established.`, 'success');
       // Requirement: Command Staff/Admin users should be directed to the Operations dashboard 
       // immediately upon establishing incident context, rather than the responder dashboard.
       navigate('/operations');
     } catch (err) {
-      setError(err.message || "Failed to activate session.");
+      addToast(err.message || "Failed to activate session.", 'error');
     } finally {
       setLoading(false);
     }
@@ -352,7 +348,7 @@ const AdminPage = () => {
       res: resRefresh,
       sartopo: sartopoRefresh
     });
-    setSuccess('System refresh intervals updated successfully.');
+    addToast('System refresh intervals updated successfully.', 'success');
   };
 
   useEffect(() => {
@@ -366,8 +362,6 @@ const AdminPage = () => {
 
   const handleSaveUser = async (formData, stayOpen = false) => {
     setLoading(true);
-    setError(null);
-    setSuccess(null);
 
     try {
       if (formData.email && editingUser) { // Editing existing user
@@ -386,7 +380,7 @@ const AdminPage = () => {
           p_vehicles: formData.vehicles,
         });
         if (updateError) throw updateError;
-        setSuccess(`User ${formData.email} updated successfully.`);
+        addToast(`User ${formData.email} updated successfully.`, 'success');
       } else { // Adding new user
         const { error: insertError } = await supabase.rpc('admin_add_user', {
           p_email: formData.email,
@@ -403,7 +397,7 @@ const AdminPage = () => {
           p_vehicles: formData.vehicles,
         });
         if (insertError) throw insertError;
-        setSuccess(`User ${formData.email} added successfully.`);
+        addToast(`User ${formData.email} added successfully.`, 'success');
       }
       await fetchTable('users');
 
@@ -415,7 +409,7 @@ const AdminPage = () => {
         setEditingUser(null);
       }
     } catch (err) {
-      setError(err.message || 'Failed to save user.');
+      addToast(err.message || 'Failed to save user.', 'error');
     } finally {
       setLoading(false);
     }
@@ -423,8 +417,6 @@ const AdminPage = () => {
 
   const handleSaveResponder = async (formData, stayOpen = false) => {
     setLoading(true);
-    setError(null);
-    setSuccess(null);
 
     try {
       const targetIncidentId = formData.incident_id || incidentId;
@@ -450,7 +442,7 @@ const AdminPage = () => {
 
       if (rpcError) throw rpcError;
       
-      setSuccess(`Responder ${formData.name} saved successfully.`);
+      addToast(`Responder ${formData.name} saved successfully.`, 'success');
       await refreshDashboardData();
 
       if (stayOpen) {
@@ -461,7 +453,7 @@ const AdminPage = () => {
         setEditingResponder(null);
       }
     } catch (err) {
-      setError(err.message || 'Failed to save responder.');
+      addToast(err.message || 'Failed to save responder.', 'error');
     } finally {
       setLoading(false);
     }
@@ -469,7 +461,6 @@ const AdminPage = () => {
 
   const handleSaveVehicle = async (formData, stayOpen = false) => {
     setLoading(true);
-    setError(null);
     try {
       const payload = {
         designation: formData.designation,
@@ -481,7 +472,7 @@ const AdminPage = () => {
       if (formData.vehicle_id) {
         const { error: updateError } = await supabase.from('vehicles').update(payload).eq('vehicle_id', formData.vehicle_id);
         if (updateError) throw updateError;
-        setSuccess(`Vehicle ${formData.designation} updated.`);
+        addToast(`Vehicle ${formData.designation} updated.`, 'success');
       } else {
         if (!incidentId && !formData.incident_id) throw new Error("Select an incident context.");
         // Use upsert to handle cases where the designation already exists for this incident
@@ -489,7 +480,7 @@ const AdminPage = () => {
           .from('vehicles')
           .upsert({ ...payload, checkin_datetime: new Date().toISOString() }, { onConflict: 'incident_id, designation' });
         if (insertError) throw insertError;
-        setSuccess(`Vehicle ${formData.designation} checked in.`);
+        addToast(`Vehicle ${formData.designation} checked in.`, 'success');
       }
       await fetchTable('vehicles');
       if (stayOpen) {
@@ -500,7 +491,7 @@ const AdminPage = () => {
         setEditingVehicle(null);
       }
     } catch (err) {
-      setError(err.message || 'Failed to save vehicle.');
+      addToast(err.message || 'Failed to save vehicle.', 'error');
     } finally {
       setLoading(false);
     }
@@ -540,18 +531,16 @@ const AdminPage = () => {
 
   const handleSaveTeam = async (formData, stayOpen = false) => {
     setLoading(true);
-    setError(null);
-    setSuccess(null);
 
     try {
       const teamId = formData.team_id;
       const payload = {
-        team_name_number: formData.team_name_number,
-        sartopo_color_hex: formData.sartopo_color_hex,
-        type: formData.type,
-        status: formData.status,
+        team_name_number: formData.team_name_number || `Team ${Date.now()}`,
+        sartopo_color_hex: formData.sartopo_color_hex || '#FF0000',
+        type: formData.type || 'Other',
+        status: formData.status || 'Staged',
         leader_responder_id: formData.leader_responder_id || null,
-        equipment: formData.equipment,
+        equipment: formData.equipment || [],
       };
 
       if (teamId) {
@@ -563,7 +552,12 @@ const AdminPage = () => {
         if (updateError) throw updateError;
 
         // 2. Reconcile responder attachments (Add/Remove/Update roles)
-        const finalIds = formData.responder_ids || [];
+        // Requirement: Ensure the leader is always included in the membership set to prevent accidental removal.
+        const currentResponders = formData.responder_ids || [];
+        const finalIds = (formData.leader_responder_id && !currentResponders.includes(formData.leader_responder_id))
+          ? [...currentResponders, formData.leader_responder_id]
+          : currentResponders;
+
         const roles = formData.responder_roles || {};
         const originalIds = editingTeam?.current_responders?.map(r => r.responder_id) || [];
         
@@ -589,20 +583,24 @@ const AdminPage = () => {
           ...vehToRemove.map(id => supabase.from('vehicles').update({ team_id: null }).eq('vehicle_id', id))
         ]);
 
-        setSuccess(`Team ${formData.team_name_number} updated.`);
+        addToast(`Team ${formData.team_name_number} updated.`, 'success');
       } else {
         // Adding new team to the current active incident context
+        if (!incidentId) throw new Error("Please join an incident context before creating a team.");
+
         const { data: opData } = await supabase
           .from('operational_periods')
           .select('op_period_id')
           .eq('incident_id', incidentId)
           .order('created_at', { ascending: false }).limit(1).maybeSingle();
+
+        if (!opData?.op_period_id) throw new Error("No active operational period found for the selected incident.");
           
         const newTeamId = uuidv4();
         const { error: insertError } = await supabase.from('teams').insert({ 
           ...payload, 
           team_id: newTeamId, 
-          op_period_id: opData?.op_period_id 
+          op_period_id: opData.op_period_id 
         });
 
         if (insertError) throw insertError;
@@ -626,7 +624,7 @@ const AdminPage = () => {
           await supabase.from('vehicles').update({ team_id: newTeamId }).in('vehicle_id', finalVehIds);
         }
 
-        setSuccess(`Team ${formData.team_name_number} created.`);
+        addToast(`Team ${formData.team_name_number} created.`, 'success');
       }
       await refreshDashboardData();
 
@@ -638,7 +636,7 @@ const AdminPage = () => {
         setEditingTeam(null);
       }
     } catch (err) {
-      setError(err.message || 'Failed to save team.');
+      addToast(err.message || 'Failed to save team.', 'error');
     } finally {
       setLoading(false);
     }
@@ -669,10 +667,10 @@ const AdminPage = () => {
       const responder = allResponders.find(r => r.responder_id === id);
       await recordAction?.(`Admin checked out responder "${responder?.name || 'Unknown'}" (ID: ${id}). Fields modified: status="CheckedOut", checkout_datetime="${now}".`);
 
-      setSuccess('Responder checked out.');
+      addToast('Responder checked out.', 'success');
       await fetchTable('responders');
     } catch (err) {
-      setError('Failed to check out responder: ' + err.message);
+      addToast('Failed to check out responder: ' + err.message, 'error');
     }
   };
 
@@ -703,9 +701,9 @@ const AdminPage = () => {
       await recordAction?.(`Admin disbanded team "${name}" (ID: ${id}, Type: ${type}). Fields modified: status="Disbanded", last_par_check=null. Automated trigger: All members released to "Staged".`);
       
       await refreshDashboardData();
-      setSuccess('Team disbanded.');
+      addToast('Team disbanded.', 'success');
     } catch (err) {
-      setError('Failed to disband team: ' + err.message);
+      addToast('Failed to disband team: ' + err.message, 'error');
     } finally {
       setLoading(false);
     }
@@ -723,10 +721,10 @@ const AdminPage = () => {
       if (deleteError) throw deleteError;
 
       await recordAction?.(`Admin deleted team "${name}" (ID: ${id}, Type: ${type}).`);
-      setSuccess('Team record deleted.');
+      addToast('Team record deleted.', 'success');
       await fetchTable('teams');
     } catch (err) {
-      setError('Failed to delete team: ' + err.message);
+      addToast('Failed to delete team: ' + err.message, 'error');
     }
   };
 
@@ -742,10 +740,10 @@ const AdminPage = () => {
       if (deleteError) throw deleteError;
 
       await recordAction?.(`Admin deleted assignment "${name}" (ID: ${id}, Type: ${type}).`);
-      setSuccess('Assignment record deleted.');
+      addToast('Assignment record deleted.', 'success');
       await fetchTable('assignments');
     } catch (err) {
-      setError('Failed to delete assignment: ' + err.message);
+      addToast('Failed to delete assignment: ' + err.message, 'error');
     }
   };
 
@@ -766,10 +764,10 @@ const AdminPage = () => {
       }
 
       await recordAction?.(`Admin deleted responder "${name}" (ID: ${id}, Agency: ${agency}).`);
-      setSuccess('Responder record deleted.');
+      addToast('Responder record deleted.', 'success');
       await fetchTable('responders');
     } catch (err) {
-      setError('Failed to delete responder: ' + err.message);
+      addToast('Failed to delete responder: ' + err.message, 'error');
     }
   };
 
@@ -786,10 +784,10 @@ const AdminPage = () => {
       if (updateError) throw updateError;
       const vehicle = allVehicles.find(v => v.vehicle_id === id);
       await recordAction?.(`Admin checked out vehicle "${vehicle?.designation || 'Unknown'}" (ID: ${id}).`);
-      setSuccess('Vehicle checked out.');
+      addToast('Vehicle checked out.', 'success');
       await fetchTable('vehicles');
     } catch (err) {
-      setError('Failed to check out vehicle: ' + err.message);
+      addToast('Failed to check out vehicle: ' + err.message, 'error');
     } finally {
       setLoading(false);
     }
@@ -801,17 +799,16 @@ const AdminPage = () => {
       const { error: deleteError } = await supabase.from('vehicles').delete().eq('vehicle_id', id);
       if (deleteError) throw deleteError;
       await recordAction?.(`Admin deleted vehicle "${designation}" (ID: ${id}).`);
-      setSuccess('Vehicle record deleted.');
+      addToast('Vehicle record deleted.', 'success');
       await fetchTable('vehicles');
     } catch (err) {
-      setError('Failed to delete vehicle: ' + err.message);
+      addToast('Failed to delete vehicle: ' + err.message, 'error');
     }
   };
 
   const handleEndIncident = async (id) => {
     try {
       setLoading(true);
-      setError(null);
 
       // 1. Get the latest operational period for this incident to clean up its resources
       const { data: opData } = await supabase
@@ -873,11 +870,11 @@ const AdminPage = () => {
         endIncident();
       }
 
-      setSuccess('Incident ended and resources cleaned up.');
+      addToast('Incident ended and resources cleaned up.', 'success');
       
       await refreshDashboardData();
     } catch (err) {
-      setError('Failed to end incident: ' + err.message);
+      addToast('Failed to end incident: ' + err.message, 'error');
     } finally {
       setLoading(false);
     }
@@ -885,8 +882,6 @@ const AdminPage = () => {
 
   const handleSaveAssignment = async (formData, stayOpen = false) => {
     setLoading(true);
-    setError(null);
-    setSuccess(null);
 
     try {
       const payload = {
@@ -912,7 +907,7 @@ const AdminPage = () => {
           .update(payload)
           .eq('assignment_id', formData.assignment_id);
         if (updateError) throw updateError;
-        setSuccess(`Assignment ${formData.title} updated successfully.`);
+        addToast(`Assignment ${formData.title} updated successfully.`, 'success');
       } else {
         const { data: opData } = await supabase
           .from('operational_periods')
@@ -921,7 +916,7 @@ const AdminPage = () => {
           .order('created_at', { ascending: false }).limit(1).maybeSingle();
         const { error: insertError } = await supabase.from('assignments').insert({ ...payload, assignment_id: uuidv4(), op_period_id: opData?.op_period_id });
         if (insertError) throw insertError;
-        setSuccess(`Assignment ${formData.title} created.`);
+        addToast(`Assignment ${formData.title} created.`, 'success');
       }
       await refreshDashboardData();
 
@@ -933,7 +928,7 @@ const AdminPage = () => {
         setEditingAssignment(null);
       }
     } catch (err) {
-      setError(err.message || 'Failed to save assignment.');
+      addToast(err.message || 'Failed to save assignment.', 'error');
     } finally {
       setLoading(false);
     }
@@ -945,7 +940,6 @@ const AdminPage = () => {
 
     try {
       setLoading(true);
-      setError(null);
 
       // Delete the incident record.
       // This will automatically cascade through operational_periods, teams, 
@@ -963,11 +957,11 @@ const AdminPage = () => {
         logout();
       }
 
-      setSuccess('Incident and all associated data deleted.');
+      addToast('Incident and all associated data deleted.', 'success');
       
       await refreshDashboardData();
     } catch (err) {
-      setError('Failed to delete incident: ' + err.message);
+      addToast('Failed to delete incident: ' + err.message, 'error');
     } finally {
       setLoading(false);
     }
@@ -978,8 +972,6 @@ const AdminPage = () => {
     if (!newPwd || !newPwd.trim()) return;
 
     setLoading(true);
-    setError(null);
-    setSuccess(null);
 
     try {
       const { error: updateError } = await supabase.rpc('admin_update_password', {
@@ -988,20 +980,17 @@ const AdminPage = () => {
       });
 
       if (updateError) throw updateError;
-      setSuccess(`Password updated for ${email}`);
+      addToast(`Password updated for ${email}`, 'success');
     } catch (err) {
-      setError('Failed to update password: ' + err.message);
+      addToast('Failed to update password: ' + err.message, 'error');
     } finally {
       setLoading(false);
     }
   };
 
   const handleRemoveAdmin = async (email) => {
-    setError(null);
-    setSuccess(null);
-
     if (users.length <= 1) {
-      setError('Cannot remove the last user. At least one system user is required to maintain access.');
+      addToast('Cannot remove the last user. At least one system user is required to maintain access.', 'error');
       return;
     }
 
@@ -1011,9 +1000,10 @@ const AdminPage = () => {
       const { error: deleteError } = await supabase.rpc('admin_remove_user', { p_email: email });
       
       if (deleteError) throw deleteError;
+      addToast(`User ${email} removed successfully.`, 'success');
       await fetchTable('users');
     } catch (err) {
-      setError('Failed to remove user');
+      addToast('Failed to remove user: ' + err.message, 'error');
     }
   };
 
@@ -1035,9 +1025,6 @@ const AdminPage = () => {
           Sign Out Admin
         </button>
       </div>
-
-      {error && <div className="alert alert-error" style={{ marginBottom: '24px' }}>{error}</div>}
-      {success && <div className="alert alert-success" style={{ marginBottom: '24px' }}>{success}</div>}
 
       <div className="section-card" style={{ marginBottom: '24px' }}>
         <h2>Incident Activation</h2>
@@ -1152,6 +1139,7 @@ const AdminPage = () => {
       <AdminRespondersTable
         allResponders={allResponders}
         allIncidents={allIncidents}
+        allTeams={allTeams}
         isRespondersExpanded={isRespondersExpanded}
         setIsRespondersExpanded={setIsRespondersExpanded}
         handleCheckOutResponder={handleCheckOutResponder}
@@ -1169,6 +1157,7 @@ const AdminPage = () => {
       <AdminVehiclesTable
         allVehicles={allVehicles}
         allIncidents={allIncidents}
+        allTeams={allTeams}
         fetching={fetching}
         isVehiclesExpanded={isVehiclesExpanded}
         setIsVehiclesExpanded={setIsVehiclesExpanded}
@@ -1181,6 +1170,7 @@ const AdminPage = () => {
       <AdminTeamsTable
         allTeams={allTeams}
         allIncidents={allIncidents}
+        allAssignments={allAssignments}
         isTeamsExpanded={isTeamsExpanded}
         setIsTeamsExpanded={setIsTeamsExpanded}
         handleDisbandTeam={handleDisbandTeam}
@@ -1195,6 +1185,7 @@ const AdminPage = () => {
       <AdminAssignmentsTable
         allAssignments={allAssignments}
         allIncidents={allIncidents}
+        allTeams={allTeams}
         isAssignmentsExpanded={isAssignmentsExpanded}
         setIsAssignmentsExpanded={setIsAssignmentsExpanded}
         handleDeleteAssignment={handleDeleteAssignment}
@@ -1225,8 +1216,6 @@ const AdminPage = () => {
         onSave={handleSaveUser}
         initialData={editingUser}
         loading={loading}
-        error={error}
-        success={success}
       />
 
       <ResponderFormModal
@@ -1236,7 +1225,6 @@ const AdminPage = () => {
         onCheckOut={(data) => handleCheckOutResponder(data.responder_id)}
         initialData={editingResponder || {}}
         loading={loading}
-        error={error}
         isAdminMode={true}
       />
 
@@ -1247,7 +1235,6 @@ const AdminPage = () => {
         initialData={editingVehicle}
         responders={allResponders}
         loading={loading}
-        error={error}
       />
 
       <TeamFormModal
@@ -1256,7 +1243,6 @@ const AdminPage = () => {
         onSave={handleSaveTeam}
         initialData={editingTeam || {}}
         loading={loading}
-        error={error}
         responders={allResponders}
         vehicles={allVehicles}
         commandStaffExists={commandStaffExists}
@@ -1269,7 +1255,6 @@ const AdminPage = () => {
         onSave={handleSaveAssignment}
         initialData={editingAssignment || {}}
         loading={loading}
-        error={error}
       />
 
     </div>

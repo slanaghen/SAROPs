@@ -8,6 +8,7 @@ import {
   buildSecureSartopoUrl, 
   downloadAndSyncSartopoData 
 } from '../services/sartopoService';
+import { useToast } from '../context/ToastContext';
 import '../styles/IncidentEditPage.css';
 
 const getCurrentLocalDatetime = () => {
@@ -111,6 +112,7 @@ const IncidentEditPage = () => {
     setAccessLevel,
     setResponderStatus
   } = useIncident();
+  const { addToast } = useToast();
   const [isLocalSaved, setIsLocalSaved] = useState(false);
 
   const fromAdmin = location.state?.fromAdmin;
@@ -256,7 +258,7 @@ const IncidentEditPage = () => {
     ].find(val => val && val !== 'YOUR_SARTOPO_API_SECRET') || (isTest ? 'test-secret' : undefined);
     
     if (!secret || !credId) {
-      setSartopoSyncErrorMessage("SARTopo API credentials not configured. Map creation requires VITE_SARTOPO_API_CREDENTIAL_ID and VITE_SARTOPO_API_CREDENTIAL_SECRET for signed requests.");
+      addToast("SARTopo API credentials not configured. Map creation requires VITE_SARTOPO_API_CREDENTIAL_ID and VITE_SARTOPO_API_CREDENTIAL_SECRET for signed requests.", 'error');
       return;
     }
 
@@ -317,7 +319,7 @@ const IncidentEditPage = () => {
       }
     } catch (err) {
       console.error('Map creation failed:', err);
-      setSartopoSyncErrorMessage(err.message || 'Failed to create map.');
+      addToast(err.message || 'Failed to create map.', 'error');
     } finally {
       setIsCreatingMap(false);
     }
@@ -330,7 +332,7 @@ const IncidentEditPage = () => {
     // Only attempt sync if Map ID is reasonably valid (at least 4 chars) and no validation message
     if (isActive && sartopoConfig.id && sartopoConfig.id.length >= 4 && !sartopoIdValidationMessage && opId && incident.sartopo_id !== initialIncident.sartopo_id && existingId) {
       const timer = setTimeout(() => syncSartopoData(sartopoConfig, opId, existingId), 1200);
-      return () => clearTimeout(timer);
+      return () => clearTimeout(timer); // Clear timeout on unmount or re-render
     }
   }, [sartopoConfig, isActive, incidentData?.opPeriodId, initialIncident.sartopo_id, sartopoIdValidationMessage, existingId]);
 
@@ -358,7 +360,7 @@ const IncidentEditPage = () => {
     const newIncidentId = incident.number.trim();
 
     if (!newIncidentId) {
-      alert("Incident Number is required to start tracking.");
+      addToast("Incident Number is required to start tracking.", 'error');
       setIsSaving(false);
       return false;
     }
@@ -474,7 +476,7 @@ const IncidentEditPage = () => {
     } catch (err) {
       console.error('Failed to save incident:', err);
       const message = err.message || 'Unknown database error';
-      alert(`Error starting incident tracking: ${message}`);
+      addToast(`Error starting incident tracking: ${message}`, 'error');
       return null;
     } finally {
       if (autoResetSaving) setIsSaving(false);
@@ -560,7 +562,7 @@ const IncidentEditPage = () => {
           await supabase.auth.refreshSession();
         } catch (err) {
           console.error('[IncidentEdit] Auto check-in failed:', err);
-          alert('Incident created, but auto check-in failed: ' + err.message);
+          addToast('Incident created, but auto check-in failed: ' + err.message, 'error');
           return; // Stop navigation if session setup failed
         }
       }
@@ -612,7 +614,7 @@ const IncidentEditPage = () => {
       navigate('/operations');
     } catch (err) {
       console.error('Error transitioning to next OP:', err);
-      alert('Failed to start next OP: ' + (err.message || 'Database error'));
+      addToast('Failed to start next OP: ' + (err.message || 'Database error'), 'error');
     } finally {
       setIsTransitioning(false);
     }
@@ -677,7 +679,7 @@ const IncidentEditPage = () => {
     } catch (err) {
       console.error('Error ending incident:', err);
       setIsSubmitting(false);
-      alert('Failed to end incident: ' + (err.message || 'Database error'));
+      addToast('Failed to end incident: ' + (err.message || 'Database error'), 'error');
     } finally {
       setIsSaving(false);
     }

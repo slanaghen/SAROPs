@@ -43,6 +43,7 @@ const OperationsTable = ({
                   placeholder="Search..." 
                   value={assignmentFilter}
                   onChange={(e) => onAssignmentFilterChange(e.target.value)}
+                  data-lpignore="true"
                   style={{ height: '24px', padding: '0 8px', fontSize: '11px', borderRadius: '4px', border: '1px solid #cbd5e1', width: '100px', textTransform: 'none' }}
                   onClick={(e) => e.stopPropagation()}
                 />
@@ -59,6 +60,7 @@ const OperationsTable = ({
                   placeholder="Search..." 
                   value={teamFilter}
                   onChange={(e) => onTeamFilterChange(e.target.value)}
+                  data-lpignore="true"
                   style={{ height: '24px', padding: '0 8px', fontSize: '11px', borderRadius: '4px', border: '1px solid #cbd5e1', width: '100px', textTransform: 'none' }}
                   onClick={(e) => e.stopPropagation()}
                 />
@@ -189,7 +191,7 @@ const OperationsTable = ({
                 <div style={{ fontWeight: 500 }}>{row.teamLeader || '—'}</div>
               </td>
               <td style={{ textAlign: 'center', fontFamily: 'monospace', fontSize: '12px' }}>{row.leaderIdentifier || '—'}</td>
-              <td style={{ textAlign: 'center' }}>{row.teamSize || '—'}</td>
+              <td style={{ textAlign: 'center' }}>{row.teamSize ?? '—'}</td>
               <td style={{ textAlign: 'center' }}>
                 {row.teamId ? (
                   <span className={`status-indicator ${row.teamStatus?.toLowerCase() || ''}`}>{row.teamStatus || '—'}</span>

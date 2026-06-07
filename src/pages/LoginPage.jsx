@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useIncident } from '../context/IncidentContext';
 import LoginForm from '../components/admin/Login';
+import { useToast } from '../context/ToastContext';
 
 const LoginPage = () => {
   const navigate = useNavigate();
@@ -10,6 +11,7 @@ const LoginPage = () => {
     setIsAdmin, setResponderId, setResponderName, setResponderStatus, 
     setAccessLevel, startIncident 
   } = useIncident();
+  const { addToast } = useToast();
 
   const handleLoginSuccess = async (selectedId, userRecord, responderRecord) => {
     // Persist system user identity for the Settings page

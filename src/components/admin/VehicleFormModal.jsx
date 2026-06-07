@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import BaseModal from '../BaseModal';
 import { RESPONDER_STATUS_LIST } from '../operationalConstants';
+import { useToast } from '../../context/ToastContext';
 
 const VehicleFormModal = ({ isOpen, onClose, onSave, initialData, loading, error }) => {
   const [formData, setFormData] = useState({
@@ -9,6 +10,7 @@ const VehicleFormModal = ({ isOpen, onClose, onSave, initialData, loading, error
     status: 'Staged',
   });
 
+  const { addToast } = useToast();
   useEffect(() => {
     if (initialData) {
       setFormData({
@@ -50,9 +52,7 @@ const VehicleFormModal = ({ isOpen, onClose, onSave, initialData, loading, error
         </>
       }
     >
-      <div className="modal-scroll-wrapper" style={{ maxHeight: '65vh', overflowY: 'auto', paddingRight: '8px' }}>
-        {error && <div className="alert alert-error" style={{ marginBottom: '16px' }}>{error}</div>}
-        
+      <div className="modal-scroll-wrapper" style={{ maxHeight: '65vh', overflowY: 'auto', paddingRight: '8px' }}>        
         <div className="form-row">
           <label htmlFor="designation">Vehicle Designation *</label>
           <input id="designation" name="designation" value={formData.designation} onChange={handleChange} placeholder="e.g. 3121, Rescue 1" required />
