@@ -8,6 +8,12 @@ import useResponderTeamAndAssignment from '../hooks/useResponderTeamAndAssignmen
 import { removeResponderFromTeam } from '../services/responderService';
 import { supabase } from '../lib/supabase';
 
+const mockNavigate = vi.fn();
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual('react-router-dom');
+  return { ...actual, useNavigate: () => mockNavigate };
+});
+
 vi.mock('../context/IncidentContext', () => ({
   useIncident: vi.fn(),
 }));

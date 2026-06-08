@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase'; // Assuming this is the centralized Supabase client
+import { useNavigate } from 'react-router-dom';
 import { useIncident } from '../context/IncidentContext';
 import { checkIsParOverdue, formatTimeSince } from '../utils/operationalUtils';
 import useResponderTeamAndAssignment from '../hooks/useResponderTeamAndAssignment'; // The new hook

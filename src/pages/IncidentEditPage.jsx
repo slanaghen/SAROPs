@@ -529,7 +529,6 @@ const IncidentEditPage = () => {
               p_responder_type: responderData.responder_type || 'SAR',
               p_special_skills: responderData.special_skills,
               p_vehicles: responderData.vehicles,
-              p_access_level: userAccessLevel,
               p_status: 'Deployed',
               p_device_id: `device_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 11)}`
             })

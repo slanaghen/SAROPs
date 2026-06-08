@@ -20,7 +20,7 @@ const SettingsPage = () => {
 
       const { data, error: fetchError } = await supabase
         .from('users')
-        .select('*')
+        .select('email, username, name, agency, identifier, cell_phone, responder_type, special_skills, access_level, display_density')
         .eq('email', userEmail)
         .maybeSingle();
 

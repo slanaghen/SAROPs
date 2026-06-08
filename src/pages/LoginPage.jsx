@@ -13,7 +13,7 @@ const LoginPage = () => {
   } = useIncident();
   const { addToast } = useToast(); // This is already defined in the context
 
-  const handleLoginSuccess = async (selectedId, userRecord, responderRecord) => {
+  const handleLoginSuccess = async (selectedId, userRecord, responderRecord, loginVehicles = '') => {
     // Persist system user identity for the Settings page
     if (userRecord?.email) {
       localStorage.setItem('sarops_user_email', userRecord.email);
@@ -32,7 +32,7 @@ const LoginPage = () => {
             cell_phone: userRecord.cell_phone || '',
             special_skills: userRecord.special_skills || '',
             responder_type: userRecord.responder_type || 'SAR',
-            vehicles: userRecord.vehicles || ''
+            vehicles: loginVehicles
           }
         } 
       });

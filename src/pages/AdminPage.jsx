@@ -429,7 +429,7 @@ const AdminPage = () => {
         throw new Error("No active incident context. Please join an incident before adding responders.");
       }
 
-      // Requirement: Use the secure check-in RPC to handle vehicle parsing and status rules automatically
+      // Requirement: Use the secure check-in RPC to handle responder check-in and status rules automatically
       const { data: responderData, error: rpcError } = await supabase.rpc('checkin_responder_securely', {
         p_incident_id: targetIncidentId,
         p_auth_uid: formData.auth_uid || null,
@@ -1042,9 +1042,7 @@ const AdminPage = () => {
               </p>
             </div>
             <div style={{ display: 'flex', gap: '12px' }}>
-              <button className="btn btn-primary btn-sm" onClick={() => navigate('/operations')}>Go to Operations</button>
-              <button className="btn btn-primary btn-sm" onClick={() => navigate('/planning')}>Go to Planning</button>
-              <button className="btn btn-secondary btn-sm" style={{ color: '#dc2626', borderColor: '#fecaca' }} onClick={handleLeaveIncident}>Leave Incident</button>
+              <button className="btn btn-secondary btn-sm" style={{ borderColor: '#fecaca' }} onClick={handleLeaveIncident}>Check out from Incident</button>
             </div>
           </div>
         ) : (
@@ -1246,7 +1244,6 @@ const AdminPage = () => {
         onClose={() => setShowVehicleModal(false)}
         onSave={handleSaveVehicle}
         initialData={editingVehicle}
-        responders={allResponders}
         loading={loading}
       />
 

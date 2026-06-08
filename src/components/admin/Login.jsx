@@ -11,7 +11,7 @@ const Login = ({ onLoginSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [view, setView] = useState('login'); // 'login', 'register', 'verify'
-  const [otpToken, setOtpToken] = useState('');
+  const [otpToken, setOtpToken] = useState(''); 
   const [vehicles, setVehicles] = useState('');
 
   useEffect(() => {
@@ -94,8 +94,8 @@ const Login = ({ onLoginSuccess }) => {
         }
       }
 
-      // Pass the form-entered vehicles to the success handler. The user profile no longer contains a vehicles field.
-      onLoginSuccess(selectedIncidentId, { ...data, vehicles: vehicles || '' }, responderRecord);
+      // Pass the form-entered vehicles separately. The user profile and responder records no longer contain vehicle associations.
+      onLoginSuccess(selectedIncidentId, data, responderRecord, vehicles || '');
     } catch (err) {
       setError(err.message || 'Login failed');
     } finally {
@@ -157,7 +157,7 @@ const Login = ({ onLoginSuccess }) => {
 
       const { data: userRecord } = await supabase
         .from('users')
-        .select('*')
+        .select('email, username, name, agency, identifier, cell_phone, responder_type, special_skills, access_level, display_density')
         .eq('email', email.trim().toLowerCase())
         .maybeSingle();
 
@@ -195,7 +195,7 @@ const Login = ({ onLoginSuccess }) => {
                   <option key={inc.incident_id} value={inc.incident_id}>{inc.name} ({inc.number})</option>
                 ))}
               </select>
-            </label>
+            </label> 
             <label>Checking in with Vehicle(s)?
               <input type="text" value={vehicles} onChange={(e) => setVehicles(e.target.value)} data-lpignore="true" placeholder="e.g. 3121, UTV, Boat" />
               <small className="form-hint" style={{ color: '#64748b', fontSize: '11px', display: 'block', marginTop: '4px' }}>Optional: List vehicle designations separated by commas.</small>

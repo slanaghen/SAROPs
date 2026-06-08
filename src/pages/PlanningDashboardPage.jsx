@@ -76,7 +76,7 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
   const createResponder = async (responderData) => {
     if (!incidentId) throw new Error("No active incident context.");
     
-    // Use the secure check-in RPC to handle vehicle parsing and driver designation automatically
+    // Use the secure check-in RPC to establish operational identity
     const { error } = await supabase.rpc('checkin_responder_securely', {
       p_incident_id: incidentId,
       p_auth_uid: null, // Manually created from dashboard
@@ -113,7 +113,6 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
       .from('vehicles')
       .upsert({
         ...vehicleData,
-        responder_id: vehicleData.responder_id || null, // Convert empty string from form to null for UUID type
         incident_id: incidentId,
         checkin_datetime: new Date().toISOString(),
       }, { onConflict: 'incident_id, designation' });
@@ -132,8 +131,7 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
     const { error } = await supabase
       .from('vehicles')
       .update({
-        ...vehicleData,
-        responder_id: vehicleData.responder_id || null // Convert empty string from form to null for UUID type
+        ...vehicleData
       })
       .eq('vehicle_id', id);
     if (error) throw error;

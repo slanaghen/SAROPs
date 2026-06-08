@@ -892,7 +892,7 @@ describe('AdminPage Authentication Gate', () => {
       expect(screen.queryByText(/Current Active Session/i)).not.toBeInTheDocument();
       expect(screen.getByLabelText(/Select Incident/i)).toBeInTheDocument();
       expect(screen.getByRole('option', { name: /New Incident/i })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /Join Incident/i })).toBeDisabled(); // Should be disabled until selected
+      expect(screen.getByRole('button', { name: /Check in to Incident/i })).toBeDisabled(); // Should be disabled until selected
     });
 
     // Select the new incident

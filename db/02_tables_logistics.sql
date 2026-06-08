@@ -11,7 +11,6 @@ CREATE TABLE users (
   cell_phone TEXT,
   responder_type responder_type,
   special_skills TEXT,
-  vehicles TEXT,
   display_density display_density DEFAULT 'comfortable',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -28,7 +27,6 @@ CREATE TABLE responders (
   cell_phone TEXT,
   device_id TEXT NOT NULL,
   special_skills TEXT,
-  vehicles TEXT,
   access_level access_level NOT NULL DEFAULT 'responder',
   responder_type responder_type,
   status responder_status NOT NULL DEFAULT 'Staged',
