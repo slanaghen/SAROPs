@@ -39,6 +39,7 @@ const SettingsPage = () => {
   }, [fetchMyProfile]);
 
   const handleSaveProfile = async (formData, stayOpen = false) => {
+    setLoading(true);
     try {
       const { error: updateError } = await supabase.rpc('admin_add_user', {
         p_email: formData.email,
@@ -52,7 +53,6 @@ const SettingsPage = () => {
         p_type: formData.responder_type,
         p_skills: formData.special_skills,
         p_display_density: formData.display_density,
-        p_vehicles: formData.vehicles,
       });
 
       if (updateError) throw updateError;

@@ -31,6 +31,7 @@ This document details the lifecycle and status transitions for the three primary
 1.  **Planned**: The task is defined in the system but no team is assigned.
 2.  **Assigned**: A team has been linked to the task.
 3.  **Unassigned**: If a team is unlinked from an assignment, the team status returns to `Staged`. This transition automatically triggers the Team -> Responder Sync, reverting member statuses to `Attached`.
+    *   **Requirement**: When a team is unassigned, the team status should return to `Staged` and the team members’ statuses should return to `Attached`.
 4.  **Deployed**: The assigned team is active in the field.
 5.  **Completed / Incomplete**: The task is finished. This automatically disbands the attached team.
 
@@ -41,7 +42,7 @@ This document details the lifecycle and status transitions for the three primary
 The system uses PostgreSQL triggers to maintain "operational parity," ensuring that status changes in one table correctly update related entities.
 
 ### Assignment -> Team Sync
-*   **Planned**: If a team is unlinked, the team returns to `Staged`.
+*   **Planned / Unassigned**: If a team is unlinked, the team returns to `Staged`. This transition cascade automatically returns team members to `Attached` status.
 *   **Assigned**: Moving an assignment to `Assigned` moves the linked team to `Assigned`.
 *   **Deployed**: Moving an assignment to `Deployed` moves the linked team to `Deployed` and starts the PAR timer.
 *   **Completed / Incomplete**: These terminal statuses trigger the linked team to move to `Disbanded`.

@@ -18,14 +18,13 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     incidentData, incidentId, responderName, user, operationsRefreshInterval
   } = useIncident(); 
   
-  const [showGlobalMap, setShowGlobalMap] = useState(false); // Local state for layout toggle
   const operationalPeriodId = propOpId || incidentData?.opPeriodId;
 
   const {
     teams, assignments, responders, vehicles, opPeriod, loading, error, setError, setLoading, stats,
     fetchDashboardData, updateResourceStatus, assignTeamToAssignment, unassignTeam,
     createTeam, createAssignment, deleteAssignment, deleteTeam, attachVehicleToTeam,
-    detachTeam: disbandTeam, updateTeam, updateAssignment,
+    deleteTeam: disbandTeam, updateTeam, updateAssignment,
     attachResponderToTeam, detachResponderFromTeam
   } = usePlanningDashboard(supabase, operationalPeriodId); // Hook manages its own error state
 
@@ -228,6 +227,26 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   };
 
   const handleStatusUpdate = async (assignmentId, teamId, newStatus) => {
+    // Validation: If reactivating a disbanded team via assignment status change, verify member availability.
+    // This prevents responders from being automatically pulled into multiple active teams.
+    if (teamId && ['Assigned', 'Deployed'].includes(newStatus)) {
+      const targetTeam = teamById[teamId];
+      if (targetTeam && targetTeam.status === 'Disbanded') {
+        const members = targetTeam.current_responders || [];
+        const conflicts = members.filter(m => {
+          const r = responders.find(res => res.responder_id === m.responder_id);
+          // Only staged (unassigned) responders can join an active team composition.
+          return r && !['staged', 'checkedout'].includes(String(r.status || '').toLowerCase());
+        });
+
+        if (conflicts.length > 0) {
+          const names = conflicts.map(c => c.name || 'Unknown').join(', ');
+          addToast(`Activation Conflict: Responders ${names} are already active on other teams. They must be released from their current assignments before this team can be reactivated.`, 'error');
+          return;
+        }
+      }
+    }
+
     try {
       await updateResourceStatus(assignmentId, teamId, newStatus);
     } catch (err) { // Error is handled by the hook's setError

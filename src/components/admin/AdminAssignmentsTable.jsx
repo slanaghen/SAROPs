@@ -80,7 +80,7 @@ const AdminAssignmentsTable = ({
                   Type {sortConfig.key === 'resource_type' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
                 </th>
                 <th onClick={() => requestSort('incident_number')} style={{ cursor: 'pointer' }}>
-                  Inc # {sortConfig.key === 'incident_number' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+                  Incident {sortConfig.key === 'incident_number' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
                 </th>
                 <th onClick={() => requestSort('team_name')} style={{ cursor: 'pointer' }}>
                   Team {sortConfig.key === 'team_name' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}

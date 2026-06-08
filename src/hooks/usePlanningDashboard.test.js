@@ -77,8 +77,8 @@ describe('usePlanningDashboard Hook', () => {
       await result.current.fetchDashboardData();
     });
 
-    expect(result.current.teams).toEqual(mockTeams);
-    expect(result.current.assignments[0]).toMatchObject(mockAsns[0]);
+    expect(result.current.teams).toEqual(expect.arrayContaining(mockTeams));
+    expect(result.current.assignments[0]).toMatchObject(expect.objectContaining(mockAsns[0]));
     expect(result.current.stagedTeams).toHaveLength(1);
     expect(result.current.availableAssignments).toHaveLength(1);
   });

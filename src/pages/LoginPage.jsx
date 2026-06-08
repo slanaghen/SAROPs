@@ -11,7 +11,7 @@ const LoginPage = () => {
     setIsAdmin, setResponderId, setResponderName, setResponderStatus, 
     setAccessLevel, startIncident 
   } = useIncident();
-  const { addToast } = useToast();
+  const { addToast } = useToast(); // This is already defined in the context
 
   const handleLoginSuccess = async (selectedId, userRecord, responderRecord) => {
     // Persist system user identity for the Settings page
@@ -32,7 +32,7 @@ const LoginPage = () => {
             cell_phone: userRecord.cell_phone || '',
             special_skills: userRecord.special_skills || '',
             responder_type: userRecord.responder_type || 'SAR',
-            vehicles: ''
+            vehicles: userRecord.vehicles || ''
           }
         } 
       });

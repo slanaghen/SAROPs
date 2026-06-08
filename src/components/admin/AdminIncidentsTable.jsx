@@ -74,7 +74,7 @@ const AdminIncidentsTable = ({
                   Incident {sortConfig.key === 'name' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
                 </th>
                 <th onClick={() => requestSort('number')} style={{ cursor: 'pointer' }}>
-                  Inc # {sortConfig.key === 'number' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+                  Incident {sortConfig.key === 'number' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
                 </th>
                 <th onClick={() => requestSort('start_datetime')} style={{ cursor: 'pointer' }}>
                   Started {sortConfig.key === 'start_datetime' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}

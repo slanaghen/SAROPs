@@ -415,7 +415,6 @@ describe('AdminPage Authentication Gate', () => {
         p_type: 'SAR',
         p_skills: '',
         p_display_density: 'comfortable',
-        p_vehicles: '',
       }));
     });
   });
@@ -898,7 +897,7 @@ describe('AdminPage Authentication Gate', () => {
 
     // Select the new incident
     fireEvent.change(screen.getByLabelText(/Select Incident/i), { target: { value: 'inc-new' } });
-    expect(screen.getByRole('button', { name: /Join Incident/i })).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: /Check in to Incident/i })).not.toBeDisabled();
 
     // Mock the rpc call for checkin_responder_securely
     supabase.auth.getSession.mockResolvedValue({ data: { session: { user: { id: 'auth-uid', email: 'admin@test.com' } } }, error: null });
@@ -914,7 +913,7 @@ describe('AdminPage Authentication Gate', () => {
       return globalThis.createSupabaseQueryMock([]);
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /Join Incident/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Check in to Incident/i }));
 
     await waitFor(() => {
       expect(mockStartIncident).toHaveBeenCalledWith(
@@ -970,7 +969,7 @@ describe('AdminPage Authentication Gate', () => {
 
     const select = await screen.findByLabelText(/Select Incident/i);
     fireEvent.change(select, { target: { value: 'i1' } });
-    fireEvent.click(screen.getByRole('button', { name: /Join Incident/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Check in to Incident/i }));
 
     await waitFor(() => {
       expect(mockAddToast).toHaveBeenCalledWith(expect.stringContaining('RPC Activation Error'), 'error');

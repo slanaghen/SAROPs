@@ -51,6 +51,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
   const [staffTeamId, setStaffTeamId] = useState(null);
   const [currentTime, setCurrentTime] = useState(Date.now());
   const { addToast } = useToast();
+  const navigate = useNavigate();
   const [allTeams, setAllTeams] = useState([]); // For staff messaging dropdown
   const [selectedTeamForMessaging, setSelectedTeamForMessaging] = useState(''); // For staff messaging dropdown
 
@@ -673,7 +674,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
                       You are assigned as the {icsRole} for this incident.
                     </p>
                   )}
-                  <button className="btn btn-primary" style={{ width: '100%', fontSize: '18px' }} onClick={() => window.location.href = '/operations'}>
+                  <button className="btn btn-primary" style={{ width: '100%', fontSize: '18px' }} onClick={() => navigate('/operations')}>
                     Go to Operations Dashboard
                   </button>
                 </div>

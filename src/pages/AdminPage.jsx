@@ -43,6 +43,7 @@ const AdminPage = () => {
   const [loading, setLoading] = useState(false);
   const [isRespondersExpanded, setIsRespondersExpanded] = useState(true);
   const [isVehiclesExpanded, setIsVehiclesExpanded] = useState(true);
+  const [currentTime, setCurrentTime] = useState(Date.now());
 
   const recordAction = useCallback(async (actionText) => {
     if (!incidentId) return;
@@ -76,6 +77,12 @@ const AdminPage = () => {
   const [isAssignmentsExpanded, setIsAssignmentsExpanded] = useState(true);
   const [isIncidentsExpanded, setIsIncidentsExpanded] = useState(true);
   const [isUsersExpanded, setIsUsersExpanded] = useState(true);
+
+  // Keep a live clock for timer displays and overdue calculations
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(Date.now()), 15000);
+    return () => clearInterval(timer);
+  }, []);
 
   // State for Modals
   const [showUserModal, setShowUserModal] = useState(false);
@@ -377,7 +384,6 @@ const AdminPage = () => {
           p_type: formData.responder_type,
           p_skills: formData.special_skills,
           p_display_density: formData.display_density,
-          p_vehicles: formData.vehicles,
         });
         if (updateError) throw updateError;
         addToast(`User ${formData.email} updated successfully.`, 'success');
@@ -394,7 +400,6 @@ const AdminPage = () => {
           p_type: formData.responder_type,
           p_skills: formData.special_skills,
           p_display_density: formData.display_density,
-          p_vehicles: formData.vehicles,
         });
         if (insertError) throw insertError;
         addToast(`User ${formData.email} added successfully.`, 'success');
@@ -1044,9 +1049,16 @@ const AdminPage = () => {
           </div>
         ) : (
           <>
-            <p className="subtitle" style={{ fontSize: '13px', margin: '0 0 16px' }}>
-              Select an active incident to check in as a responder and establish session context.
-            </p>
+            <div style={{ marginBottom: '16px' }}>
+              <p className="subtitle" style={{ fontSize: '13px', margin: '0 0 4px' }}>
+                Select an active incident to check in as a responder and establish session context.
+              </p>
+              {allIncidents.filter(inc => !inc.end_datetime).length === 0 && !fetching && (
+                <p style={{ fontSize: '12px', color: '#dc2626', fontWeight: 600, margin: 0 }}>
+                  ⚠️ No active incidents found. Use the "New Incident" button in the management table below to start one.
+                </p>
+              )}
+            </div>
             <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
               <label style={{ flex: 1, minWidth: '250px', marginBottom: 0 }}>
                 Select Incident
@@ -1067,7 +1079,7 @@ const AdminPage = () => {
                 onClick={handleActivateSession} 
                 disabled={loading || fetching || !selectedActivationId}
               >
-                {loading ? 'Joining...' : (fetching ? 'Loading Data...' : 'Join Incident')}
+                {loading ? 'Joining...' : (fetching ? 'Loading Data...' : 'Check in to Incident')}
               </button>
             </div>
           </>
@@ -1171,6 +1183,7 @@ const AdminPage = () => {
         allTeams={allTeams}
         allIncidents={allIncidents}
         allAssignments={allAssignments}
+        currentTime={currentTime}
         isTeamsExpanded={isTeamsExpanded}
         setIsTeamsExpanded={setIsTeamsExpanded}
         handleDisbandTeam={handleDisbandTeam}

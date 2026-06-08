@@ -13,8 +13,8 @@ if ! docker info > /dev/null 2>&1; then
   if [[ "$OSTYPE" == "darwin"* ]]; then
     echo "Attempting to launch Docker Desktop..."
     open -a Docker
-    
-    # Wait for Docker to initialize
+  
+  # Wait for Docker to initialize
     COUNT=0
     MAX_RETRIES=24 # Wait up to 2 minutes
     while ! docker info > /dev/null 2>&1; do

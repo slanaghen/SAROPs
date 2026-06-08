@@ -73,7 +73,7 @@ const Login = ({ onLoginSuccess }) => {
             p_cell_phone: data.cell_phone || null,
             p_responder_type: data.responder_type || 'SAR',
             p_special_skills: data.special_skills || null,
-            p_vehicles: vehicles || data.vehicles || null,
+            p_vehicles: vehicles || null,
             p_access_level: data.access_level,
             p_status: 'Staged',
             p_device_id: `admin_${data.email}_${selectedIncidentId}`

@@ -70,14 +70,13 @@ CREATE OR REPLACE FUNCTION admin_add_user(
   p_name TEXT DEFAULT NULL, p_agency TEXT DEFAULT NULL, p_identifier TEXT DEFAULT NULL,
   p_phone TEXT DEFAULT NULL, p_type TEXT DEFAULT NULL, p_skills TEXT DEFAULT NULL,
   p_display_density TEXT DEFAULT 'comfortable',
-  p_vehicles TEXT DEFAULT NULL
 )
 RETURNS VOID AS $func$
 BEGIN
   IF EXISTS (SELECT 1 FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM(p_email))) THEN
     UPDATE users SET
       username = p_username,
-      password = CASE WHEN p_password IS NOT NULL AND TRIM(p_password) <> '' THEN crypt(p_password, gen_salt('bf')) ELSE password END,
+      password = CASE WHEN p_password IS NOT NULL AND TRIM(p_password) <> '' THEN crypt(p_password, gen_salt('bf')) ELSE password END, -- Only update if provided
       access_level = p_access_level::access_level,
       name = p_name, 
       agency = p_agency, 
@@ -85,19 +84,18 @@ BEGIN
       cell_phone = p_phone,
       responder_type = CASE WHEN p_type IS NOT NULL AND p_type <> '' THEN p_type::responder_type ELSE NULL END,
       special_skills = p_skills,
-      display_density = p_display_density::display_density,
-      vehicles = p_vehicles
+      display_density = p_display_density::display_density
     WHERE LOWER(TRIM(email)) = LOWER(TRIM(p_email));
   ELSE
     INSERT INTO users (
       email, username, password, access_level, name, agency, identifier, 
-      cell_phone, responder_type, special_skills, display_density, vehicles
+      cell_phone, responder_type, special_skills, display_density
     )
     VALUES (
       LOWER(TRIM(p_email)), p_username, crypt(p_password, gen_salt('bf')), p_access_level::access_level, 
-      p_name, p_agency, p_identifier, p_phone, 
-      CASE WHEN p_type IS NOT NULL AND p_type <> '' THEN p_type::responder_type ELSE NULL END, 
-      p_skills, p_display_density::display_density, p_vehicles
+      p_name, p_agency, p_identifier, p_phone,
+      CASE WHEN p_type IS NOT NULL AND p_type <> '' THEN p_type::responder_type ELSE NULL END,
+      p_skills, p_display_density::display_density
     );
   END IF;
 END;
@@ -129,8 +127,8 @@ END;
 $func$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- GRANTS
-GRANT EXECUTE ON FUNCTION verify_user_login(TEXT, TEXT) TO anon, authenticated;
-GRANT EXECUTE ON FUNCTION checkin_responder_securely(TEXT, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated;
-GRANT EXECUTE ON FUNCTION admin_add_user(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION verify_user_login(TEXT, TEXT) TO anon, authenticated; -- Existing grant
+GRANT EXECUTE ON FUNCTION checkin_responder_securely(TEXT, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated; -- Existing grant
+GRANT EXECUTE ON FUNCTION admin_add_user(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated; -- Updated grant
 GRANT EXECUTE ON FUNCTION admin_remove_user TO authenticated;
 GRANT EXECUTE ON FUNCTION admin_update_password TO authenticated;

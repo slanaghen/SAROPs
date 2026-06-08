@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useIncident } from '../context/IncidentContext';
-import { useToast } from '../context/ToastContext';
 
 const QRCodesPage = () => {
   const { incidentId, incidentData, isActive } = useIncident();
@@ -9,7 +8,6 @@ const QRCodesPage = () => {
   const [loading, setLoading] = useState(true);
 
   const currentUrl = window.location.origin;
-  const { addToast } = useToast();
   const checkinUrl = `${currentUrl}/checkin`;
 
   // Helper to ensure we have a valid SARTopo URL regardless of whether an ID or URL was provided
@@ -23,9 +21,8 @@ const QRCodesPage = () => {
 
   useEffect(() => {
     if (!isActive || !incidentId) {
-      // Give context a moment to hydrate before showing the "No Incident" state
-      const timer = setTimeout(() => setLoading(false), 500); // Small delay to avoid flash of "No Incident"
-      return () => clearTimeout(timer);
+      setLoading(false);
+      return;
     }
 
     const fetchIncident = async () => {

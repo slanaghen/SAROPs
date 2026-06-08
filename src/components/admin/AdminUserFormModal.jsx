@@ -15,8 +15,7 @@ const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
     cell_phone: '',
     responder_type: 'SAR',
     special_skills: '',
-    display_density: 'comfortable',
-    vehicles: '',
+    display_density: 'comfortable'
   });
   const { addToast } = useToast();
 
@@ -36,7 +35,6 @@ const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
         responder_type: initialData.responder_type || 'SAR',
         special_skills: initialData.special_skills || '',
         display_density: initialData.display_density || 'comfortable',
-        vehicles: initialData.vehicles || '',
       });
     } else {
       // Reset form for new user
@@ -52,7 +50,6 @@ const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
         responder_type: 'SAR',
         special_skills: '',
         display_density: 'comfortable',
-        vehicles: '',
       });
     }
   }, [isOpen, initialData, isEditing]);
@@ -97,72 +94,42 @@ const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
       <form id="user-form" onSubmit={(e) => { e.preventDefault(); handleSave(false); }}>
         <div className="modal-scroll-wrapper" style={{ maxHeight: '65vh', overflowY: 'auto', paddingRight: '8px' }}>
 
-          <div className="form-row">
-            <label htmlFor="user_email">Email Address</label>
-            <input
-              id="user_email"
-              type="email"
-              name="email"
-              value={formData.email}
-              onChange={handleChange}
-              data-lpignore="true"
-              placeholder="admin@agency.gov"
-              required
-              disabled={isEditing}
-            />
+          {/* Row 1: Username, Password */}
+          <div style={{ display: 'flex', gap: '16px', marginBottom: '16px' }}>
+            <div className="form-row" style={{ flex: 1 }}>
+              <label htmlFor="user_username">Username</label>
+              <input
+                id="user_username"
+                type="text"
+                name="username"
+                value={formData.username}
+                data-lpignore="true"
+                onChange={handleChange}
+                disabled={isEditing}
+              />
+            </div>
+            <div className="form-row" style={{ flex: 1 }}>
+              <label htmlFor="user_password">
+                Password {isEditing && <span style={{ fontSize: '10px', color: '#64748b', display: 'inline', fontWeight: 400 }}> (Leave blank to keep current)</span>}
+              </label>
+              <input
+                id="user_password"
+                type="password"
+                name="password"
+                value={formData.password}
+                onChange={handleChange}
+                placeholder={isEditing ? '••••••••' : '•••••••• (required)'}
+                required={!isEditing}
+              />
+            </div>
           </div>
 
-          <div className="form-row">
-            <label htmlFor="user_username">Username</label>
-            <input
-              id="user_username"
-              type="text"
-              name="username"
-              value={formData.username}
-              data-lpignore="true"
-              onChange={handleChange}
-              disabled={isEditing}
-            />
-          </div>
-
-          <div className="form-row">
-            <label htmlFor="user_password">
-              Password {isEditing && <span style={{ fontSize: '10px', color: '#64748b', display: 'inline', fontWeight: 400 }}> (Leave blank to keep current)</span>}
-            </label>
-            <input
-              id="user_password"
-              type="password"
-              name="password"
-              value={formData.password}
-              onChange={handleChange}
-              placeholder={isEditing ? '••••••••' : '•••••••• (required)'}
-              required={!isEditing}
-            />
-          </div>
-
+          {/* Row 2: Full Name, Responder Type */}
           <div style={{ display: 'flex', gap: '16px', marginBottom: '16px' }}>
             <div className="form-row" style={{ flex: 1 }}>
               <label htmlFor="user_name">Full Name</label>
               <input id="user_name" type="text" name="name" value={formData.name} onChange={handleChange} data-lpignore="true" placeholder="John Doe" />
             </div>
-            <div className="form-row" style={{ flex: 1 }}>
-              <label htmlFor="user_agency">Agency</label>
-              <input id="user_agency" type="text" name="agency" value={formData.agency} onChange={handleChange} data-lpignore="true" placeholder="SAR Agency" />
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', gap: '16px', marginBottom: '16px' }}>
-            <div className="form-row" style={{ flex: 1 }}>
-              <label htmlFor="user_id">Identifier</label>
-              <input id="user_id" type="text" name="identifier" value={formData.identifier} onChange={handleChange} data-lpignore="true" placeholder="JD-1" />
-            </div>
-            <div className="form-row" style={{ flex: 1 }}>
-              <label htmlFor="user_phone">Phone Number</label>
-              <input id="user_phone" type="tel" name="cell_phone" value={formData.cell_phone} onChange={handleChange} data-lpignore="true" placeholder="555-123-4567" />
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', gap: '16px', marginBottom: '16px', alignItems: 'start' }}>
             <div className="form-row" style={{ flex: 1 }}>
               <label htmlFor="user_type">Responder Type</label>
               <select id="user_type" name="responder_type" value={formData.responder_type} onChange={handleChange}>
@@ -171,6 +138,53 @@ const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
                 <option value="Law">Law Enforcement</option>
                 <option value="Medical">Medical</option>
               </select>
+            </div>
+          </div>
+
+          {/* Row 3: Agency, Identifier */}
+          <div style={{ display: 'flex', gap: '16px', marginBottom: '16px' }}>
+            <div className="form-row" style={{ flex: 1 }}>
+              <label htmlFor="user_agency">Agency</label>
+              <input id="user_agency" type="text" name="agency" value={formData.agency} onChange={handleChange} data-lpignore="true" placeholder="SAR Agency" />
+            </div>
+            <div className="form-row" style={{ flex: 1 }}>
+              <label htmlFor="user_id">Identifier</label>
+              <input id="user_id" type="text" name="identifier" value={formData.identifier} onChange={handleChange} data-lpignore="true" placeholder="JD-1" />
+            </div>
+          </div>
+
+          {/* Row 4: Email Address, Phone Number */}
+          <div style={{ display: 'flex', gap: '16px', marginBottom: '16px' }}>
+            <div className="form-row" style={{ flex: 1 }}>
+              <label htmlFor="user_email">Email Address</label>
+              <input
+                id="user_email"
+                type="email"
+                name="email"
+                value={formData.email}
+                onChange={handleChange}
+                data-lpignore="true"
+                placeholder="admin@agency.gov"
+                required
+                disabled={isEditing}
+              />
+            </div>
+            <div className="form-row" style={{ flex: 1 }}>
+              <label htmlFor="user_phone">Phone Number</label>
+              <input id="user_phone" type="tel" name="cell_phone" value={formData.cell_phone} onChange={handleChange} data-lpignore="true" placeholder="555-123-4567" />
+            </div>
+          </div>
+
+          {/* Row 5: Access Level, Display Density */}
+          <div style={{ display: 'flex', gap: '16px', marginBottom: '16px' }}>
+            <div className="form-row" style={{ flex: 1 }}>
+              <label htmlFor="user_level">Access Level</label>
+              <select id="user_level" name="access_level" value={formData.access_level} onChange={handleChange} disabled={isProfileSettings}>
+                <option value="responder">Responder</option>
+                <option value="staff">Staff</option>
+                <option value="admin">Admin</option>
+              </select>
+              {isProfileSettings && <small className="form-hint" style={{ display: 'block', marginTop: '4px' }}>Contact an administrator to change permissions.</small>}
             </div>
             <div className="form-row" style={{ flex: 1 }}>
               <label>Display Density</label>
@@ -191,24 +205,10 @@ const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
             </div>
           </div>
 
-          <div className="form-row">
-            <label htmlFor="user_level">Access Level</label>
-            <select id="user_level" name="access_level" value={formData.access_level} onChange={handleChange} disabled={isProfileSettings}>
-              <option value="responder">Responder</option>
-              <option value="staff">Staff</option>
-              <option value="admin">Admin</option>
-            </select>
-            {isProfileSettings && <small className="form-hint">Contact an administrator to change permissions.</small>}
-          </div>
-
-          <div className="form-row">
+          {/* Row 6: Capabilities */}
+          <div className="form-row" style={{ marginBottom: '16px' }}>
             <label htmlFor="user_skills">Capabilities</label>
             <textarea id="user_skills" name="special_skills" value={formData.special_skills} onChange={handleChange} data-lpignore="true" placeholder="EMT, Rope Rescue, K9 Handler" style={{ minHeight: '80px' }} />
-          </div>
-
-          <div className="form-row">
-            <label htmlFor="user_vehicles">Default Vehicles (Comma-separated)</label>
-            <input id="user_vehicles" type="text" name="vehicles" value={formData.vehicles} onChange={handleChange} data-lpignore="true" placeholder="3121, UTV, Boat" />
           </div>
         </div>
       </form>

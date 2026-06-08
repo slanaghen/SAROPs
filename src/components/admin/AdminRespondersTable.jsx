@@ -82,13 +82,10 @@ const AdminRespondersTable = ({
                   Identifier {sortConfig.key === 'identifier' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
                 </th>
                 <th onClick={() => requestSort('incident_number')} style={{ cursor: 'pointer' }}>
-                  Inc # {sortConfig.key === 'incident_number' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+                  Incident {sortConfig.key === 'incident_number' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
                 </th>
                 <th onClick={() => requestSort('team_name')} style={{ cursor: 'pointer' }}>
                   Team {sortConfig.key === 'team_name' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
-                </th>
-                <th onClick={() => requestSort('checkin_datetime')} style={{ cursor: 'pointer' }}>
-                  Check-In Time {sortConfig.key === 'checkin_datetime' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
                 </th>
                 <th onClick={() => requestSort('status')} style={{ cursor: 'pointer' }}>
                   Status {sortConfig.key === 'status' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
@@ -117,7 +114,6 @@ const AdminRespondersTable = ({
                       <td style={{ color: '#000' }}>{res.identifier || '—'}</td>
                       <td style={{ color: '#000' }}>#{incident?.number || '—'}</td>
                       <td style={{ color: '#000' }}>{team?.team_name_number || '—'}</td>
-                      <td style={{ color: '#000' }}>{new Date(res.checkin_datetime).toLocaleString()}</td>
                       <td style={{ color: '#000' }}>
                         <span className={`status-indicator ${(res.status || 'unknown').toLowerCase()}`}>
                           {res.status}

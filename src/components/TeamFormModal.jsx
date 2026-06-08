@@ -188,6 +188,35 @@ const TeamFormModal = ({
   };
 
   const handleSave = (stayOpen = false) => {
+    // Enforce business rule: A responder cannot be active on multiple teams simultaneously.
+    // Active status is defined as 'Attached', 'Assigned', or 'Deployed'.
+    const initialMemberIds = new Set([
+      ...(initialData.responder_ids || []),
+      ...(initialData.current_responders?.map(r => r.responder_id) || []),
+      initialData.leader_responder_id
+    ].filter(Boolean));
+
+    const checkResponderConflict = (id) => {
+      if (!id || initialMemberIds.has(id)) return null;
+      const r = responders.find(res => res.responder_id === id);
+      // Status logic: if not 'staged' or 'checkedout', the responder is currently active on another team.
+      if (r && !['staged', 'checkedout'].includes(String(r.status || '').toLowerCase())) {
+        return r.name;
+      }
+      return null;
+    };
+
+    const conflicts = [
+      checkResponderConflict(teamForm.leader_responder_id),
+      ...(teamForm.responder_ids || []).map(checkResponderConflict)
+    ].filter(Boolean);
+
+    if (conflicts.length > 0) {
+      const uniqueConflicts = [...new Set(conflicts)];
+      addToast(`Assignment Conflict: Responders ${uniqueConflicts.join(', ')} are already active on other teams. Responders can only belong to one team at a time.`, 'error');
+      return;
+    }
+
     // Convert equipment string back to array for the API
     const equipmentArray = typeof teamForm.equipment === 'string'
       ? teamForm.equipment.split(',').map(s => s.trim()).filter(Boolean)

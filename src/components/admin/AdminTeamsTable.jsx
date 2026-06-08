@@ -1,9 +1,11 @@
 import React, { useState, useMemo } from 'react';
+import { formatTimeSince } from '../../utils/operationalUtils';
 
 const AdminTeamsTable = ({
   allTeams = [],
   allIncidents = [],
   allAssignments = [],
+  currentTime,
   isTeamsExpanded,
   setIsTeamsExpanded,
   handleDisbandTeam,
@@ -81,10 +83,13 @@ const AdminTeamsTable = ({
                   Type {sortConfig.key === 'type' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
                 </th>
                 <th onClick={() => requestSort('incident_number')} style={{ cursor: 'pointer' }}>
-                  Inc # {sortConfig.key === 'incident_number' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+                  Incident {sortConfig.key === 'incident_number' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
                 </th>
                 <th onClick={() => requestSort('assignment_title')} style={{ cursor: 'pointer' }}>
                   Assignment {sortConfig.key === 'assignment_title' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+                </th>
+                <th style={{ textAlign: 'left' }}>
+                  Last PAR Check
                 </th>
                 <th onClick={() => requestSort('status')} style={{ cursor: 'pointer' }}>
                   Status {sortConfig.key === 'status' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
@@ -95,7 +100,7 @@ const AdminTeamsTable = ({
             <tbody>
               {allTeams.length === 0 ? (
                 <tr>
-                  <td colSpan="6" className="empty-row">No teams found in database.</td>
+                  <td colSpan="7" className="empty-row">No teams found in database.</td>
                 </tr>
               ) : (
                 sortedTeams.map(team => {
@@ -115,6 +120,9 @@ const AdminTeamsTable = ({
                       <td style={{ color: '#000' }}>{team.type}</td>
                       <td style={{ color: '#000' }}>{incidentNumber ? `#${incidentNumber}` : '—'}</td>
                       <td style={{ color: '#000' }}>{assignment?.title || '—'}</td>
+                      <td style={{ color: '#64748b', fontSize: '12px' }}>
+                        {team.last_par_check || team.created_at ? formatTimeSince(team.last_par_check || team.created_at, currentTime) : '—'}
+                      </td>
                       <td style={{ color: '#000' }}>
                         <span className={`status-indicator ${team.status.toLowerCase()}`}>
                           {team.status}
