@@ -7,8 +7,7 @@ dist-ssr/
 *.local
 
 # assets
-assets/
-assets/sarops-Google-*.json
+src/assets/*.json
 
 # Environment variables
 .env
