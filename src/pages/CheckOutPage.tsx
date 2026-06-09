@@ -16,11 +16,10 @@ const CheckOutPage: React.FC = () => {
       return;
     }
 
-    const isStaffOrAdmin = accessLevel === 'staff' || accessLevel === 'admin';
-    const canCheckOut = responderStatus === 'Staged' || (isStaffOrAdmin && responderStatus === 'Assigned');
+    const canCheckOut = responderStatus === 'Staged';
 
     if (!canCheckOut) {
-      setError(`Check-out unsuccessful: Your current status is "${responderStatus}". ${isStaffOrAdmin ? 'Staff/Admins must be in "Assigned" or "Staged" status' : 'Responders must be in "Staged" status'} to check out. Please ensure you have been released from your team or assignment before clearing.`);
+      setError(`Check-out unsuccessful: Your current status is "${responderStatus}". All personnel must be in "Staged" status to check out. Please ensure you have been released from your team or assignment before clearing.`);
       return;
     }
 

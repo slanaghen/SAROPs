@@ -3,6 +3,8 @@ import { supabase } from '../lib/supabase';
 import AdminUserFormModal from '../components/admin/AdminUserFormModal';
 import '../styles/IncidentEditPage.css';
 import { useToast } from '../context/ToastContext';
+import '../styles/ActionButtons.css';
+import '../styles/FormElements.css';
 
 const SettingsPage = () => {
   const [userProfile, setUserProfile] = useState(null);
@@ -66,13 +68,13 @@ const SettingsPage = () => {
   };
 
   return (
-    <div className="incident-edit-page">
+    <div className={`incident-edit-page density-${userProfile?.display_density || 'comfortable'}`} style={{ paddingBottom: 'var(--space-lg)' }}>
       <div className="page-header" style={{ textAlign: 'center' }}>
         <h1>Account Settings</h1>
         <p className="subtitle">Update your personal information and security credentials.</p>
       </div>
 
-      {loading && !userProfile && <p className="operations-message" style={{ textAlign: 'center' }}>Loading your profile...</p>}
+      {loading && !userProfile && <div style={{ padding: 'var(--space-lg)', textAlign: 'center' }}><p className="operations-message">Loading your profile...</p></div>}
       
       {!loading && userProfile && (
         <div className="section-card" style={{ maxWidth: '600px', margin: '0 auto' }}>
@@ -89,9 +91,18 @@ const SettingsPage = () => {
       
       <style>{`
         /* Transform the modal into an embedded page component */
-        .modal-backdrop { position: static; background: none; padding: 0; }
-        .modal { box-shadow: none; width: 100%; max-width: none; padding: 0; border: none; }
+        .incident-edit-page .modal-backdrop { position: static; background: none; padding: 0; }
+        .incident-edit-page .modal { 
+          box-shadow: none; 
+          width: 100%; 
+          max-width: none; 
+          border: none; 
+          padding: 0 !important; 
+        }
         .modal-actions .btn-secondary { display: none; }
+        
+        /* Ensure the form body inside the embedded modal uses full width */
+        .incident-edit-page .modal-body { padding: 0; }
       `}</style>
     </div>
   );

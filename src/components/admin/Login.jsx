@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
+import '../../styles/ActionButtons.css';
+import '../../styles/FormElements.css';
 
 const Login = ({ onLoginSuccess }) => {
   const navigate = useNavigate();
@@ -13,6 +15,18 @@ const Login = ({ onLoginSuccess }) => {
   const [view, setView] = useState('login'); // 'login', 'register', 'verify'
   const [otpToken, setOtpToken] = useState(''); 
   const [vehicles, setVehicles] = useState('');
+  const [displayDensity, setDisplayDensity] = useState('comfortable');
+
+  // Fetch display density for local component styling
+  useEffect(() => {
+    const fetchDensity = async () => {
+      const userEmail = localStorage.getItem('sarops_user_email');
+      if (!userEmail) return;
+      const { data } = await supabase.from('users').select('display_density').eq('email', userEmail).maybeSingle();
+      if (data?.display_density) setDisplayDensity(data.display_density);
+    };
+    fetchDensity();
+  }, []);
 
   useEffect(() => {
     const fetchActiveIncidents = async () => {
@@ -170,58 +184,69 @@ const Login = ({ onLoginSuccess }) => {
   };
 
   return (
-    <div className="incident-edit-page">
+    <div className={`incident-edit-page density-${displayDensity}`}>
       <div className="page-header" style={{ textAlign: 'center' }}>
         <h1>
           {view === 'login' ? 'SAROPs Login' : (view === 'register' ? 'Register Account' : 'Verify Email')}
         </h1>
         <p className="subtitle">
           {view === 'login' && 'Please authenticate to proceed'}
-          {view === 'register' && 'Join the mission and setup your responder profile'}
+          {view === 'register' && 'Join the mission and set up your responder profile'}
           {view === 'verify' && 'Check your email for a magic link or enter the 6-digit code below.'}
         </p>
       </div>
 
-      <div className="section-card" style={{ maxWidth: '400px', margin: '40px auto' }}>
+      <div className="section-card" style={{ maxWidth: '400px', margin: 'var(--space-lg) auto' }}>
         {view === 'login' && (
           <form onSubmit={handleAdminLogin}>
-            <label>Username <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required /></label>
-            <label>Password <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required /></label>
-            <label>Check Into Incident
-              <select value={selectedIncidentId} onChange={(e) => setSelectedIncidentId(e.target.value)} data-lpignore="true">
+            <div className="form-field">
+              <label className="form-label">Username</label>
+              <input type="email" className="form-input" value={email} onChange={(e) => setEmail(e.target.value)} required />
+            </div>
+            <div className="form-field">
+              <label className="form-label">Password</label>
+              <input type="password" className="form-input" value={password} onChange={(e) => setPassword(e.target.value)} required />
+            </div>
+            <div className="form-field">
+              <label className="form-label">Check Into Incident</label>
+              <select className="form-select" value={selectedIncidentId} onChange={(e) => setSelectedIncidentId(e.target.value)} data-lpignore="true">
                 <option value="">— Don't check in —</option>
                 <option value="NEW_INCIDENT">+ Start New Incident</option>
                 {incidents.map((inc) => (
                   <option key={inc.incident_id} value={inc.incident_id}>{inc.name} ({inc.number})</option>
                 ))}
               </select>
-            </label> 
-            <label>Checking in with Vehicle(s)?
-              <input type="text" value={vehicles} onChange={(e) => setVehicles(e.target.value)} data-lpignore="true" placeholder="e.g. 3121, UTV, Boat" />
-              <small className="form-hint" style={{ color: '#64748b', fontSize: '11px', display: 'block', marginTop: '4px' }}>Optional: List vehicle designations separated by commas.</small>
-            </label>
-            <button type="submit" className="btn btn-primary" disabled={loading} style={{ width: '100%', marginTop: '20px' }}>Login</button>
-            <button type="button" onClick={() => setView('register')} className="btn btn-secondary" style={{ width: '100%', marginTop: '10px' }}>Register</button>
-            <button type="button" onClick={() => navigate('/checkin')} className="btn btn-secondary" style={{ width: '100%', marginTop: '10px' }}>Check-in without Account</button>
+            </div>
+            <div className="form-field">
+              <label className="form-label">Checking in with Vehicle(s)?</label>
+              <input type="text" className="form-input" value={vehicles} onChange={(e) => setVehicles(e.target.value)} data-lpignore="true" placeholder="e.g. 3121, UTV, Boat" />
+              <small className="form-hint" style={{ color: '#64748b', fontSize: 'var(--text-xs)', display: 'block', marginTop: 'var(--space-xs)' }}>Optional: List vehicle designations separated by commas.</small>
+            </div>
+            <button type="submit" className="action-btn action-btn-primary action-btn-full" disabled={loading} style={{ marginTop: 'var(--space-lg)' }}>Login</button>
+            <button type="button" onClick={() => setView('register')} className="action-btn action-btn-secondary action-btn-full" style={{ marginTop: 'var(--space-md)' }}>Register</button>
+            <button type="button" onClick={() => navigate('/checkin')} className="action-btn action-btn-secondary action-btn-full" style={{ marginTop: 'var(--space-md)' }}>Check-in without Account</button>
           </form>
         )}
 
         {view === 'register' && (
           <form onSubmit={handleRegister}>
-            <label>
-              Email Address
+            <div className="form-field">
+              <label className="form-label">
+                Email Address
+              </label>
               <input 
                 type="email" 
+                className="form-input"
                 value={email} 
                 onChange={(e) => setEmail(e.target.value)} 
                 placeholder="you@example.com"
                 required 
               />
-            </label>
-            <button type="submit" className="btn btn-primary" disabled={loading} style={{ width: '100%', marginTop: '20px' }}>
+            </div>
+            <button type="submit" className="action-btn action-btn-primary action-btn-full" disabled={loading} style={{ marginTop: 'var(--space-lg)' }}>
               {loading ? 'Sending...' : 'Send Verification Code'}
             </button>
-            <button type="button" onClick={() => setView('login')} className="btn btn-secondary" style={{ width: '100%', marginTop: '10px' }}>
+            <button type="button" onClick={() => setView('login')} className="action-btn action-btn-secondary action-btn-full" style={{ marginTop: 'var(--space-md)' }}>
               Back to Login
             </button>
           </form>
@@ -229,21 +254,24 @@ const Login = ({ onLoginSuccess }) => {
 
         {view === 'verify' && (
           <form onSubmit={handleVerifyOtp}>
-            <label>
-              6-Digit Code
+            <div className="form-field">
+              <label className="form-label">
+                6-Digit Code
+              </label>
               <input 
                 type="text" 
+                className="form-input"
                 value={otpToken} 
                 onChange={(e) => setOtpToken(e.target.value)} 
                 placeholder="123456"
                 maxLength={6}
                 required 
               />
-            </label>
-            <button type="submit" className="btn btn-primary" disabled={loading} style={{ width: '100%', marginTop: '20px' }}>
+            </div>
+            <button type="submit" className="action-btn action-btn-primary action-btn-full" disabled={loading} style={{ marginTop: 'var(--space-lg)' }}>
               {loading ? 'Verifying...' : 'Verify & Continue'}
             </button>
-            <button type="button" onClick={() => setView('register')} className="btn btn-secondary" style={{ width: '100%', marginTop: '10px' }}>
+            <button type="button" onClick={() => setView('register')} className="action-btn action-btn-secondary action-btn-full" style={{ marginTop: 'var(--space-md)' }}>
               Back
             </button>
           </form>

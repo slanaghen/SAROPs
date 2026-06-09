@@ -5,6 +5,7 @@ import useResponderTeamAndAssignment from '../hooks/useResponderTeamAndAssignmen
 import { useToast } from '../context/ToastContext';
 import { useIncident } from '../context/IncidentContext';
 import '../styles.css';
+import '../styles/ActionButtons.css';
 
 /**
  * PDFsPage
@@ -163,21 +164,21 @@ const PDFsPage = () => {
             ))}
           </select>
           {pdfUrl && (
-            <div style={{ display: 'flex', gap: '8px' }}>
+            <div className="action-btn-group">
               <a 
                 href={pdfUrl} 
                 target="_blank" 
                 rel="noopener noreferrer" 
-                className="btn btn-secondary"
-                style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', height: '40px', padding: '0 16px' }}
+                className="action-btn action-btn-secondary"
+                style={{ textDecoration: 'none' }}
               >
                 Open in New Tab
               </a>
               <a 
                 href={pdfUrl} 
                 download
-                className="btn btn-secondary"
-                style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', height: '40px', padding: '0 16px' }}
+                className="action-btn action-btn-secondary"
+                style={{ textDecoration: 'none' }}
               >
                 Download
               </a>

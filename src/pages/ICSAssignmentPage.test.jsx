@@ -19,6 +19,7 @@ vi.mock('../lib/supabase', () => ({
     from: vi.fn(() => ({
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
       delete: vi.fn().mockReturnThis(),
       upsert: vi.fn().mockReturnThis(),
       insert: vi.fn().mockReturnThis(),
@@ -43,6 +44,7 @@ describe('ICSAssignmentPage', () => {
       incidentId: 'inc-123',
       incidentData: { opPeriodId: 'op-123' },
       responderName: 'Steve Admin',
+      user: { email: 'admin@test.com' },
       setResponderStatus: vi.fn(),
     });
 

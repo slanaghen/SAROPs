@@ -5,6 +5,8 @@ import { Incident, Responder, Team, ResponderStatus } from '../types/sarops-type
 import ResponderCheckin from '../components/ResponderCheckin';
 import { useResponderCheckin } from '../hooks/useResponderCheckin';
 import { useIncident } from '../context/IncidentContext';
+import '../styles/FormElements.css';
+import '../styles/ActionButtons.css';
 
 /**
  * ResponderCheckinPage
@@ -52,6 +54,17 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
   // Ensure an anonymous session exists before fetching data or allowing navigation
   const [isAuthenticating, setIsAuthenticating] = useState(true);
   const [sessionError, setSessionError] = useState<string | null>(null);
+  const [displayDensity, setDisplayDensity] = useState('comfortable');
+
+  useEffect(() => {
+    const fetchDensity = async () => {
+      const userEmail = localStorage.getItem('sarops_user_email');
+      if (!userEmail) return;
+      const { data } = await supabase.from('users').select('display_density').eq('email', userEmail).maybeSingle();
+      if (data?.display_density) setDisplayDensity(data.display_density);
+    };
+    fetchDensity();
+  }, []);
 
   useEffect(() => {
     const initSession = async () => {
@@ -528,7 +541,7 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
 
   // Show check-in form
   return (
-    <div className="responder-checkin" style={{ display: 'flex', justifyContent: 'center', padding: '24px 24px' }}>
+    <div className={`responder-checkin density-${displayDensity}`} style={{ display: 'flex', justifyContent: 'center', padding: 'var(--space-lg)' }}>
       {isAuthenticating ? (
         <div className="checkin-container" style={{ width: '100%', maxWidth: '480px', textAlign: 'center' }}>
           <div className="checkin-transition">

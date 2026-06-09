@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { useIncident } from '../context/IncidentContext';
 import { usePlanningDashboard } from '../hooks/usePlanningDashboard';
@@ -9,8 +9,20 @@ import '../styles/ICSAssignmentPage.css';
  * Displays the ICS organizational hierarchy with editable assignments.
  */
 const ICSAssignmentPage = () => {
-  const { incidentData } = useIncident();
+  const { incidentData, user } = useIncident();
   const operationalPeriodId = incidentData?.opPeriodId;
+
+  const [displayDensity, setDisplayDensity] = useState('comfortable');
+
+  useEffect(() => {
+    const fetchDensity = async () => {
+      const userEmail = user?.email || localStorage.getItem('sarops_user_email');
+      if (!userEmail) return;
+      const { data } = await supabase.from('users').select('display_density').eq('email', userEmail).maybeSingle();
+      if (data?.display_density) setDisplayDensity(data.display_density);
+    };
+    fetchDensity();
+  }, [user]);
 
   const { teams, responders, loading, error: hookError, fetchDashboardData } = usePlanningDashboard(supabase, operationalPeriodId);
 
@@ -60,9 +72,9 @@ const ICSAssignmentPage = () => {
           background: '#fff', 
           border: '1px solid #e2e8f0', 
           borderRadius: '6px', 
-          padding: '8px 12px', 
-          fontSize: '14px',
-          minHeight: '44px',
+          padding: 'var(--table-cell-padding)', 
+          fontSize: 'var(--table-font-size)',
+          minHeight: displayDensity === 'compact' ? '34px' : '44px',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
@@ -86,7 +98,7 @@ const ICSAssignmentPage = () => {
   };
 
   return (
-    <div className="ics-assignment-page">
+    <div className={`ics-assignment-page density-${displayDensity}`}>
       <div className="page-header">
         <h1>ICS Chart</h1>
         <p className="subtitle">Assign personnel to Command and General Staff positions.</p>

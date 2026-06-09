@@ -1,5 +1,5 @@
 .operations-dashboard {
-  padding: 24px;
+  padding: var(--space-lg);
   max-width: 1600px;
   margin: 0 auto;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
@@ -84,7 +84,7 @@
 
 .operations-table th,
 .operations-table td {
-  padding: 4px 1px;
+  padding: var(--table-cell-padding);
   border-bottom: 1px solid #f0f0f0;
   text-align: left;
   vertical-align: middle;
@@ -97,7 +97,7 @@
   background: #f8fafc;
   color: #2c3e50;
   font-weight: 700;
-  font-size: 13px;
+  font-size: var(--text-xs);
   letter-spacing: 0.02em;
   text-transform: uppercase;
   white-space: normal;
@@ -124,7 +124,7 @@
 
 .operations-table td {
   color: #202020;
-  font-size: 14px;
+  font-size: var(--table-font-size);
   white-space: nowrap;
 }
 
@@ -173,10 +173,10 @@
 
 .chip {
   display: inline-block;
-  padding: 4px 2px;
+  padding: var(--chip-padding);
   border-radius: 4px;
   font-weight: 600;
-  font-size: 13px;
+  font-size: var(--chip-font-size);
   cursor: grab;
   transition: all 0.2s ease;
   border: 1px solid transparent;

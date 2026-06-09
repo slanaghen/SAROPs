@@ -88,7 +88,7 @@ describe('CheckOutPage', () => {
     });
   });
 
-  it('allows check-out for Admins in Assigned status', async () => {
+  it('blocks check-out for Admins in Assigned status', async () => {
     const mockLogout = vi.fn();
     vi.mocked(useIncident).mockReturnValue({
       isActive: true,
@@ -103,10 +103,10 @@ describe('CheckOutPage', () => {
     const confirmBtn = screen.getByText(/Confirm Check-Out/i);
     fireEvent.click(confirmBtn);
 
-    await waitFor(() => {
-      expect(supabase.from).toHaveBeenCalledWith('responders');
-      expect(mockLogout).toHaveBeenCalled();
-    });
+    expect(await screen.findByText(/Check-out unsuccessful/i)).toBeInTheDocument();
+    expect(screen.getByText(/current status is "Assigned"/i)).toBeInTheDocument();
+    expect(supabase.from).not.toHaveBeenCalledWith('responders');
+    expect(mockLogout).not.toHaveBeenCalled();
   });
 
   it('nullifies leadership on active teams before completing checkout', async () => {

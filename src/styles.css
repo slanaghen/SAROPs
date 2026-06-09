@@ -35,15 +35,18 @@
   --space-lg: 24px;
 }
 
-.compact-mode {
+.density-compact {
   --chip-padding: 2px 8px;
   --chip-font-size: var(--text-xs);
   --chip-font-weight: 700;
-  --btn-height: 18px;
+  --btn-height: 26px;
   --btn-font-size: var(--text-xs);
   --btn-padding: 2px 12px;
   --table-font-size: 12px;
   --table-cell-padding: 2px 8px;
+  --space-sm: 4px;
+  --space-md: 8px;
+  --space-lg: 12px;
 }
 
 /* Operational Attention Animations */
@@ -297,10 +300,6 @@ article {
 }
 
 .status-indicator {
-  padding: var(--chip-padding);
-  border-radius: 4px;
-  font-weight: var(--chip-font-weight);
-  font-size: var(--chip-font-size);
   text-transform: uppercase;
   background: #334155;
   display: inline-flex;
@@ -313,13 +312,12 @@ article {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: var(--chip-padding);
-  border-radius: 4px;
-  font-weight: var(--chip-font-weight);
-  font-size: var(--chip-font-size);
   text-transform: uppercase;
   background: #334155;
   gap: 4px;
+  white-space: nowrap;
+  box-sizing: border-box;
+  line-height: 1;
 }
 
 .chip {

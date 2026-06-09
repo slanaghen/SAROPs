@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { supabase } from '../lib/supabase';
 import { Responder, ResponderStatus, AccessLevel, ResponderType } from '../types/sarops-types';
 import { getResponderByIdentifier } from '../services/responderService';
 import '../styles/ResponderCheckin.css';
+import '../styles/FormElements.css';
+import '../styles/ActionButtons.css';
 
 /**
  * ResponderCheckin Component
@@ -83,6 +85,19 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
     vehicles: string;
     incident_id?: string;
   } | null>(null);
+
+  const [displayDensity, setDisplayDensity] = useState('comfortable');
+
+  // Fetch display density for local component styling
+  useEffect(() => {
+    const fetchDensity = async () => {
+      const userEmail = localStorage.getItem('sarops_user_email');
+      if (!userEmail) return;
+      const { data } = await supabase.from('users').select('display_density').eq('email', userEmail).maybeSingle();
+      if (data?.display_density) setDisplayDensity(data.display_density);
+    };
+    fetchDensity();
+  }, []);
 
   // Use external error/loading/success if provided, otherwise use internal state
   const displayError = externalError || internalError;
@@ -294,10 +309,10 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
   const displayResponder = confirmationData || confirmedResponder;
 
   return (
-    <div className="checkin-container">
+    <div className={`checkin-container density-${displayDensity}`}>
       <div className="checkin-header">
         <h1>Responder Check-In</h1>
-        <p style={{ color: 'white', fontSize: '14px', margin: '4px 0 0' }}>
+        <p style={{ color: 'white', fontSize: 'var(--text-sm)', margin: 'var(--space-xs) 0 0' }}>
           Registered user? <Link to="/login" style={{ color: '#0ea5e9', fontWeight: 600, textDecoration: 'none' }}>Login here</Link>
         </p>
       </div>
@@ -328,39 +343,64 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
         {/* Main Form */}
         {!showConfirmation ? (
           <form onSubmit={handleSubmit} className="checkin-form" noValidate>
-            <div className="form-group">
-              <label htmlFor="name">Full Name *</label>
-              <input
-                id="name"
-                type="text"
-                name="name"
-                value={formData.name}
-                onChange={handleInputChange}
-                placeholder="First and Last Name"
-                required
-                autoFocus
-                disabled={displayLoading}
-              />
+            {/* Row 1: Name and Phone */}
+            <div className="form-grid" style={{ gap: 'var(--space-md)', marginBottom: 'var(--space-md)' }}>
+              <div className="form-field">
+                <label className="form-label" htmlFor="name">Full Name *</label>
+                <input
+                  id="name"
+                  className="form-input"
+                  type="text"
+                  name="name"
+                  value={formData.name}
+                  onChange={handleInputChange}
+                  placeholder="First and Last Name"
+                  required
+                  autoFocus
+                  disabled={displayLoading}
+                />
+              </div>
+              <div className="form-field">
+                <label className="form-label" htmlFor="cell_phone">Cell Phone Number *</label>
+                <input
+                  id="cell_phone"
+                  className="form-input"
+                  type="tel"
+                  name="cell_phone"
+                  value={formData.cell_phone}
+                  onChange={handleInputChange}
+                  placeholder="(555) 123-4567 or 555-123-4567"
+                  required
+                  disabled={displayLoading}
+                />
+                <small className="form-hint" style={{ fontSize: 'var(--text-xs)', marginTop: 'var(--space-xs)' }}>
+                  So we can contact you if needed
+                </small>
+              </div>
             </div>
 
-            <div className="form-group">
-              <label htmlFor="agency">Agency *</label>
+            {/* Row 2: Agency and Identifier */}
+            <div className="form-grid" style={{ gap: 'var(--space-md)', marginBottom: 'var(--space-md)' }}>
+              <div className="form-field">
+                <label className="form-label" htmlFor="agency">Agency *</label>
               <input
-                id="agency"
-                type="text"
-                name="agency"
-                value={formData.agency}
+                  id="agency"
+                className="form-input"
+                  type="text"
+                  name="agency"
+                  value={formData.agency}
                 onChange={handleInputChange}
-                placeholder="e.g., Sheriff's Office, Fire Department, Volunteer"
+                  placeholder="e.g., Sheriff's Office, Volunteer"
                 required
                 disabled={displayLoading}
               />
-            </div>
+              </div>
 
-            <div className="form-group">
-              <label htmlFor="identifier">Identifier *</label>
+              <div className="form-field">
+                <label className="form-label" htmlFor="identifier">Identifier *</label>
               <input
                 id="identifier"
+                className="form-input"
                 type="text"
                 name="identifier"
                 value={formData.identifier}
@@ -369,64 +409,58 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
                 required
                 disabled={displayLoading}
               />
-              <small className="form-hint">
+              <small className="form-hint" style={{ fontSize: 'var(--text-xs)', marginTop: 'var(--space-xs)' }}>
                 A unique identifier to distinguish you from other responders
               </small>
+              </div>
             </div>
 
-            <div className="form-group">
-              <label htmlFor="cell_phone">Cell Phone Number *</label>
-              <input
-                id="cell_phone"
-                type="tel"
-                name="cell_phone"
-                value={formData.cell_phone}
-                onChange={handleInputChange}
-                placeholder="(555) 123-4567 or 555-123-4567"
-                required
-                disabled={displayLoading}
-              />
-              <small className="form-hint">
-                So we can contact you if needed
-              </small>
-            </div>
-
-            <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
-              <div className="form-group" style={{ flex: 1, minWidth: '200px' }}>
-                <label htmlFor="special_skills">Capabilities</label>
-                <textarea
+            {/* Row 3: Capabilities and Vehicles */}
+            <div className="form-grid" style={{ gap: 'var(--space-md)', marginBottom: 'var(--space-md)' }}>
+              <div className="form-field">
+                <label className="form-label" htmlFor="special_skills">Capabilities</label>
+                <input
                   id="special_skills"
+                  type="text"
                   name="special_skills"
+                  className="form-input"
                   value={formData.special_skills}
                   onChange={handleInputChange}
                   placeholder="e.g. EMT, K9 Handler, Rope Rescue, ..."
                   disabled={displayLoading}
-                  style={{ height: '100px', resize: 'none' }}
                 />
-                <small className="form-hint">
+                <small className="form-hint" style={{ fontSize: 'var(--text-xs)', marginTop: 'var(--space-xs)' }}>
                   List specialized skills or certifications separated by commas.
                 </small>
               </div>
 
-              <div className="form-group" style={{ flex: 1, minWidth: '200px' }}>
-                <label htmlFor="vehicles">Vehicles</label>
-                <textarea
+              <div className="form-field">
+                <label className="form-label" htmlFor="vehicles">Vehicles</label>
+                <input
                   id="vehicles"
+                  type="text"
                   name="vehicles"
+                  className="form-input"
                   value={formData.vehicles}
                   onChange={handleInputChange}
                   placeholder="3121, UTV, boat, snowmobile, helicopter, ..."
                   disabled={displayLoading}
-                  style={{ height: '100px', resize: 'none' }}
                 />
-                <small className="form-hint">
+                <small className="form-hint" style={{ fontSize: 'var(--text-xs)', marginTop: 'var(--space-xs)' }}>
                   List vehicle designations separated by commas.
                 </small>
               </div>
             </div>
 
-            <div className="form-group radio-form-group">
-              <label>Responder Type *</label>
+            {/* Row 4: Empty Spacing Grid */}
+            <div className="form-grid" style={{ marginBottom: 'var(--space-md)' }}>
+              <div className="form-field" />
+              <div className="form-field" />
+            </div>
+
+            {/* Row 5: Responder Type (Centered Single Column) */}
+            <div className="form-field radio-form-group" style={{ alignItems: 'center', textAlign: 'center', marginBottom: 'var(--space-md)' }}>
+              <label className="form-label">Responder Type *</label>
               <div className="radio-group">
                 <label className="radio-label">
                   <input
@@ -467,16 +501,17 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
                   Medical
                 </label>
               </div>
-              <small className="form-hint">
+              <small className="form-hint" style={{ fontSize: 'var(--text-xs)', marginTop: 'var(--space-xs)' }}>
                 Your primary operational role/agency type.
               </small>
             </div>
 
-            {/* Incident Selection Dropdown */}
-            <div className="form-group">
-              <label htmlFor="incident">Select Active Incident *</label>
+            {/* Row 6: Incident Selection (Centered Single Column) */}
+            <div className="form-field" style={{ maxWidth: '400px', margin: '0 auto var(--space-md)' }}>
+              <label className="form-label" htmlFor="incident">Select Active Incident *</label>
               <select
                 id="incident"
+                className="form-select"
                 value={selectedIncidentId}
                 onChange={(e) => {
                 if (e.target.value === 'NEW_INCIDENT') {
@@ -498,16 +533,17 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
                   <option value="NEW_INCIDENT">+ Create New Incident</option>
                 )}
               </select>
-              {incidentError && <small className="form-hint error-text">{incidentError}</small>}
+              {incidentError && <small className="form-hint error-text" style={{ fontSize: 'var(--text-xs)', color: '#dc2626' }}>{incidentError}</small>}
             </div>
 
-            <div className="login-actions" style={{ marginTop: '24px' }}>
+            {/* Row 7: Continue Button (Centered Single Column) */}
+            <div className="login-actions" style={{ maxWidth: '400px', margin: 'var(--space-lg) auto 0' }}>
               <button
                 type="submit"
-                className="btn btn-primary btn-large"
+                className="action-btn action-btn-primary action-btn-full"
                 disabled={displayLoading}
                 aria-busy={displayLoading}
-                style={{ width: '100%', marginBottom: '12px' }}
+                style={{ marginBottom: 'var(--space-md)' }}
               >
                 {displayLoading ? 'Processing...' : 'Continue to Confirmation'}
               </button>

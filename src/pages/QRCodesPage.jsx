@@ -1,11 +1,24 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useIncident } from '../context/IncidentContext';
+import '../styles/ActionButtons.css';
 
 const QRCodesPage = () => {
-  const { incidentId, incidentData, isActive } = useIncident();
+  const { incidentId, incidentData, isActive, user } = useIncident();
   const [sartopoId, setSartopoId] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  const [displayDensity, setDisplayDensity] = useState('comfortable');
+
+  useEffect(() => {
+    const fetchDensity = async () => {
+      const userEmail = user?.email || localStorage.getItem('sarops_user_email');
+      if (!userEmail) return;
+      const { data } = await supabase.from('users').select('display_density').eq('email', userEmail).maybeSingle();
+      if (data?.display_density) setDisplayDensity(data.display_density);
+    };
+    fetchDensity();
+  }, [user]);
 
   const currentUrl = window.location.origin;
   const checkinUrl = `${currentUrl}/checkin`;
@@ -67,19 +80,19 @@ const QRCodesPage = () => {
   };
 
   return (
-    <div className="qr-codes-page" style={{ padding: '24px', maxWidth: '1000px', margin: '0 auto' }}>
-      <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '32px', borderBottom: '1px solid #e2e8f0', paddingBottom: '16px' }}>
+    <div className={`qr-codes-page density-${displayDensity}`} style={{ padding: 'var(--space-lg)', maxWidth: '1000px', margin: '0 auto' }}>
+      <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-lg)', borderBottom: '1px solid #e2e8f0', paddingBottom: 'var(--space-md)' }}>
         <div>
           <h1 style={{ margin: 0 }}>Incident QR Codes</h1>
           <p style={{ color: '#64748b', margin: '4px 0 0' }}>
             {isActive ? `${incidentData?.name} — OP #${incidentData?.opNumber}` : 'General Incident Access'}
           </p>
         </div>
-        <button className="btn btn-primary" onClick={() => window.print()} style={{ width: 'auto', minWidth: '0', flex: 'none' }}>Print / Save as PDF</button>
+        <button className="action-btn action-btn-primary" onClick={() => window.print()}>Print / Save as PDF</button>
       </div>
 
       <div style={{ display: 'flex', gap: '40px', justifyContent: 'center', flexWrap: 'wrap' }}>
-        <div className="qr-card">
+        <div className="qr-card" style={{ padding: 'var(--space-lg)' }}>
           <h2 style={{ marginBottom: '20px' }}>Check-In Portal</h2>
           <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
             <img 
@@ -90,12 +103,12 @@ const QRCodesPage = () => {
           </div>
           <p style={{ marginTop: '16px', fontSize: '14px', fontWeight: 600, color: '#1e293b' }}>Scan to Check-In</p>
           <p style={{ fontSize: '11px', color: '#94a3b8', wordBreak: 'break-all', maxWidth: '250px' }}>{checkinUrl}</p>
-          <button className="btn btn-secondary btn-sm no-print" style={{ marginTop: '12px' }} onClick={() => downloadQR(checkinUrl, 'SAROps-CheckIn-QR')}>
+          <button className="action-btn action-btn-secondary action-btn-header no-print" style={{ marginTop: '12px' }} onClick={() => downloadQR(checkinUrl, 'SAROps-CheckIn-QR')}>
             Download PNG
           </button>
         </div>
 
-        <div className="qr-card">
+        <div className="qr-card" style={{ padding: 'var(--space-lg)' }}>
           <h2 style={{ marginBottom: '20px' }}>SARTopo Map</h2>
           {sartopoId ? (
             <>
@@ -129,7 +142,7 @@ const QRCodesPage = () => {
         </div>
       </div>
 
-      <div className="no-print" style={{ marginTop: '48px', padding: '20px', background: '#fefce8', border: '1px solid #fef08a', borderRadius: '8px', color: '#854d0e', fontSize: '14px' }}>
+      <div className="no-print" style={{ marginTop: 'var(--space-lg)', padding: 'var(--space-md)', background: '#fefce8', border: '1px solid #fef08a', borderRadius: '8px', color: '#854d0e', fontSize: '14px' }}>
         <strong>Pro-tip:</strong> Print this page and post it at the Command Post or Staging Area to allow field teams to check themselves in via their own mobile devices.
       </div>
 

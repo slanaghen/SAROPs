@@ -13,8 +13,8 @@
 }
 
 .checkin-container {
-  width: 100%;
-  max-width: 600px;
+  width: 90%; /* Allow some responsiveness */
+  max-width: 700px; /* Increased to better contain two columns */
   background: white;
   border-radius: 12px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
@@ -311,14 +311,12 @@
 }
 
 .status-badge {
-  display: inline-block;
-  padding: 4px 12px;
-  border-radius: 4px;
-  font-size: 12px;
-  font-weight: 600;
   text-transform: uppercase;
   background: #e2e8f0;
   color: #111827;
+  white-space: nowrap;
+  box-sizing: border-box;
+  line-height: 1;
 }
 
 .status-badge.staged { background: #1e3a8a; color: white; }

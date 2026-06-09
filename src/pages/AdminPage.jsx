@@ -23,6 +23,9 @@ import AdminIncidentsTable from '../components/admin/AdminIncidentsTable';
 import AdminVehiclesTable from '../components/admin/AdminVehiclesTable';
 import VehicleFormModal from '../components/admin/VehicleFormModal';
 import { useToast } from '../context/ToastContext';
+import '../styles/ActionButtons.css';
+import '../styles/FormElements.css';
+import '../styles/StatusChips.css';
 
 const AdminPage = () => {
   const navigate = useNavigate();
@@ -83,6 +86,12 @@ const AdminPage = () => {
     const timer = setInterval(() => setCurrentTime(Date.now()), 15000);
     return () => clearInterval(timer);
   }, []);
+
+  // Determine the display density based on the current user's profile
+  const userEmail = localStorage.getItem('sarops_user_email');
+  const myProfile = useMemo(() => 
+    users.find(u => u.email?.toLowerCase() === (userEmail || '').toLowerCase()),
+  [users, userEmail]);
 
   // State for Modals
   const [showUserModal, setShowUserModal] = useState(false);
@@ -171,16 +180,49 @@ const AdminPage = () => {
     }
   };
 
+  const handleClearData = async () => {
+    const confirmMsg = "Are you sure you want to clear all operational data? This will remove all incidents, teams, assignments, and responder records. System users will be preserved.";
+    if (!window.confirm(confirmMsg)) return;
+
+    setLoading(true);
+
+    try {
+      // Execute the data clearance via RPC. Ensure the 99_clear_data.sql 
+      // content is defined as a function named 'clear_data' in Postgres.
+      const { error: clearError } = await supabase.rpc('clear_data');
+      if (clearError) throw clearError;
+
+      // Clear local operational context since the data is gone from the database
+      if (clearIncident) clearIncident();
+      if (setResponderId) setResponderId(null);
+      if (setResponderStatus) setResponderStatus('CheckedOut');
+      setSelectedActivationId('');
+
+      await refreshDashboardData();
+      addToast('Operational data cleared successfully.', 'success');
+    } catch (err) {
+      addToast('Failed to clear data: ' + err.message, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleLeaveIncident = async () => {
-    if (responderId && responderStatus !== 'CheckedOut') {
+    // If we have an active responder session, perform a clean operational check-out
+    if (isActive && responderId && responderStatus !== 'CheckedOut') {
       setLoading(true);
       try {
-        // Attempt clean operational checkout in the database
         try {
+          // 1. Clear leadership status to avoid foreign key constraints
           await supabase.from('teams').update({ leader_responder_id: null }).eq('leader_responder_id', responderId);
+          
+          // 2. Mark as CheckedOut and record timestamp
           await supabase.from('responders')
             .update({ status: 'CheckedOut', checkout_datetime: new Date().toISOString() })
             .eq('responder_id', responderId);
+            
+          // 3. Detach from current teams
+          await supabase.from('team_responders').delete().eq('responder_id', responderId);
         } catch (dbErr) {
           console.warn('Operational check-out database update failed:', dbErr);
         }
@@ -196,25 +238,25 @@ const AdminPage = () => {
       }
     }
 
-    // Unconditionally clear global operational context and local UI state
+    // Restore system user identity and clear session context
     try {
-      // Restore system user identity to the banner by re-syncing from profile
       const userEmail = localStorage.getItem('sarops_user_email');
       const myProfile = users.find(u => u.email?.toLowerCase() === (userEmail || '').toLowerCase());
+      
       if (myProfile) {
+        // Restore system identity to the top banner
         if (setResponderName) setResponderName(myProfile.name || myProfile.username);
         if (setAccessLevel) setAccessLevel(myProfile.access_level);
       }
 
-      // Nullify incident context to trigger UI transition to activation dropdown
+      // Clear local operational state
       if (clearIncident) clearIncident();
       if (setResponderId) setResponderId(null);
       if (setResponderStatus) setResponderStatus('CheckedOut');
 
-      // Reset local activation selection for the dropdown
       setSelectedActivationId('');
 
-      // Refresh Supabase session to clear operational JWT claims (incident_id)
+      // Refresh Supabase session to clear operational JWT claims
       await supabase.auth.refreshSession();
       
       addToast("Successfully left incident. You can now select a new context.", 'success');
@@ -1020,21 +1062,21 @@ const AdminPage = () => {
   if (!isAdmin) return null;
 
   return (
-    <div className="incident-edit-page">
+    <div className={`incident-edit-page density-${myProfile?.display_density || 'comfortable'}`}>
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
           <h1>System Administration</h1>
           <p className="subtitle">Manage users with administrative access to SAROps.</p>
         </div>
-        <button onClick={handleLogout} className="btn btn-secondary">
+        <button onClick={handleLogout} className="action-btn action-btn-secondary">
           Sign Out Admin
         </button>
       </div>
 
       <div className="section-card" style={{ marginBottom: '24px' }}>
         <h2>Incident Activation</h2>
-        {isActive ? (
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f0f9ff', padding: '16px', borderRadius: '8px', border: '1px solid #bae6fd' }}>
+        {isActive && responderStatus !== 'CheckedOut' ? (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f0f9ff', padding: 'var(--space-md)', borderRadius: '8px', border: '1px solid #bae6fd' }}>
             <div>
               <p style={{ margin: 0, fontWeight: 700, color: '#0369a1' }}>Current Active Session: {incidentData?.name || 'In Progress'}</p>
               <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#0c4a6e' }}>
@@ -1042,7 +1084,15 @@ const AdminPage = () => {
               </p>
             </div>
             <div style={{ display: 'flex', gap: '12px' }}>
-              <button className="btn btn-secondary btn-sm" style={{ borderColor: '#fecaca' }} onClick={handleLeaveIncident}>Check out from Incident</button>
+              <button 
+                className="action-btn action-btn-secondary" 
+                style={{ borderColor: '#fecaca' }} 
+                onClick={handleLeaveIncident}
+                disabled={responderStatus !== 'Staged'}
+                title={responderStatus !== 'Staged' ? "You must return to 'Staged' status before checking out. Use the Operations dashboard to release yourself from your current team." : "End your operational session for this incident"}
+              >
+                Check out from Incident
+              </button>
             </div>
           </div>
         ) : (
@@ -1057,10 +1107,12 @@ const AdminPage = () => {
                 </p>
               )}
             </div>
-            <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
-              <label style={{ flex: 1, minWidth: '250px', marginBottom: 0 }}>
-                Select Incident
+            <div className="action-btn-group" style={{ flexWrap: 'wrap', alignItems: 'flex-end' }}>
+              <div className="form-field" style={{ flex: 1, minWidth: '250px' }}>
+                <label className="form-label" htmlFor="activate-incident-select">Select Incident</label>
                 <select 
+                  id="activate-incident-select"
+                  className="form-select"
                   value={selectedActivationId} 
                   onChange={(e) => setSelectedActivationId(e.target.value)}
                 >
@@ -1071,9 +1123,9 @@ const AdminPage = () => {
                     </option>
                   ))}
                 </select>
-              </label>
+              </div>
               <button 
-                className="btn btn-primary" 
+                className="action-btn action-btn-primary" 
                 onClick={handleActivateSession} 
                 disabled={loading || fetching || !selectedActivationId}
               >
@@ -1087,35 +1139,41 @@ const AdminPage = () => {
       <div className="section-card" style={{ marginBottom: '24px' }}>
         <h2>System Settings</h2>
         <p className="subtitle" style={{ fontSize: '13px', margin: '0 0 16px' }}>Configure global refresh and polling intervals (in seconds).</p>
-        <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
-          <label style={{ flex: 1, minWidth: '150px', marginBottom: 0 }}>
-            Operations Refresh
+        <div className="form-grid" style={{ gap: 'var(--space-md)', alignItems: 'flex-end' }}>
+          <div className="form-field" style={{ minWidth: '150px' }}>
+            <label className="form-label" htmlFor="ops-refresh-input">Operations Refresh</label>
             <input 
+              id="ops-refresh-input"
               type="number" 
+              className="form-input"
               value={opRefresh} 
               onChange={(e) => setOpRefresh(parseInt(e.target.value, 10) || 0)}
               min="5"
             />
-          </label>
-          <label style={{ flex: 1, minWidth: '150px', marginBottom: 0 }}>
-            Responder Refresh
+          </div>
+          <div className="form-field" style={{ minWidth: '150px' }}>
+            <label className="form-label" htmlFor="res-refresh-input">Responder Refresh</label>
             <input 
+              id="res-refresh-input"
               type="number" 
+              className="form-input"
               value={resRefresh} 
               onChange={(e) => setResRefresh(parseInt(e.target.value, 10) || 0)}
               min="5"
             />
-          </label>
-          <label style={{ flex: 1, minWidth: '150px', marginBottom: 0 }}>
-            SARTopo Refresh
+          </div>
+          <div className="form-field" style={{ minWidth: '150px' }}>
+            <label className="form-label" htmlFor="topo-refresh-input">SARTopo Refresh</label>
             <input 
+              id="topo-refresh-input"
               type="number" 
+              className="form-input"
               value={sartopoRefresh} 
               onChange={(e) => setSartopoRefresh(parseInt(e.target.value, 10) || 0)}
               min="5"
             />
-          </label>
-          <button className="btn btn-primary" onClick={handleApplySettings} disabled={!isSettingsDirty}>
+          </div>
+          <button className="action-btn action-btn-primary" onClick={handleApplySettings} disabled={!isSettingsDirty}>
             Apply
           </button>
         </div>
@@ -1127,10 +1185,17 @@ const AdminPage = () => {
         <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end' }}>
           <button 
             onClick={handleSeedData} 
-            className="btn btn-secondary" 
+            className="action-btn action-btn-secondary" 
             disabled={loading} 
           >
             {loading ? 'Seeding...' : 'Seed Data'}
+          </button>
+          <button 
+            onClick={handleClearData} 
+            className="action-btn action-btn-danger" 
+            disabled={loading} 
+          >
+            {loading ? 'Clearing...' : 'Clear Data'}
           </button>
         </div>
       </div>

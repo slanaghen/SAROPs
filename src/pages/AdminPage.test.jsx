@@ -244,17 +244,18 @@ describe('AdminPage Authentication Gate', () => {
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
     // System Users is expanded by default now
 
-    const editButton = await screen.findByRole('button', { name: /Edit/i, exact: true });
+    const userRow = (await screen.findByText(mockUserToEdit.email)).closest('tr');
+    const editButton = within(userRow).getByRole('button', { name: /Edit/i });
     fireEvent.click(editButton);
 
     expect(screen.getByRole('heading', { name: /Edit User:/i })).toBeInTheDocument(); 
-    expect(screen.getByLabelText('Email Address')).toHaveValue(mockUserToEdit.email);
-    expect(screen.getByLabelText('Full Name')).toHaveValue(mockUserToEdit.name);
-    expect(screen.getByLabelText('Agency')).toHaveValue(mockUserToEdit.agency);
-    expect(screen.getByLabelText('Identifier')).toHaveValue(mockUserToEdit.identifier);
-    expect(screen.getByLabelText('Phone Number')).toHaveValue(mockUserToEdit.cell_phone);
-    expect(screen.getByLabelText('Access Level')).toHaveValue(mockUserToEdit.access_level);
-    expect(screen.getByLabelText('Responder Type')).toHaveValue(mockUserToEdit.responder_type);
+    expect(screen.getByLabelText(/Email Address/i)).toHaveValue(mockUserToEdit.email);
+    expect(screen.getByLabelText(/Full Name/i)).toHaveValue(mockUserToEdit.name);
+    expect(screen.getByLabelText(/Agency/i)).toHaveValue(mockUserToEdit.agency);
+    expect(screen.getByLabelText(/Identifier/i)).toHaveValue(mockUserToEdit.identifier);
+    expect(screen.getByLabelText(/Phone Number/i)).toHaveValue(mockUserToEdit.cell_phone);
+    expect(screen.getByLabelText(/Access Level/i)).toHaveValue(mockUserToEdit.access_level);
+    expect(screen.getByLabelText(/Responder Type/i)).toHaveValue(mockUserToEdit.responder_type);
   });
 
   it('should disband a team and release responders (via DB trigger)', async () => { // Updated description
@@ -825,7 +826,7 @@ describe('AdminPage Authentication Gate', () => {
 
     render(<BrowserRouter><AdminPage /></BrowserRouter>); // Render AdminPage
     
-    const leaveBtn = await screen.findByRole('button', { name: /Leave Incident/i });
+    const leaveBtn = await screen.findByRole('button', { name: /Check out from Incident/i });
     fireEvent.click(leaveBtn);
 
     await waitFor(() => {
@@ -884,7 +885,7 @@ describe('AdminPage Authentication Gate', () => {
 
     render(<BrowserRouter><AdminPage /></BrowserRouter>);
 
-    const leaveBtn = await screen.findByRole('button', { name: /Leave Incident/i });
+    const leaveBtn = await screen.findByRole('button', { name: /Check out from Incident/i });
     fireEvent.click(leaveBtn);
 
     await waitFor(() => {

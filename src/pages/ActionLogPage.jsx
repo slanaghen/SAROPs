@@ -3,6 +3,8 @@ import { supabase } from '../lib/supabase';
 import { useIncident } from '../context/IncidentContext';
 import { useToast } from '../context/ToastContext';
 import '../styles.css';
+import '../styles/ActionButtons.css';
+import '../styles/StatusChips.css';
 
 /**
  * ActionLogPage
@@ -15,6 +17,17 @@ const ActionLogPage = () => {
   const [loading, setLoading] = useState(false);
   const [manualAction, setManualAction] = useState('');
   const { addToast } = useToast();
+  const [displayDensity, setDisplayDensity] = useState('comfortable');
+
+  useEffect(() => {
+    const fetchDensity = async () => {
+      const userEmail = user?.email || localStorage.getItem('sarops_user_email');
+      if (!userEmail) return;
+      const { data } = await supabase.from('users').select('display_density').eq('email', userEmail).maybeSingle();
+      if (data?.display_density) setDisplayDensity(data.display_density);
+    };
+    fetchDensity();
+  }, [user]);
 
   const fetchLogs = async () => {
     if (!incidentId) return;
@@ -70,22 +83,22 @@ const ActionLogPage = () => {
   }
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell density-${displayDensity}`}>
       <h1>Incident Action Log</h1>
       
-      <div className="section-card" style={{ marginBottom: '20px' }}>
+      <div className="section-card" style={{ marginBottom: 'var(--space-md)' }}>
         <form onSubmit={handleAddManualLog} data-lpignore="true" style={{ display: 'flex', gap: '10px' }}>
           <input 
             type="text" 
-            className="form-control"
+            className="form-input"
             value={manualAction} 
             onChange={(e) => setManualAction(e.target.value)} 
             autoComplete="off"
             data-lpignore="true"
             placeholder="Manually record an action (e.g., 'CP moved to base of mountain')..."
-            style={{ flex: 1, padding: '8px 12px', borderRadius: '4px', border: '1px solid #ddd' }}
+            style={{ flex: 1 }}
           />
-          <button type="submit" className="btn btn-primary btn-sm">Add to Log</button>
+          <button type="submit" className="action-btn action-btn-primary action-btn-header">Add to Log</button>
         </form>
       </div>
 
@@ -106,11 +119,11 @@ const ActionLogPage = () => {
             ) : (
               logs.map(log => (
                 <tr key={log.id}>
-                  <td style={{ whiteSpace: 'nowrap', fontSize: '11px', color: '#64748b' }}>
+                  <td style={{ whiteSpace: 'nowrap', fontSize: 'var(--text-xs)', color: '#64748b' }}>
                     {new Date(log.created_at).toLocaleString()}
                   </td>
                   <td>{log.action}</td>
-                  <td><span className="status-indicator attached">{log.user_name}</span></td>
+                  <td><span className="status-chip status-chip-attached">{log.user_name}</span></td>
                 </tr>
               ))
             )}

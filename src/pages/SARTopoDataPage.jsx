@@ -15,9 +15,10 @@ import {
   mergeMapUpdates 
 } from '../utils/indexedDBCache';
 import { useToast } from '../context/ToastContext';
+import '../styles/ActionButtons.css';
 
 const SARTopoDataPage = () => {
-  const { incidentId, isActive, incidentData, responderName } = useIncident();
+  const { incidentId, isActive, incidentData, responderName, user } = useIncident();
   const [sartopoId, setSartopoId] = useState('CVJP9L4');
   const [features, setFeatures] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -37,6 +38,18 @@ const SARTopoDataPage = () => {
   const [showDownloadGeometry, setShowDownloadGeometry] = useState(false);
   const { addToast } = useToast();
   const [isAutoRefreshEnabled, setIsAutoRefreshEnabled] = useState(false);
+
+  const [displayDensity, setDisplayDensity] = useState('comfortable');
+
+  useEffect(() => {
+    const fetchDensity = async () => {
+      const userEmail = user?.email || localStorage.getItem('sarops_user_email');
+      if (!userEmail) return;
+      const { data } = await supabase.from('users').select('display_density').eq('email', userEmail).maybeSingle();
+      if (data?.display_density) setDisplayDensity(data.display_density);
+    };
+    fetchDensity();
+  }, [user]);
 
   const sartopoConfig = useMemo(() => getSartopoConfig(sartopoId), [sartopoId]);
 
@@ -575,13 +588,13 @@ const SARTopoDataPage = () => {
   }
 
   return (
-    <div className="app-shell" style={{ padding: '24px' }}>
+    <div className={`app-shell density-${displayDensity}`} style={{ padding: 'var(--space-lg)' }}>
       <div className="page-header">
         <h1>SARTopo Data</h1>
         <p className="subtitle">Retrieve live map feature data from SARTopo integration.</p>
       </div>
 
-      <div className="section-card" style={{ marginBottom: '24px' }}>
+      <div className="section-card" style={{ marginBottom: 'var(--space-lg)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <p style={{ margin: 0, fontWeight: 600 }}>Map Connection</p>
@@ -601,14 +614,7 @@ const SARTopoDataPage = () => {
           </div>
           <div style={{ display: 'flex', gap: '12px' }}>
             <button 
-              className={`btn ${isAutoRefreshEnabled ? 'btn-secondary' : 'btn-primary'}`}
-              onClick={toggleAutoRefresh}
-              disabled={!sartopoId}
-            >
-              {isAutoRefreshEnabled ? 'Pause' : 'Sync'}
-            </button>
-            <button 
-              className="btn btn-secondary" 
+              className="action-btn action-btn-secondary" 
               onClick={async () => {
                 setLastFetchTime(0);
                 setLastUploadTime(0);
@@ -629,14 +635,21 @@ const SARTopoDataPage = () => {
               Reset
             </button>
             <button 
-              className="btn btn-primary" 
+              className={`action-btn ${isAutoRefreshEnabled ? 'action-btn-secondary' : 'action-btn-primary'}`}
+              onClick={toggleAutoRefresh}
+              disabled={!sartopoId}
+            >
+              {isAutoRefreshEnabled ? 'Pause' : 'Sync'}
+            </button>
+            <button 
+              className="action-btn action-btn-primary" 
               onClick={handleFetchFeatures}
               disabled={loading || !sartopoId}
             >
               {loading ? 'Downloading...' : 'Download from SARTopo'}
             </button>
             <button 
-              className="btn btn-primary"
+              className="action-btn action-btn-primary"
               onClick={handleUploadToSARTopo}
               disabled={isUploading || !incidentData?.opPeriodId || !sartopoId}
             >
@@ -664,13 +677,13 @@ const SARTopoDataPage = () => {
 
       </div>
 
-      <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-start', marginBottom: '24px' }}>
-        <div className="section-card" style={{ flex: 1, margin: 0 }}>
+      <div style={{ display: 'flex', gap: 'var(--space-lg)', alignItems: 'flex-start', marginBottom: 'var(--space-lg)' }}>
+        <div className="section-card" style={{ flex: '1 1 0', minWidth: 0, margin: 0 }}>
           <div 
             onClick={() => setIsMapUploadExpanded(prev => !prev)}
             style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', marginBottom: '16px' }}
           >
-            <h2 style={{ margin: 0 }}>Map Upload to SARTopo ({uploadGeoJSON?.features?.length || 0})</h2>
+            <h2 style={{ margin: 0, fontSize: '18px' }}>GeoJSON Upload to SARTopo ({uploadGeoJSON?.features?.length || 0})</h2>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               {lastUploadTime > 0 && (
                 <span style={{ fontSize: '11px', color: '#64748b', fontStyle: 'italic' }}>
@@ -678,31 +691,27 @@ const SARTopoDataPage = () => {
                 </span>
               )}
               <button 
-                className="btn btn-secondary btn-sm" 
+                className="action-btn action-btn-secondary action-btn-header" 
                 onClick={(e) => { e.stopPropagation(); setLastUploadTime(0); setUploadGeoJSON(null); }}
                 disabled={!incidentData?.opPeriodId}
-                style={{ padding: '2px 8px', fontSize: '11px', minHeight: 'auto', width: 'auto' }}
                 title="Reset upload timestamp to include all assignments"
               >
                 Reset
               </button>
               <button 
-                className="btn btn-secondary btn-sm" 
+                className="action-btn action-btn-secondary action-btn-header" 
                 onClick={(e) => { e.stopPropagation(); setShowUploadGeometry(!showUploadGeometry); }}
-                style={{ padding: '2px 8px', fontSize: '11px', minHeight: 'auto', width: 'auto' }}
                 title={showUploadGeometry ? "Hide coordinates data" : "Show coordinates data"}
               >
                 {showUploadGeometry ? 'Hide Geometry' : 'Show Geometry'}
               </button>
               <button 
-                className="btn btn-primary btn-sm" 
+                className="action-btn action-btn-primary action-btn-header" 
                 onClick={(e) => { e.stopPropagation(); generateUploadGeoJSON(); }}
                 disabled={isGeneratingUpload || !incidentData?.opPeriodId}
-                style={{ padding: '2px 8px', fontSize: '11px', minHeight: 'auto', width: 'auto' }}
               >
                 {isGeneratingUpload ? 'Generating...' : 'Generate JSON'}
               </button>
-              <span style={{ fontSize: '12px', color: '#64748b' }}>GeoJSON Upload Source</span>
               <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 700 }}>
                 {isMapUploadExpanded ? 'COLLAPSE ▲' : 'EXPAND ▼'}
               </span>
@@ -714,7 +723,7 @@ const SARTopoDataPage = () => {
                 maxHeight: '600px', 
                 overflow: 'auto', 
                 fontSize: '12px', 
-                padding: '16px', 
+                padding: 'var(--space-md)', 
                 background: '#f8fafc',
                 border: '1px solid #e2e8f0',
                 borderRadius: '8px',
@@ -730,30 +739,27 @@ const SARTopoDataPage = () => {
         </div>
 
       
-        <div className="section-card" style={{ flex: 1, margin: 0 }}>
+        <div className="section-card" style={{ flex: '1 1 0', minWidth: 0, margin: 0 }}>
           <div 
             onClick={() => setIsMapDownloadExpanded(prev => !prev)}
             style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', marginBottom: '16px' }}
           >
-            <h2 style={{ margin: 0 }}>Map Download from SARTopo ({filteredDownloadFeatures.length || 0})</h2>
+            <h2 style={{ margin: 0, fontSize: '18px' }}>GeoJSON Download from SARTopo ({filteredDownloadFeatures.length || 0})</h2>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <button 
-                className="btn btn-secondary btn-sm" 
+                className="action-btn action-btn-secondary action-btn-header" 
                 onClick={(e) => { e.stopPropagation(); setShowAllDownloadObjects(!showAllDownloadObjects); }}
-                style={{ padding: '2px 8px', fontSize: '11px', minHeight: 'auto', width: 'auto' }}
                 title={showAllDownloadObjects ? "Show only Assignments" : "Show All Objects"}
               >
                 {showAllDownloadObjects ? 'Show Assignments Only' : 'Show All Objects'}
               </button>
               <button 
-                className="btn btn-secondary btn-sm" 
+                className="action-btn action-btn-secondary action-btn-header" 
                 onClick={(e) => { e.stopPropagation(); setShowDownloadGeometry(!showDownloadGeometry); }}
-                style={{ padding: '2px 8px', fontSize: '11px', minHeight: 'auto', width: 'auto' }}
                 title={showDownloadGeometry ? "Hide coordinates data" : "Show coordinates data"}
               >
                 {showDownloadGeometry ? 'Hide Geometry' : 'Show Geometry'}
               </button>
-              <span style={{ fontSize: '12px', color: '#64748b' }}>GeoJSON Download Source</span>
               <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 700 }}>
                 {isMapDownloadExpanded ? 'COLLAPSE ▲' : 'EXPAND ▼'}
               </span>
@@ -765,7 +771,7 @@ const SARTopoDataPage = () => {
                 maxHeight: '600px', 
                 overflow: 'auto', 
                 fontSize: '12px', 
-                padding: '16px', 
+                padding: 'var(--space-md)', 
                 background: '#f8fafc',
                 border: '1px solid #e2e8f0',
                 borderRadius: '8px',

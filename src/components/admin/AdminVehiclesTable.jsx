@@ -42,7 +42,7 @@ const AdminVehiclesTable = ({
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <h2 style={{ margin: 0 }}>Vehicle Management ({allVehicles?.length || 0})</h2>
-          <button className="btn btn-primary btn-sm" onClick={(e) => { e.stopPropagation(); handleNewVehicle(); }} style={{ padding: '4px 12px', fontSize: '16px' }}>+ New</button>
+          <button className="action-btn action-btn-primary action-btn-header" onClick={(e) => { e.stopPropagation(); handleNewVehicle(); }}>+ New</button>
         </div>
         <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 700 }}>
           {isVehiclesExpanded ? 'COLLAPSE ▲' : 'EXPAND ▼'}
@@ -87,15 +87,15 @@ const AdminVehiclesTable = ({
                       {allTeams.find(t => t.team_id === v.team_id)?.team_name_number || '—'}
                     </td>
                     <td>
-                      <span className={`status-indicator ${v.status?.toLowerCase()}`}>{v.status}</span>
+                      <span className={`status-chip status-chip-${v.status?.toLowerCase()}`}>{v.status}</span>
                     </td>
                     <td style={{ textAlign: 'right' }}>
                       <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
                         {v.status !== 'CheckedOut' && (
-                          <button className="btn btn-secondary btn-sm" onClick={() => handleCheckOutVehicle(v.vehicle_id)}>Check Out</button>
+                          <button className="action-btn action-btn-warning" onClick={() => handleCheckOutVehicle(v.vehicle_id)}>Check Out</button>
                         )}
-                        <button className="btn btn-secondary btn-sm" onClick={() => handleEditVehicle(v)}>Edit</button>
-                        <button className="btn btn-secondary btn-sm" style={{ color: '#dc2626' }} onClick={() => handleDeleteVehicle(v.vehicle_id, v.designation)}>Remove</button>
+                        <button className="action-btn action-btn-secondary" onClick={() => handleEditVehicle(v)}>Edit</button>
+                        <button className="action-btn action-btn-danger" onClick={() => handleDeleteVehicle(v.vehicle_id, v.designation)}>Remove</button>
                       </div>
                     </td>
                   </tr>

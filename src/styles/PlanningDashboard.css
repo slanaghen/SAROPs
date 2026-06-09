@@ -1,7 +1,7 @@
 /* PlanningDashboard.css */
 
 .planning-dashboard {
-  padding: 24px;
+  padding: var(--space-lg);
   max-width: 1600px;
   margin: 0 auto;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
@@ -104,7 +104,7 @@
   background: #fff;
   border: 1px solid #e0e0e0;
   border-radius: 8px;
-  padding: 20px;
+  padding: var(--space-md);
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
 }
 
@@ -133,7 +133,7 @@
 .team-card,
 .assignment-card,
 .responder-card {
-  padding: 16px;
+  padding: var(--space-md);
   border: 2px solid #e0e0e0;
   border-radius: 6px;
   cursor: pointer;
@@ -220,20 +220,19 @@
 
 .team-name {
   font-weight: 600;
-  font-size: 16px;
+  font-size: var(--text-base);
   color: #1a1a1a;
   flex: 1;
 }
 
 .team-type {
-  font-size: 12px;
-  font-weight: 600;
-  padding: 4px 8px;
   background: #f0f0f0;
   border-radius: 4px;
   text-transform: uppercase;
   color: #666;
   white-space: nowrap;
+  box-sizing: border-box;
+  line-height: 1;
 }
 
 .team-type.ground-search {
@@ -282,7 +281,7 @@
 .detail-row {
   display: flex;
   justify-content: space-between;
-  font-size: 13px;
+  font-size: var(--text-sm);
   line-height: 1.4;
 }
 
@@ -316,17 +315,13 @@
 
 .assignment-name {
   font-weight: 600;
-  font-size: 16px;
+  font-size: var(--text-base);
   color: #1a1a1a;
   flex: 1;
   word-break: break-word;
 }
 
 .assignment-status {
-  font-size: 12px;
-  font-weight: 600;
-  padding: 4px 8px;
-  border-radius: 4px;
   text-transform: uppercase;
   white-space: nowrap;
   flex-shrink: 0;

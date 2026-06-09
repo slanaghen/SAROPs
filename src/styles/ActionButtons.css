@@ -1,0 +1,112 @@
+/* Common button classes for table rows, tiles, and dashboard actions */
+
+.action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-weight: 600;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.1s ease-in-out;
+  white-space: nowrap;
+  gap: 8px;
+  line-height: 1;
+  box-sizing: border-box;
+  text-decoration: none;
+  margin: 0;
+  outline: none;
+}
+
+.action-btn-group {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.action-btn:active {
+  transform: translateY(1px) scale(0.98);
+}
+
+.action-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: grayscale(0.5);
+  pointer-events: none;
+}
+
+.action-btn-full {
+  width: 100%;
+  justify-content: center;
+}
+
+/* Primary: Default blue action */
+.action-btn-primary {
+  background-color: #2563eb;
+  color: #ffffff;
+  border-color: #2563eb;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+.action-btn-primary:hover {
+  background-color: #1d4ed8;
+  border-color: #1e40af;
+}
+
+/* Secondary: Subtle gray action */
+.action-btn-secondary {
+  background-color: #ffffff;
+  border-color: #e2e8f0;
+  color: #475569;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+.action-btn-secondary:hover {
+  background-color: #f8fafc;
+  border-color: #cbd5e1;
+  color: #1e293b;
+}
+
+/* Warning: Amber action (Checkout, Disband) */
+.action-btn-warning {
+  background-color: #fffbeb;
+  border-color: #fde68a;
+  color: #b45309;
+}
+.action-btn-warning:hover {
+  background-color: #fef3c7;
+  border-color: #fcd34d;
+}
+
+/* Danger: Red action (Delete, Cancel) */
+.action-btn-danger {
+  background-color: #fef2f2;
+  border-color: #fee2e2;
+  color: #dc2626;
+}
+.action-btn-danger:hover {
+  background-color: #fee2e2;
+  border-color: #fecaca;
+}
+
+/* Density: Comfortable (Default) */
+.density-comfortable .action-btn {
+  height: 36px;
+  padding: 0 16px;
+  font-size: 13.5px;
+}
+
+/* Density: Compact */
+.density-compact .action-btn {
+  height: 26px;
+  padding: 0 10px;
+  font-size: 11.5px;
+  border-radius: 4px;
+  gap: 4px;
+}
+
+/* Small override for Header "+" buttons and row actions */
+.action-btn-header {
+  height: 24px !important;
+  padding: 0 8px !important;
+  font-size: 12px !important;
+}

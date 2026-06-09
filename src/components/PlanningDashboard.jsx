@@ -672,6 +672,25 @@ const PlanningDashboard = ({
     }
   };
 
+  const handleCheckOutVehicle = async (vehicle) => {
+    if (!window.confirm(`Are you sure you want to check out vehicle ${vehicle.designation}?`)) return;
+    
+    try {
+      setLoading(true);
+      if (updateVehicle) {
+        await updateVehicle(vehicle.vehicle_id, { 
+          status: 'CheckedOut', 
+          checkout_datetime: new Date().toISOString() 
+        });
+        addToast('Vehicle checked out.', 'success');
+      }
+    } catch (err) {
+      addToast(err.message || 'Failed to check out vehicle', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleCheckOutResponder = async (responder) => {
     if (!window.confirm(`Are you sure you want to check out ${responder.name}?`)) return;
     
@@ -873,6 +892,17 @@ const PlanningDashboard = ({
                   </div>
                   <div className="responder-agency-meta">
                     {vehicle.type}
+                  </div>
+
+                  <div className="team-actions" style={{ marginTop: '8px', display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                    <button 
+                      className="btn btn-secondary btn-sm" 
+                      onClick={(e) => { e.stopPropagation(); handleCheckOutVehicle(vehicle); }}
+                      disabled={vehicle.status?.toLowerCase() !== 'staged'}
+                      style={{ color: '#dc2626' }}
+                    >
+                      Check Out
+                    </button>
                   </div>
                 </div>
               ))}

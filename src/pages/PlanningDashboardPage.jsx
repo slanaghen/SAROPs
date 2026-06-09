@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import PlanningDashboard from '../components/PlanningDashboard';
 import { usePlanningDashboard } from '../hooks/usePlanningDashboard';
 import { useIncident } from '../context/IncidentContext';
 import { v4 as uuidv4 } from 'uuid';
+import '../styles/StatusChips.css';
 
 /**
  * PlanningDashboardPage
@@ -17,8 +18,20 @@ import { v4 as uuidv4 } from 'uuid';
  */
 
 const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
-  const { incidentData, incidentId, responderName } = useIncident();
+  const { incidentData, incidentId, responderName, user } = useIncident();
   const operationalPeriodId = propOpId || incidentData?.opPeriodId;
+
+  const [displayDensity, setDisplayDensity] = useState('comfortable');
+
+  useEffect(() => {
+    const fetchDensity = async () => {
+      const userEmail = user?.email || localStorage.getItem('sarops_user_email');
+      if (!userEmail) return;
+      const { data } = await supabase.from('users').select('display_density').eq('email', userEmail).maybeSingle();
+      if (data?.display_density) setDisplayDensity(data.display_density);
+    };
+    fetchDensity();
+  }, [user]);
 
   // Use the custom hook to manage dashboard state and operations
   const {
@@ -241,7 +254,7 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
   }
 
   return (
-    <div>
+    <div className={`density-${displayDensity}`}>
       {hookError && (
         <div className="alert alert-error" style={{ margin: '16px' }}>
           <p><strong>Error:</strong> {hookError}</p>
@@ -291,11 +304,11 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
           />
 
           <div className="operations-stats-footer" style={{ 
-            marginTop: '24px',
+            marginTop: 'var(--space-lg)',
             display: 'flex',
-            gap: '32px',
+            gap: 'var(--space-lg)',
             flexWrap: 'wrap',
-            padding: '8px 20px',
+            padding: 'var(--space-sm) var(--space-md)',
             background: '#ffffff',
             borderRadius: '12px',
             border: '1px solid #e2e8f0',

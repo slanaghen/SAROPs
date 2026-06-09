@@ -15,41 +15,49 @@ function App() {
   const navigate = useNavigate();
   const location = useLocation();
 
+  // Reactive Profile & Display Density Synchronization
   useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(async (response) => {
-      const session = response?.data?.session;
-      setUser(session?.user ?? null);
+    let channel = null;
+    
+    const syncProfile = async (email) => {
+      const normalizedEmail = email.toLowerCase().trim();
+      if (!normalizedEmail) return;
       
-      if (session?.user?.email) {
-        const { data } = await supabase.from('users')
-          .select('display_density')
-          .eq('email', session.user.email)
-          .maybeSingle();
-        
-        if (data) {
-          setDisplayDensity(data.display_density || 'comfortable');
-        }
-
-        // Subscribe to profile changes for real-time reactive UI updates
-        const channel = supabase
-          .channel(`user-profile-sync-${session.user.email}`)
-          .on('postgres_changes', { 
-            event: 'UPDATE', 
-            schema: 'public', 
-            table: 'users', 
-            filter: `email=eq.${session.user.email}` 
-          }, payload => {
-            if (payload.new.display_density !== undefined) setDisplayDensity(payload.new.display_density);
-          })
-          .subscribe();
-
-        return () => {
-          supabase.removeChannel(channel);
-        };
+      // Fetch initial user settings
+      const { data } = await supabase.from('users')
+        .select('display_density')
+        .eq('email', normalizedEmail)
+        .maybeSingle();
+      
+      if (data?.display_density) {
+        setDisplayDensity(data.display_density);
       }
-    });
 
+      // Listen for density updates (e.g. from the Settings page)
+      if (channel) supabase.removeChannel(channel);
+      channel = supabase
+        .channel(`user-profile-sync-${normalizedEmail}`)
+        .on('postgres_changes', { 
+          event: 'UPDATE', 
+          schema: 'public', 
+          table: 'users', 
+          filter: `email=eq.${normalizedEmail}` 
+        }, payload => {
+          if (payload.new.display_density) setDisplayDensity(payload.new.display_density);
+        })
+        .subscribe();
+    };
+
+    if (user?.email) {
+      syncProfile(user.email);
+    } else {
+      setDisplayDensity('comfortable'); // Reset to default on logout
+    }
+
+    return () => { if (channel) supabase.removeChannel(channel); };
+  }, [user?.email]);
+
+  useEffect(() => {
     // Listen for auth changes (login/logout)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
@@ -160,7 +168,12 @@ function App() {
 
       // Requirement: If check-out occurs (even remotely), synchronize the session state
       if (responderRecord.status === 'CheckedOut') {
-        handleSignOut();
+        if (accessLevel === 'responder') {
+          handleSignOut();
+        } else {
+          // Staff/Admin keep their system session but lose operational context
+          if (isActive && logout) logout();
+        }
       }
     }
 
@@ -204,7 +217,7 @@ function App() {
   }, [isActive, isAdmin, accessLevel, location.pathname, navigate]);
 
   return (
-    <div className={`app-shell ${displayDensity === 'compact' ? 'compact-mode' : ''}`}>
+    <div className={`app-shell density-${displayDensity} ${displayDensity === 'compact' ? 'compact-mode' : ''}`}>
       <div className="incident-banner">
         <div className="banner-left">
           <div className="banner-logo-container">
@@ -224,7 +237,7 @@ function App() {
             {responderName ? (
               <>
                 {responderName}
-                {isActive && (
+                {accessLevel && (
                   <span style={{ fontSize: '0.9em', opacity: 0.8, marginLeft: '4px' }}>
                     ({accessLevel === 'admin' ? 'Admin' : (accessLevel === 'staff' ? 'Staff' : 'Responder')})
                   </span>
@@ -232,11 +245,11 @@ function App() {
               </>
             ) : (user?.email || 'Guest')}
           </div>
-          {isActive && (responderStatus || currentTeamStatus) && (
+          {(isActive || responderStatus === 'CheckedOut') && (responderStatus || currentTeamStatus) && (
             <span className={`status-indicator ${(
-              (currentTeamStatus && currentTeamStatus !== 'Disbanded') ? currentTeamStatus : (responderStatus || 'Staged')
+              (responderStatus && responderStatus !== 'Staged') ? responderStatus : (currentTeamStatus || responderStatus || 'Staged')
             ).toLowerCase()}`}>
-              {(currentTeamStatus && currentTeamStatus !== 'Disbanded') ? currentTeamStatus : (responderStatus || 'Staged')}
+              {(responderStatus && responderStatus !== 'Staged') ? responderStatus : (currentTeamStatus || responderStatus || 'Staged')}
             </span>
           )}
           {isActive && notificationPermission === 'denied' && (

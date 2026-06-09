@@ -19,9 +19,9 @@ const AdminRespondersTable = ({
       items.sort((a, b) => {
         let aVal, bVal;
         
-        if (sortConfig.key === 'incident_number') {
-          aVal = (allIncidents.find(i => i.incident_id === a.incident_id)?.number || '').toLowerCase();
-          bVal = (allIncidents.find(i => i.incident_id === b.incident_id)?.number || '').toLowerCase();
+        if (sortConfig.key === 'incident_name') {
+          aVal = (allIncidents.find(i => i.incident_id === a.incident_id)?.name || '').toLowerCase();
+          bVal = (allIncidents.find(i => i.incident_id === b.incident_id)?.name || '').toLowerCase();
         } else if (sortConfig.key === 'team_name') {
           aVal = (allTeams.find(t => t.current_responders?.some(r => r.responder_id === a.responder_id))?.team_name_number || '').toLowerCase();
           bVal = (allTeams.find(t => t.current_responders?.some(r => r.responder_id === b.responder_id))?.team_name_number || '').toLowerCase();
@@ -55,9 +55,8 @@ const AdminRespondersTable = ({
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <h2 style={{ margin: 0 }}>Responder Management ({allResponders.length})</h2>
           <button 
-            className="btn btn-primary btn-sm" 
+            className="action-btn action-btn-primary action-btn-header" 
             onClick={(e) => { e.stopPropagation(); handleNewResponder(); }}
-            style={{ padding: '4px 12px', fontSize: '16px' }}
           >
             + New
           </button>
@@ -81,8 +80,8 @@ const AdminRespondersTable = ({
                 <th onClick={() => requestSort('identifier')} style={{ cursor: 'pointer' }}>
                   Identifier {sortConfig.key === 'identifier' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
                 </th>
-                <th onClick={() => requestSort('incident_number')} style={{ cursor: 'pointer' }}>
-                  Incident {sortConfig.key === 'incident_number' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+                <th onClick={() => requestSort('incident_name')} style={{ cursor: 'pointer' }}>
+                  Incident {sortConfig.key === 'incident_name' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
                 </th>
                 <th onClick={() => requestSort('team_name')} style={{ cursor: 'pointer' }}>
                   Team {sortConfig.key === 'team_name' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
@@ -115,7 +114,7 @@ const AdminRespondersTable = ({
                       <td style={{ color: '#000' }}>#{incident?.number || '—'}</td>
                       <td style={{ color: '#000' }}>{team?.team_name_number || '—'}</td>
                       <td style={{ color: '#000' }}>
-                        <span className={`status-indicator ${(res.status || 'unknown').toLowerCase()}`}>
+                        <span className={`status-chip status-chip-${(res.status || 'unknown').toLowerCase()}`}>
                           {res.status}
                         </span>
                       </td>
@@ -124,17 +123,15 @@ const AdminRespondersTable = ({
                           {!isCheckedOut && (
                             <button
                               onClick={() => handleCheckOutResponder(res.responder_id)}
-                              className="btn btn-secondary btn-sm"
-                              style={{ color: '#f59e0b' }}
+                              className="action-btn action-btn-warning"
                             >
                               Check Out
                             </button>
                           )}
-                          <button onClick={() => handleEditResponder(res)} className="btn btn-secondary btn-sm">Edit</button>
+                          <button onClick={() => handleEditResponder(res)} className="action-btn action-btn-secondary">Edit</button>
                           <button
                             onClick={() => handleDeleteResponder(res.responder_id, res.name, res.agency)}
-                            className="btn btn-secondary btn-sm"
-                            style={{ color: '#dc2626' }}
+                            className="action-btn action-btn-danger"
                           >
                             Delete
                           </button>

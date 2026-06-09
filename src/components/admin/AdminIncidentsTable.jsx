@@ -54,9 +54,8 @@ const AdminIncidentsTable = ({
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <h2 style={{ margin: 0 }}>Incident Management ({allIncidents.length})</h2>
           <button 
-            className="btn btn-primary btn-sm" 
+            className="action-btn action-btn-primary action-btn-header" 
             onClick={(e) => { e.stopPropagation(); handleNewIncident(); }}
-            style={{ padding: '4px 12px', fontSize: '16px' }}
           >
             + New
           </button>
@@ -115,31 +114,29 @@ const AdminIncidentsTable = ({
                         {latestOpStart && <div>{latestOpStart}</div>}
                       </td>
                       <td style={{ color: isCurrentlyActiveInSession ? '#0369a1' : '#000' }}>
-                        <span className={`status-indicator ${isActive ? 'active' : 'ended'}`}>
+                        <span className={`status-chip status-chip-${isActive ? 'active' : 'ended'}`}>
                           {isActive ? 'Active' : 'Ended'}
                         </span>
                       </td>
                       <td style={{ textAlign: 'right' }}>
                         <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', alignItems: 'center' }}>
                           {isCurrentlyActiveInSession && (
-                            <span className="status-indicator assigned" style={{ margin: 0, fontWeight: 800, border: '1px solid rgba(255,255,255,0.3)' }}>
+                            <span className="status-chip status-chip-assigned" style={{ margin: 0, fontWeight: 800, border: '1px solid rgba(255,255,255,0.3)' }}>
                               Active Session
                             </span>
                           )}
                           {isActive && (
                             <button
                               onClick={() => handleEndIncident(inc.incident_id)}
-                              className="btn btn-secondary btn-sm"
-                              style={{ color: '#f59e0b' }}
+                              className="action-btn action-btn-warning"
                             >
                               End Incident
                             </button>
                           )}
-                          <button onClick={() => handleEditIncident(inc)} className="btn btn-secondary btn-sm">Edit</button>
+                          <button onClick={() => handleEditIncident(inc)} className="action-btn action-btn-secondary">Edit</button>
                           <button
                             onClick={() => handleDeleteIncident(inc.incident_id, inc.name)}
-                            className="btn btn-secondary btn-sm"
-                            style={{ color: '#dc2626' }}
+                            className="action-btn action-btn-danger"
                           >
                             Delete
                           </button>

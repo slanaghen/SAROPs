@@ -4,6 +4,7 @@ import { useIncident } from '../context/IncidentContext';
 import { TEAM_TYPES, STAFF_PREDEFINED_ROLES } from '../constants/operationalConstants';
 import { normalizeResourceTypeName } from '../utils/dataNormalization';
 import { useToast } from '../context/ToastContext';
+import '../styles/FormElements.css';
 
 /**
  * Shared Modal for creating and editing Teams.
@@ -265,20 +266,21 @@ const TeamFormModal = ({
         </>
       }
     >
-        <div style={{ display: 'flex', gap: '20px', marginBottom: '16px', alignItems: 'flex-start' }}>
-          <div className="form-row" style={{ flex: 0.8, minWidth: 0 }}>
-            <label htmlFor="team_name">Team Name</label>
+        <div className="form-grid" style={{ marginBottom: '16px' }}>
+          <div className="form-field">
+            <label className="form-label" htmlFor="team_name">Team Name</label>
             <input 
               id="team_name"
+              className="form-input"
               value={teamForm.team_name_number || ''} 
               onChange={e => setTeamForm({ ...teamForm, team_name_number: e.target.value })} 
               placeholder="Auto-generated if blank"
               style={{ width: '100%', boxSizing: 'border-box' }}
             />
           </div>
-          <div className="form-row" style={{ flex: 1, minWidth: 0 }}>
-            <label htmlFor="team_type">Type</label>
-            <select id="team_type" value={teamForm.type} onChange={e => {
+          <div className="form-field">
+            <label className="form-label" htmlFor="team_type">Type</label>
+            <select id="team_type" className="form-select" value={teamForm.type} onChange={e => {
               const newType = e.target.value;
               const newRoles = { ...(teamForm.responder_roles || {}) };
               if (teamForm.leader_responder_id) {
@@ -298,10 +300,11 @@ const TeamFormModal = ({
             </select>
           </div>
 
-          <div className="form-row" style={{ flex: 1, minWidth: 0 }}>
-            <label htmlFor="team_status">Status</label>
+          <div className="form-field">
+            <label className="form-label" htmlFor="team_status">Status</label>
             <select 
               id="team_status" 
+              className="form-select"
               value={teamForm.status} 
               onChange={e => setTeamForm({ ...teamForm, status: e.target.value })}
               disabled={!teamForm.team_id}
@@ -314,8 +317,8 @@ const TeamFormModal = ({
           </div>
         </div>
 
-        <div className="form-row responders-selector">
-          <label>Team Members (Drag & Drop Members)</label>
+        <div className="form-field responders-selector" style={{ marginBottom: '16px' }}>
+          <label className="form-label">Team Members (Drag & Drop Members)</label>
           <div className="drag-drop-composition" style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
             {/* Column 1: Personnel Management (Tactical + Pool) */}
             <div style={{ flex: 1.2, display: 'flex', flexDirection: 'column', gap: '16px', alignSelf: 'stretch' }}>

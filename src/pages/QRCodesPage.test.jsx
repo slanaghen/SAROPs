@@ -10,7 +10,11 @@ vi.mock('../context/IncidentContext', () => ({
 
 vi.mock('../lib/supabase', () => ({
   supabase: {
-    from: vi.fn(),
+    from: vi.fn(() => ({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+    })),
     channel: vi.fn(() => ({
       on: vi.fn().mockReturnThis(),
       subscribe: vi.fn().mockReturnThis(),
@@ -25,7 +29,7 @@ describe('QRCodesPage', () => {
   });
 
   it('renders generic check-in QR code when no incident is active', async () => {
-    vi.mocked(useIncident).mockReturnValue({ isActive: false });
+    vi.mocked(useIncident).mockReturnValue({ isActive: false, user: { email: 'test@example.com' } });
     render(<QRCodesPage />);
 
     expect(await screen.findByText('General Incident Access')).toBeInTheDocument();
@@ -37,7 +41,8 @@ describe('QRCodesPage', () => {
     vi.mocked(useIncident).mockReturnValue({ 
       isActive: true, 
       incidentId: 'inc-123',
-      incidentData: { name: 'Test Mission', opNumber: '1' } 
+      incidentData: { name: 'Test Mission', opNumber: '1' },
+      user: { email: 'test@example.com' }
     });
 
     supabase.from.mockReturnValue({
@@ -55,7 +60,7 @@ describe('QRCodesPage', () => {
   });
 
   it('triggers window print when the print button is clicked', async () => {
-    vi.mocked(useIncident).mockReturnValue({ isActive: false });
+    vi.mocked(useIncident).mockReturnValue({ isActive: false, user: { email: 'test@example.com' } });
     window.print = vi.fn();
     
     render(<QRCodesPage />);

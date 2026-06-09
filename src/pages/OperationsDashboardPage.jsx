@@ -12,6 +12,8 @@ import OperationsMap from '../components/OperationsMap';
 import VehicleFormModal from '../components/admin/VehicleFormModal';
 import { useToast } from '../context/ToastContext';
 import { checkIsParOverdue, formatTimeSince } from '../utils/operationalUtils';
+import '../styles/ActionButtons.css';
+import '../styles/StatusChips.css';
 
 const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   const { 
@@ -51,6 +53,17 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   const [broadcastMessage, setBroadcastMessage] = useState('');
   const [currentTime, setCurrentTime] = useState(Date.now());
   const { addToast } = useToast();
+  const [displayDensity, setDisplayDensity] = useState('comfortable');
+
+  useEffect(() => {
+    const fetchDensity = async () => {
+      const userEmail = user?.email || localStorage.getItem('sarops_user_email');
+      if (!userEmail) return;
+      const { data } = await supabase.from('users').select('display_density').eq('email', userEmail).maybeSingle();
+      if (data?.display_density) setDisplayDensity(data.display_density);
+    };
+    fetchDensity();
+  }, [user]);
 
   const contentWrapperRef = useRef(null);
 
@@ -679,18 +692,18 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   }
 
   return (
-    <div className="operations-dashboard">
+    <div className={`operations-dashboard density-${displayDensity}`}>
       <header className="operations-header">
         <div>
           <h1>Operations Dashboard</h1>
           <p>Drag and drop teams onto assignments (or vice versa) to link resources.</p>
         </div>
-        <div className="view-filter-container" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <div className="view-filter-container action-btn-group">
           <label htmlFor="view-mode-select" style={{ fontSize: '13px', fontWeight: 600, color: '#475569' }}>View:</label>
           <select 
             id="view-mode-select"
-            className="status-update-select" 
-            style={{ width: 'auto', minWidth: '140px', height: '32px' }}
+            className="status-update-select form-select" 
+            style={{ width: 'auto', minWidth: '140px' }}
             value={viewMode}
             onChange={(e) => setViewMode(e.target.value)}
           >
@@ -699,15 +712,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
             <option value="Planning">Planning (Staged)</option>
           </select>
           <button 
-            className="btn btn-secondary" 
-            style={{ 
-              height: '32px', 
-              fontSize: '13px', 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: '6px',
-              padding: '0 12px'
-            }}
+            className="action-btn action-btn-secondary" 
             onClick={() => setShowBroadcastModal(true)}
             title="Send message to all teams"
           >
@@ -763,11 +768,11 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
 
       {!loading && !error && (
         <div className="operations-stats-footer" style={{ 
-          marginTop: '24px',
+          marginTop: 'var(--space-lg)',
           display: 'flex',
-          gap: '32px',
+          gap: 'var(--space-lg)',
           flexWrap: 'wrap',
-          padding: '8px 20px',
+          padding: 'var(--space-sm) var(--space-md)',
           background: '#ffffff',
           borderRadius: '12px',
           border: '1px solid #e2e8f0',
@@ -859,7 +864,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
             />
             <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
               <button 
-                className="btn btn-secondary" 
+                className="action-btn action-btn-secondary" 
                 onClick={() => {
                   setShowBroadcastModal(false);
                   setBroadcastMessage('');
@@ -868,7 +873,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
                 Cancel
               </button>
               <button 
-                className="btn btn-primary" 
+                className="action-btn action-btn-primary" 
                 onClick={handleSendBroadcast}
                 disabled={!broadcastMessage.trim() || loading}
               >
@@ -887,7 +892,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
           loading={loading}
           actions={
             <button 
-              className="btn btn-primary" 
+              className="action-btn action-btn-primary" 
               disabled={!selectedAssignTarget || loading}
               onClick={() => {
                 const asnId = assigningRow.assignmentId ? assigningRow.assignmentId : selectedAssignTarget;

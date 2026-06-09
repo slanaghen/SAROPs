@@ -43,7 +43,7 @@ const AdminUsersTable = ({
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <h2 style={{ margin: 0 }}>System Users ({users.length})</h2>
           <button 
-            className="btn btn-primary btn-sm" 
+            className="action-btn action-btn-primary action-btn-header" 
             onClick={(e) => { e.stopPropagation(); handleNewUser(); }}
           >
             + New
@@ -96,7 +96,7 @@ const AdminUsersTable = ({
                     </td>
                     <td style={{ color: '#000' }}>{user.email}</td>
                     <td style={{ color: '#000' }}>
-                      <span className={`status-indicator ${user.access_level || 'responder'}`}>
+                      <span className={`status-chip status-chip-${user.access_level || 'responder'}`}>
                         {user.access_level || 'responder'}
                       </span>
                     </td>
@@ -115,9 +115,9 @@ const AdminUsersTable = ({
                     </td>
                     <td style={{ textAlign: 'right' }}>
                       <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                        <button onClick={() => handleChangePassword(user.email)} className="btn btn-secondary btn-sm">Password</button>
-                        <button onClick={() => handleEditUser(user)} className="btn btn-secondary btn-sm">Edit</button>
-                        <button onClick={() => handleRemoveAdmin(user.email)} className="btn btn-secondary btn-sm" style={{ color: '#dc2626' }}>Remove</button>
+                        <button onClick={() => handleChangePassword(user.email)} className="action-btn action-btn-secondary">Password</button>
+                        <button onClick={() => handleEditUser(user)} className="action-btn action-btn-secondary">Edit</button>
+                        <button onClick={() => handleRemoveAdmin(user.email)} className="action-btn action-btn-danger">Remove</button>
                       </div>
                     </td>
                   </tr>

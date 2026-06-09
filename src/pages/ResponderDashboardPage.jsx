@@ -8,6 +8,8 @@ import { removeResponderFromTeam } from '../services/responderService';
 import { useToast } from '../context/ToastContext';
 import OperationsMap from '../components/OperationsMap';
 import '../styles/ResponderDashboard.css'; // New CSS file for styling
+import '../styles/ActionButtons.css';
+import '../styles/StatusChips.css';
 
 /**
  * ResponderDashboardPage
@@ -593,7 +595,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     return (
       <div className="alert alert-error" style={{ margin: '16px' }}>
         <p><strong>Error:</strong> {error}</p>
-        <button className="btn" onClick={refreshAllData} style={{ fontSize: '18px' }}>Retry Load</button>
+        <button className="action-btn action-btn-primary" onClick={refreshAllData}>Retry Load</button>
       </div>
     );
   }
@@ -648,7 +650,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
             sectionKey="team" 
             showBadge={team && parRequired ? (
               <span
-                className="status-indicator incomplete chip-overdue-gradient"
+                className="status-chip status-chip-incomplete chip-overdue-gradient"
                 style={{ 
                   color: 'white', 
                   gap: '4px',
@@ -688,7 +690,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
                     </div>
                     <div>
                       <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Status</label>
-                      <span className={`status-indicator ${team.status?.toLowerCase()}`}>
+                      <span className={`status-chip status-chip-${team.status?.toLowerCase()}`}>
                         {team.status}
                       </span>
                     </div>
@@ -712,7 +714,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
                         <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 600 }}>Last PAR Check:</span>
                         {parRequired ? (
                           <span 
-                            className="status-indicator incomplete chip-overdue-gradient"
+                            className="status-chip status-chip-incomplete chip-overdue-gradient"
                             onClick={() => handleParResponse('OK')}
                             title="Click to reset PAR"
                             style={{
@@ -734,7 +736,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
                         )}
                       </div>
                       <div style={{ display: 'flex', gap: '8px' }}>
-                        <button className="btn btn-primary" onClick={() => handleParResponse('OK')} style={{ flex: 1, fontSize: '18px' }}>PAR OK</button>
+                        <button className="action-btn action-btn-primary" onClick={() => handleParResponse('OK')} style={{ flex: 1 }}>PAR OK</button>
                       </div>
                     </div>
                   )}
@@ -743,10 +745,10 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
 
               {team && !isLeavingTeam && (
                 <button 
-                  className="btn btn-secondary" 
+                  className="action-btn action-btn-secondary" 
                   onClick={handleLeaveTeam}
                   disabled={isLeavingTeam || (team.status === 'Deployed' || assignment?.status === 'Deployed')}
-                  style={{ marginTop: '12px', color: '#dc2626', borderColor: '#fecaca', fontSize: '18px' }}
+                  style={{ marginTop: '12px', borderColor: '#fecaca' }}
                   title={(team.status === 'Deployed' || assignment?.status === 'Deployed') ? "Cannot leave team while deployed" : "Remove yourself from this team"}
                 >
                   {isLeavingTeam ? 'Leaving...' : 'Leave Team'}
@@ -780,7 +782,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '10px', marginBottom: '10px' }}>
             <div>
               <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Status</label>
-              <span className={`status-indicator ${assignment.status?.toLowerCase()}`}>
+              <span className={`status-chip status-chip-${assignment.status?.toLowerCase()}`}>
                 {assignment.status}
               </span>
             </div>
@@ -852,29 +854,29 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
               {team && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '12px' }}>
                   <button 
-                    className="btn btn-secondary" 
+                    className="action-btn action-btn-secondary" 
                     onClick={handleUpdateAssignmentData}
                     disabled={isUpdatingAsnData}
-                    style={{ width: '100%', fontSize: '18px' }}
+                    style={{ width: '100%' }}
                   >
                     {isUpdatingAsnData ? 'Saving...' : 'Save Mission Data'}
                   </button>
 
                   <div style={{ display: 'flex', gap: '8px' }}>
                     <button 
-                      className="btn btn-primary" 
+                      className="action-btn action-btn-primary" 
                       onClick={handleCompleteAssignment}
                       disabled={isUpdatingAsnData || podValue === '' || !debriefValue.trim()}
-                      style={{ flex: 1, backgroundColor: '#059669', borderColor: '#059669', fontSize: '18px' }}
+                      style={{ flex: 1, backgroundColor: '#059669', borderColor: '#059669' }}
                     >
                       {isUpdatingAsnData ? 'Completing...' : 'Complete'}
                     </button>
 
                     <button 
-                      className="btn btn-secondary" 
+                      className="action-btn action-btn-secondary" 
                       onClick={handleCancelAssignment}
                       disabled={isUpdatingAsnData || podValue === '' || !debriefValue.trim()}
-                      style={{ flex: 1, color: '#dc2626', borderColor: '#fecaca', fontSize: '18px' }}
+                      style={{ flex: 1, color: '#dc2626', borderColor: '#fecaca' }}
                     >
                       {isUpdatingAsnData ? 'Cancelling...' : 'Cancel'}
                     </button>
@@ -887,9 +889,9 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
 
           {isLeader && assignment.status === 'Assigned' && team && (
             <button 
-              className="btn btn-primary" 
+              className="action-btn action-btn-primary action-btn-full" 
               onClick={handleDeploy}
-              style={{ marginTop: '16px', width: '100%', fontSize: '18px' }}
+              style={{ marginTop: '16px' }}
             >
               Deploy
             </button>
@@ -906,7 +908,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
           <SectionHeader 
             title="Team Communications" 
             sectionKey="messages" 
-            showBadge={messages.length > lastMessageCountRef.current && <span className="status-indicator active">NEW</span>}
+            showBadge={messages.length > lastMessageCountRef.current && <span className="status-chip status-chip-active">NEW</span>}
           />
           {isExpanded.messages && (
             <div style={{ marginTop: '10px' }}>
@@ -931,7 +933,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
               placeholder="Send message..."
               style={{ flex: 1, padding: '8px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
             />
-            <button type="submit" className="btn btn-secondary btn-sm">Send</button>
+            <button type="submit" className="action-btn action-btn-secondary action-btn-header">Send</button>
             {isStaffOrAdmin && (
               <select
                 className="status-update-select"

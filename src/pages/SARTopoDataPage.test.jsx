@@ -112,6 +112,7 @@ describe('SARTopoDataPage', () => {
       incidentId: 'inc-123',
       incidentData: { opPeriodId: 'op-123', name: 'Mock Incident' },
       responderName: 'Steve',
+      user: { email: 'admin@test.com' }
       // Add other necessary properties if they are accessed by the component
       // e.g., setResponderStatus: vi.fn(), setCurrentTeamStatus: vi.fn(), etc.
     });
@@ -208,7 +209,7 @@ describe('SARTopoDataPage', () => {
     fireEvent.click(fetchBtn);
 
     await waitFor(async () => {
-      const heading = await screen.findByText((c, el) => el.tagName === 'H2' && c.includes('Map Download') && c.includes('(1)'));
+      const heading = await screen.findByText((c, el) => el.tagName === 'H2' && c.includes('GeoJSON Download') && c.includes('1'));
       expect(heading).toBeInTheDocument();
       expect(within(heading.closest('.section-card')).getByText(/"Clue 1"/)).toBeInTheDocument();
     });
@@ -230,7 +231,8 @@ describe('SARTopoDataPage', () => {
     vi.mocked(useIncident).mockReturnValue({ 
       isActive: true, 
       incidentId: 'inc-123', 
-      incidentData: { opPeriodId: mockOpPeriodId } 
+      incidentData: { opPeriodId: mockOpPeriodId },
+      user: { email: 'admin@test.com' }
     });
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
@@ -246,7 +248,7 @@ describe('SARTopoDataPage', () => {
     fireEvent.click(fetchBtn);
 
     await waitFor(async () => {
-      const heading = await screen.findByText((c, el) => el.tagName === 'H2' && c.includes('Map Download') && c.includes('(1)'));
+      const heading = await screen.findByText((c, el) => el.tagName === 'H2' && c.includes('GeoJSON Download') && c.includes('1'));
       expect(heading).toBeInTheDocument();
     });
     
@@ -348,7 +350,7 @@ describe('SARTopoDataPage', () => {
     const generateBtn = await screen.findByRole('button', { name: /Generate JSON/i });
     fireEvent.click(generateBtn);
 
-    const uploadHeading = await screen.findByText((c, el) => el.tagName === 'H2' && c.includes('Map Upload') && c.includes('(1)'));
+    const uploadHeading = await screen.findByText((c, el) => el.tagName === 'H2' && c.includes('GeoJSON Upload') && c.includes('1'));
     const uploadSection = uploadHeading.closest('.section-card');
     expect(within(uploadSection).getByText(/"Task 1"/i)).toBeInTheDocument();
   });
@@ -386,10 +388,10 @@ describe('SARTopoDataPage', () => {
     fireEvent.click(generateBtn);
 
     // 3. Wait for generation results to appear in the preview heading
-    const heading = await screen.findByText((c, el) => el.tagName === 'H2' && c.includes('Map Upload') && c.includes('(1)'));
+    const heading = await screen.findByText((c, el) => el.tagName === 'H2' && c.includes('GeoJSON Upload') && c.includes('1'));
     expect(heading).toBeInTheDocument();
 
-    const uploadSection = screen.getByRole('heading', { name: /Map Upload to SARTopo/i }).closest('.section-card');
+    const uploadSection = screen.getByRole('heading', { name: /GeoJSON Upload to SARTopo/i }).closest('.section-card');
     expect(uploadSection).toBeInTheDocument();
 
     // By default, geometry is hidden
@@ -473,7 +475,7 @@ describe('SARTopoDataPage', () => {
 
     // Initially, only assignments should be shown (2 features)
     await waitFor(async () => {
-      const heading = await screen.findByText((c, el) => el.tagName === 'H2' && c.includes('Map Download') && c.includes('(2)'));
+      const heading = await screen.findByText((c, el) => el.tagName === 'H2' && c.includes('GeoJSON Download') && c.includes('2'));
       expect(heading).toBeInTheDocument();
       expect(screen.getByText(/"Clue 1"/)).toBeInTheDocument();
     });
@@ -482,7 +484,7 @@ describe('SARTopoDataPage', () => {
     fireEvent.click(screen.getByTitle('Show All Objects'));
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: /Map Download from SARTopo \(3\)/i })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: /GeoJSON Download from SARTopo/i })).toHaveTextContent('3');
       expect(screen.getByText(/"POI 1"/)).toBeInTheDocument();
     });
   });
@@ -562,7 +564,8 @@ describe('SARTopoDataPage', () => {
     };
     vi.mocked(useIncident).mockReturnValue({ 
       isActive: true, incidentId: 'inc-123', responderName: 'Steve', 
-      incidentData: { opPeriodId: 'op-123' } 
+      incidentData: { opPeriodId: 'op-123' },
+      user: { email: 'admin@test.com' }
     });
     vi.mocked(supabase.from).mockImplementation((table) => {
       let data = (table === 'incidents') ? { sartopo_id: 'MAP123' } : [];

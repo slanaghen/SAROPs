@@ -10,6 +10,7 @@ import {
 } from '../services/sartopoService';
 import { useToast } from '../context/ToastContext';
 import '../styles/IncidentEditPage.css';
+import '../styles/ActionButtons.css';
 
 const getCurrentLocalDatetime = () => {
   const now = new Date();
@@ -54,6 +55,20 @@ const defaultOperationalPeriod = {
 const IncidentEditPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { 
+    isActive, 
+    incidentId: contextIncidentId, 
+    incidentData, 
+    responderName,
+    user,
+    startIncident, 
+    endIncident,
+    setResponderId,
+    setResponderName,
+    setAccessLevel,
+    setResponderStatus
+  } = useIncident();
+  const { addToast } = useToast();
   const [isSaving, setIsSaving] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [isSyncingSartopo, setIsSyncingSartopo] = useState(false);
@@ -100,19 +115,18 @@ const IncidentEditPage = () => {
     };
   }, []);
 
-  const { 
-    isActive, 
-    incidentId: contextIncidentId, 
-    incidentData, 
-    responderName,
-    startIncident, 
-    endIncident,
-    setResponderId,
-    setResponderName,
-    setAccessLevel,
-    setResponderStatus
-  } = useIncident();
-  const { addToast } = useToast();
+  const [displayDensity, setDisplayDensity] = useState('comfortable');
+
+  useEffect(() => {
+    const fetchDensity = async () => {
+      const userEmail = user?.email || localStorage.getItem('sarops_user_email');
+      if (!userEmail) return;
+      const { data } = await supabase.from('users').select('display_density').eq('email', userEmail).maybeSingle();
+      if (data?.display_density) setDisplayDensity(data.display_density);
+    };
+    fetchDensity();
+  }, [user]);
+
   const [isLocalSaved, setIsLocalSaved] = useState(false);
 
   const fromAdmin = location.state?.fromAdmin;
@@ -129,64 +143,6 @@ const IncidentEditPage = () => {
     }
     return isActive ? incidentData?.opPeriodId : null;
   }, [targetIncident, isActive, incidentData?.opPeriodId]);
-
-  // Load existing data from state (if passed from Admin) or from context (if active)
-  useEffect(() => {
-    const loadExistingData = async () => {
-      const incId = targetIncident?.incident_id || (isActive ? contextIncidentId : null);
-      if (!incId || !targetOpId) return;
-
-      setIsLocalSaved(true);
-      
-      try {
-        // Fetch Incident Details
-        const { data: incData, error: incError } = await supabase
-          .from('incidents')
-          .select('*')
-          .eq('incident_id', incId)
-          .maybeSingle();
-
-        if (incError) throw incError;
-        if (incData) {
-          const fetchedInc = {
-            name: incData.name,
-            number: incData.number,
-            sartopo_id: incData.sartopo_id || '',
-            start_datetime: incData.start_datetime ? incData.start_datetime.slice(0, 16) : getCurrentLocalDatetime(),
-            end_datetime: incData.end_datetime ? incData.end_datetime.slice(0, 16) : '',
-            notes: incData.notes || '',
-          };
-          setIncident(fetchedInc);
-          setInitialIncident(fetchedInc);
-        }
-
-        // Fetch current Operational Period
-        const { data: opData, error: opError } = await supabase
-          .from('operational_periods')
-          .select('*')
-          .eq('op_period_id', targetOpId)
-          .maybeSingle();
-
-        if (opError) throw opError;
-        if (opData) {
-          const fetchedOp = {
-            op_number: String(opData.op_number),
-            start_datetime: opData.start_datetime ? opData.start_datetime.slice(0, 16) : getCurrentLocalDatetime(),
-            end_datetime: opData.end_datetime ? opData.end_datetime.slice(0, 16) : '',
-            situation_narrative: opData.situation_narrative || '',
-            par_check_interval: opData.par_check_interval !== undefined ? opData.par_check_interval : 60,
-            situational_awareness_narrative: opData.situational_awareness_narrative || '',
-          };
-          setOperationalPeriod(fetchedOp);
-          setInitialOpPeriod(fetchedOp);
-        }
-      } catch (err) {
-        console.error('Error loading incident data:', err);
-      }
-    };
-
-    loadExistingData();
-  }, [isActive, contextIncidentId, incidentData?.opPeriodId, targetIncident, targetOpId]);
 
   // Client-side validation for SARTopo ID
   useEffect(() => {
@@ -694,7 +650,7 @@ const IncidentEditPage = () => {
   }
 
   return (
-    <div className="incident-edit-page">
+    <div className={`incident-edit-page density-${displayDensity}`}>
       <div className="page-header">
         <div>
           <h1>Incident</h1>
@@ -705,34 +661,39 @@ const IncidentEditPage = () => {
       </div>
 
       <form className="incident-form" onSubmit={handleSubmit}>
-        <div className="form-column">
+        <div className="form-column" style={{ gap: 'var(--space-md)' }}>
           <div className="section-card">
             <h2>Incident Information</h2>
 
-            <div className="timing-row">
-              <label style={{ flex: 2 }}>
-                Incident Name
+            <div className="timing-row" style={{ gap: 'var(--space-md)' }}>
+              <div className="form-field" style={{ flex: 2 }}>
+                <label className="form-label" htmlFor="inc_name">Incident Name</label>
                 <input
+                  id="inc_name"
                   type="text"
+                  className="form-input"
                   value={incident.name}
                   onChange={(e) => handleIncidentChange('name', e.target.value)}
                   placeholder="Search and Rescue Incident Name"
                 />
-              </label>
-              <label style={{ flex: 1 }}>
-                Incident Number
+              </div>
+              <div className="form-field" style={{ flex: 1 }}>
+                <label className="form-label" htmlFor="inc_num">Incident Number</label>
                 <input
+                  id="inc_num"
                   type="text"
+                  className="form-input"
                   value={incident.number}
                   onChange={(e) => handleIncidentChange('number', e.target.value)}
                   placeholder="Incident Number"
                 />
-              </label>
+              </div>
             </div>
 
-            <div className="timing-row" style={{ alignItems: 'flex-end', marginBottom: '16px' }}>
-              <label style={{ flex: 1, marginBottom: 0 }}>
-                SARTopo Map ID
+            <div className="timing-row" style={{ alignItems: 'flex-end', marginBottom: 'var(--space-md)', gap: 'var(--space-md)' }}>
+              <div className="form-field" style={{ flex: 1 }}>
+                <label className="form-label" htmlFor="inc_map">
+                  SARTopo Map ID
                 {(isSyncingSartopo || sartopoIdValidationMessage || sartopoSyncErrorMessage) && (
                   <span style={{ marginLeft: '8px', fontSize: '11px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
                     {isSyncingSartopo && <span style={{ color: '#0369a1' }}>🔄 Syncing...</span>}
@@ -740,18 +701,20 @@ const IncidentEditPage = () => {
                     {sartopoSyncErrorMessage && <span style={{ color: '#dc2626' }}>❌ Sync Failed: {sartopoSyncErrorMessage}</span>}
                   </span>
                 )}
+                </label>
                 <input
+                  id="inc_map"
                   type="text"
+                  className="form-input"
                   value={incident.sartopo_id}
                   onChange={(e) => handleIncidentChange('sartopo_id', e.target.value)}
                   placeholder="e.g. 9ABC"
                   style={{ borderColor: (sartopoIdValidationMessage || sartopoSyncErrorMessage) ? '#dc2626' : undefined }}
                 />
-              </label>
+              </div>
               <button 
                 type="button" 
-                className="btn btn-secondary" 
-                style={{ height: '42px' }}
+                className="action-btn action-btn-secondary" 
                 onClick={handleCreateMap}
                 disabled={isCreatingMap || isSaving || !!incident.sartopo_id?.trim()}
               >
@@ -759,68 +722,78 @@ const IncidentEditPage = () => {
               </button>
             </div>
 
-            <div className="timing-row">
-              <label>
-                Start Date / Time
+            <div className="timing-row" style={{ gap: 'var(--space-md)' }}>
+              <div className="form-field">
+                <label className="form-label" htmlFor="inc_start">Start Date / Time</label>
                 <input
+                  id="inc_start"
                   type="datetime-local"
+                  className="form-input"
                   value={incident.start_datetime}
                   onChange={(e) => handleIncidentChange('start_datetime', e.target.value)}
                 />
-              </label>
+              </div>
 
               {existingId && (
-                <label>
-                  End Date / Time
+                <div className="form-field">
+                  <label className="form-label" htmlFor="inc_end">End Date / Time</label>
                   <input
+                    id="inc_end"
                     type="datetime-local"
+                    className="form-input"
                     value={incident.end_datetime}
                     onChange={(e) => handleIncidentChange('end_datetime', e.target.value)}
                   />
-                </label>
+                </div>
               )}
             </div>
 
-            <label>
-              Incident Narrative
+            <div className="form-field">
+              <label className="form-label" htmlFor="inc_notes">Incident Narrative</label>
               <textarea
+                id="inc_notes"
+                className="form-textarea"
                 value={incident.notes}
                 onChange={(e) => handleIncidentChange('notes', e.target.value)}
                 placeholder="Optional notes or summary about the incident"
               />
-            </label>
+            </div>
           </div>
 
           <div className="section-card">
             <h2>Operational Period</h2>
 
-            <div className="timing-row" style={{ alignItems: 'flex-end', marginBottom: '16px' }}>
-              <label style={{ flex: '0 0 140px', marginBottom: 0 }}>
-                OP Number
+            <div className="timing-row" style={{ alignItems: 'flex-end', marginBottom: 'var(--space-md)', gap: 'var(--space-md)' }}>
+              <div className="form-field" style={{ flex: '0 0 140px' }}>
+                <label className="form-label" htmlFor="op_num">OP Number</label>
                 <input
+                  id="op_num"
                   type="text"
+                  className="form-input"
                   value={operationalPeriod.op_number}
                   onChange={(e) => handleOperationalPeriodChange('op_number', e.target.value)}
                   placeholder="OP #"
                 />
-              </label>
+              </div>
 
               <div className="par-config-row" style={{ display: 'flex', alignItems: 'flex-end', gap: '12px', flex: 1 }}>
-                <label style={{ flex: 1, marginBottom: 0 }}>
-                  PAR/Status Check Interval (minutes)
+                <div className="form-field" style={{ flex: 1 }}>
+                  <label className="form-label" htmlFor="par_int">PAR/Status Check Interval (minutes)</label>
                   <input
+                    id="par_int"
                     type="number"
+                    className="form-input"
                     value={operationalPeriod.par_check_interval}
                     onChange={(e) => handleOperationalPeriodChange('par_check_interval', e.target.value)}
                     placeholder="e.g. 60"
                     disabled={operationalPeriod.par_check_interval === 0}
                     min="0"
                   />
-                </label>
+                </div>
                 <button 
                   type="button" 
-                  className={`btn ${operationalPeriod.par_check_interval === 0 ? 'btn-primary' : 'btn-secondary'}`}
-                  style={{ height: '38px', whiteSpace: 'nowrap' }}
+                  className={`action-btn ${operationalPeriod.par_check_interval === 0 ? 'action-btn-primary' : 'action-btn-secondary'}`}
+                  style={{ whiteSpace: 'nowrap' }}
                   onClick={() => {
                     handleOperationalPeriodChange('par_check_interval', operationalPeriod.par_check_interval === 0 ? 60 : 0);
                   }}
@@ -830,53 +803,61 @@ const IncidentEditPage = () => {
               </div>
             </div>
 
-            <div className="timing-row">
-              <label>
-                OP Start Date / Time
+            <div className="timing-row" style={{ gap: 'var(--space-md)' }}>
+              <div className="form-field">
+                <label className="form-label" htmlFor="op_start">OP Start Date / Time</label>
                 <input
+                  id="op_start"
                   type="datetime-local"
+                  className="form-input"
                   value={operationalPeriod.start_datetime}
                   onChange={(e) => handleOperationalPeriodChange('start_datetime', e.target.value)}
                 />
-              </label>
+              </div>
 
               {existingId && (
-                <label>
-                  OP End Date / Time
+                <div className="form-field">
+                  <label className="form-label" htmlFor="op_end">OP End Date / Time</label>
                   <input
+                    id="op_end"
                     type="datetime-local"
+                    className="form-input"
                     value={operationalPeriod.end_datetime}
                     onChange={(e) => handleOperationalPeriodChange('end_datetime', e.target.value)}
                   />
-                </label>
+                </div>
               )}
             </div>
             
-            <label>
-              Operational Period Objective
+            <div className="form-field">
+              <label className="form-label" htmlFor="op_obj">Operational Period Objective</label>
               <textarea
+                id="op_obj"
+                className="form-textarea"
                 value={operationalPeriod.situation_narrative}
                 onChange={(e) => handleOperationalPeriodChange('situation_narrative', e.target.value)}
                 placeholder="Operational period objective for the current operational period"
               />
-            </label>
+            </div>
 
-            <label>
-              Situational Awareness Narrative
+            <div className="form-field">
+              <label className="form-label" htmlFor="sa_narr">Situational Awareness Narrative</label>
               <textarea
+                id="sa_narr"
+                className="form-textarea"
                 value={operationalPeriod.situational_awareness_narrative}
                 onChange={(e) => handleOperationalPeriodChange('situational_awareness_narrative', e.target.value)}
                 placeholder="Situational awareness narrative for the current operational period"
               />
-            </label>
+            </div>
           </div>
         </div>
 
-        <div className="form-actions" style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+        <div className="form-actions action-btn-group">
           {isActive && existingId === contextIncidentId && (
             <button 
               type="button" 
-              className="btn btn-primary" 
+              className="action-btn action-btn-primary" 
               onClick={handleStartNextOP}
               disabled={isSaving || isTransitioning}
               style={{ backgroundColor: '#0369a1', borderColor: '#0369a1' }}
@@ -884,13 +865,13 @@ const IncidentEditPage = () => {
               {isTransitioning ? 'Transitioning...' : 'Start Next OP'}
             </button>
           )}
-          <button type="submit" className="btn btn-primary" disabled={isSaving || isTransitioning || (existingId && !isDirty)}>
+          <button type="submit" className="action-btn action-btn-primary" disabled={isSaving || isTransitioning || (existingId && !isDirty)}>
             {isSaving ? 'Saving...' : (existingId ? 'Update Incident Information' : 'Start Incident Tracking')}
           </button>
           {isActive && (
             <button
               type="button"
-              className="btn btn-secondary"
+              className="action-btn action-btn-secondary"
               onClick={handleEndIncident}
               disabled={isSaving}
             >
@@ -917,8 +898,8 @@ const IncidentEditPage = () => {
             <p style={{ color: '#4b5563', lineHeight: '1.5' }}>
               You have made changes to the incident details. Would you like to commit these changes before leaving, or cancel the changes?
             </p>
-            <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', marginTop: '24px' }}>
-              <button className="btn btn-primary" onClick={async () => {
+            <div className="action-btn-group" style={{ justifyContent: 'center', marginTop: '24px' }}>
+              <button className="action-btn action-btn-primary" onClick={async () => {
                 const success = await saveData(false); // Keep isSaving true to prevent re-blocking
                 if (success) {
                   blocker.proceed();
@@ -926,8 +907,8 @@ const IncidentEditPage = () => {
                   setIsSaving(false); // Reset if save failed
                 }
               }}>Commit Changes</button>
-              <button className="btn btn-secondary" onClick={() => blocker.proceed()}>Cancel Changes</button>
-              <button className="btn btn-secondary" onClick={() => blocker.reset()}>Stay</button>
+              <button className="action-btn action-btn-secondary" onClick={() => blocker.proceed()}>Cancel Changes</button>
+              <button className="action-btn action-btn-secondary" onClick={() => blocker.reset()}>Stay</button>
             </div>
           </div>
         </div>
