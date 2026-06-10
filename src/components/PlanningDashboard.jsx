@@ -219,6 +219,9 @@ const PlanningDashboard = ({
   const availableRespondersList = useMemo(() => {
     return (responders || []).filter(r => {
       const statusLower = String(r.status || '').toLowerCase();
+      // Staff are always relevant to the planning dashboard
+      if (r.access_level === 'staff' || r.access_level === 'admin') return true;
+      
       // View Mode Filter
       if (viewMode === 'Operations') {
         if (!['attached', 'assigned', 'deployed'].includes(statusLower)) return false;
@@ -259,6 +262,8 @@ const PlanningDashboard = ({
   // Filter teams logic
   const filteredTeams = useMemo(() => {
     return (teams || []).filter(t => {
+      if (t.type === 'Staff' || t.team_name_number === 'Staff') return true; // Always show Command Staff on the planning board
+
       // View Mode Filter
       if (viewMode === 'Operations') {
         if (!['Assigned', 'Deployed'].includes(t.status)) return false;
@@ -288,6 +293,9 @@ const PlanningDashboard = ({
   const filteredAssignments = useMemo(() => {
     return (assignments || []).filter(asn => {
       if (asn.op_period_id !== operationalPeriodId || asn.is_orphaned) return false;
+
+      // Always show Command Staff assignments regardless of view mode
+      if (asn.resource_type === 'Staff' || asn.title === 'Command Staff') return true;
 
       // View Mode Filter
       if (viewMode === 'Operations') {

@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase';
 import AdminUserFormModal from '../components/admin/AdminUserFormModal';
 import '../styles/IncidentEditPage.css';
 import { useToast } from '../context/ToastContext';
+import { useLocation } from 'react-router-dom';
 import '../styles/ActionButtons.css';
 import '../styles/FormElements.css';
 
@@ -10,13 +11,16 @@ const SettingsPage = () => {
   const [userProfile, setUserProfile] = useState(null);
   const [loading, setLoading] = useState(false);
   const { addToast } = useToast();
+  const location = useLocation();
+  const isNewRegistration = location.state?.isNewRegistration || false;
+  const newRegistrationEmail = location.state?.newRegistrationEmail;
 
   const fetchMyProfile = useCallback(async () => {
     setLoading(true);
     try {
       // Attempt to identify the user via Supabase Auth (OTP users) or localStorage (RPC users)
       const { data: { session } } = await supabase.auth.getSession();
-      const userEmail = session?.user?.email || localStorage.getItem('sarops_user_email');
+      const userEmail = newRegistrationEmail || session?.user?.email || localStorage.getItem('sarops_user_email');
 
       if (!userEmail) throw new Error('No active session found.');
 
@@ -34,7 +38,7 @@ const SettingsPage = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [newRegistrationEmail]);
 
   useEffect(() => {
     fetchMyProfile();
@@ -84,6 +88,7 @@ const SettingsPage = () => {
             onSave={handleSaveProfile}
             initialData={userProfile}
             loading={loading}
+            isNewRegistration={isNewRegistration}
             isProfileSettings={true}
           />
         </div>
@@ -100,7 +105,6 @@ const SettingsPage = () => {
           padding: 0 !important; 
         }
         .modal-actions .btn-secondary { display: none; }
-        
         /* Ensure the form body inside the embedded modal uses full width */
         .incident-edit-page .modal-body { padding: 0; }
       `}</style>

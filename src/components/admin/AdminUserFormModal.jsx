@@ -5,7 +5,7 @@ import { useToast } from '../../context/ToastContext';
 import '../../styles/ActionButtons.css';
 import '../../styles/FormElements.css';
 
-const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, error, success, isProfileSettings = false }) => {
+const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, error, success, isProfileSettings = false, isNewRegistration = false }) => {
   const [formData, setFormData] = useState({
     email: '',
     username: '',
@@ -24,7 +24,21 @@ const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
   const isEditing = !!initialData?.email;
 
   useEffect(() => {
-    if (isEditing && initialData) {
+    if (isNewRegistration && initialData) { // New registration flow
+      setFormData({
+        email: initialData.email || '', // Pre-fill email from newRegistrationEmail
+        username: initialData.email || '', // Username defaults to email
+        password: '', // Password is never pre-filled for security
+        access_level: 'responder', // Default for new registrations
+        name: '', // Empty for new user to fill
+        agency: '',
+        identifier: '',
+        cell_phone: '',
+        responder_type: 'SAR',
+        special_skills: '',
+        display_density: 'comfortable',
+      });
+    } else if (isEditing && initialData) { // Editing existing user
       setFormData({
         email: initialData.email || '',
         username: initialData.username || initialData.email || '',
@@ -38,11 +52,11 @@ const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
         special_skills: initialData.special_skills || '',
         display_density: initialData.display_density || 'comfortable',
       });
-    } else {
+    } else { // Adding new user (from Admin page) or initial empty state
       // Reset form for new user
       setFormData({
-        email: '',
-        username: '',
+        email: initialData?.email || '', // Allow pre-filling if initialData has it
+        username: initialData?.username || '',
         password: '',
         access_level: 'responder',
         name: '',
@@ -54,7 +68,7 @@ const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
         display_density: 'comfortable',
       });
     }
-  }, [isOpen, initialData, isEditing]);
+  }, [isOpen, initialData, isEditing, isNewRegistration]);
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -62,6 +76,11 @@ const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
   };
 
   const handleSave = (stayOpen = false) => {
+    const form = document.getElementById('user-form');
+    if (form && !form.checkValidity()) {
+      form.reportValidity();
+      return;
+    }
     onSave(formData, stayOpen);
   };
 
@@ -98,7 +117,7 @@ const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
 
           <div className="form-grid" style={{ marginBottom: '16px' }}>
             <div className="form-field">
-              <label className="form-label" htmlFor="user_username">Username</label>
+              <label className="form-label" htmlFor="user_username">Username *</label>
               <input
                 id="user_username"
                 type="text"
@@ -107,12 +126,13 @@ const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
                 value={formData.username}
                 data-lpignore="true"
                 onChange={handleChange}
-                disabled={isEditing}
+                required
+                disabled={isEditing || isNewRegistration} // Disable if editing or new registration
               />
             </div>
             <div className="form-field">
               <label className="form-label" htmlFor="user_password">
-                Password {isEditing && <span style={{ fontSize: '10px', color: '#64748b', display: 'inline', fontWeight: 400 }}> (Leave blank to keep current)</span>}
+                Password * {!isNewRegistration && isEditing && <span style={{ fontSize: '10px', color: '#64748b', display: 'inline', fontWeight: 400 }}> (Leave blank to keep current)</span>}
               </label>
               <input
                 id="user_password"
@@ -122,30 +142,32 @@ const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
                 value={formData.password}
                 onChange={handleChange}
                 placeholder={isEditing ? '••••••••' : '•••••••• (required)'}
-                required={!isEditing}
+                required={!isEditing || isNewRegistration} // Password required for new registration, optional for existing user edits
               />
             </div>
           </div>
 
           <div className="form-grid" style={{ marginBottom: '16px' }}>
             <div className="form-field">
-              <label className="form-label" htmlFor="user_name">Full Name</label>
-              <input id="user_name" type="text" name="name" className="form-input" value={formData.name} onChange={handleChange} data-lpignore="true" placeholder="John Doe" />
+              <label className="form-label" htmlFor="user_name">Full Name *</label>
+              <input id="user_name" type="text" name="name" className="form-input" value={formData.name} onChange={handleChange} data-lpignore="true" placeholder="John Doe" required />
             </div>
             <div className="form-field">
-              <label className="form-label" htmlFor="user_type">Responder Type</label>
-              <select id="user_type" name="responder_type" className="form-select" value={formData.responder_type} onChange={handleChange}>
+              <label className="form-label" htmlFor="user_type">Responder Type *</label>
+              <select id="user_type" name="responder_type" className="form-select" value={formData.responder_type} onChange={handleChange} required>
                 <option value="SAR">SAR</option>
                 <option value="Fire">Fire</option>
                 <option value="Law">Law Enforcement</option>
                 <option value="Medical">Medical</option>
+                <option value="Other">Other</option>
               </select>
             </div>
           </div>
 
+          {!isProfileSettings && (
           <div className="form-grid" style={{ marginBottom: '16px' }}>
             <div className="form-field">
-              <label className="form-label" htmlFor="user_email">Email Address</label>
+              <label className="form-label" htmlFor="user_email">Email Address *</label>
               <input
                 id="user_email"
                 type="email"
@@ -156,44 +178,44 @@ const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
                 data-lpignore="true"
                 placeholder="admin@agency.gov"
                 required
-                disabled={isEditing}
+                disabled={isEditing || isNewRegistration} // Disable if editing or new registration
               />
             </div>
             <div className="form-field" /> {/* Alignment */}
           </div>
+          )}
 
-          {/* Row 3: Capabilities */}
+          <div className="form-grid" style={{ marginBottom: '16px' }}>
+            <div className="form-field">
+              <label className="form-label" htmlFor="user_agency">Agency *</label>
+              <input id="user_agency" type="text" name="agency" className="form-input" value={formData.agency} onChange={handleChange} data-lpignore="true" placeholder="SAR Agency" required />
+            </div>
+            <div className="form-field">
+              <label className="form-label" htmlFor="user_id">Identifier *</label>
+              <input id="user_id" type="text" name="identifier" className="form-input" value={formData.identifier} onChange={handleChange} data-lpignore="true" placeholder="JD-1" required />
+            </div>
+          </div>
+  
           <div className="form-grid" style={{ marginBottom: '16px' }}>
             <div className="form-field">
               <label className="form-label" htmlFor="user_skills">Capabilities</label>
               <input id="user_skills" type="text" name="special_skills" className="form-input" value={formData.special_skills} onChange={handleChange} data-lpignore="true" placeholder="EMT, Rope Rescue, K9 Handler" />
             </div>  
             <div className="form-field">
-              <label className="form-label" htmlFor="user_phone">Phone Number</label>
+              <label className="form-label" htmlFor="user_phone">Cell Phone</label>
               <input id="user_phone" type="tel" name="cell_phone" className="form-input" value={formData.cell_phone} onChange={handleChange} data-lpignore="true" placeholder="555-123-4567" />
             </div>
           </div>
 
           <div className="form-grid" style={{ marginBottom: '16px' }}>
             <div className="form-field">
-              <label className="form-label" htmlFor="user_agency">Agency</label>
-              <input id="user_agency" type="text" name="agency" className="form-input" value={formData.agency} onChange={handleChange} data-lpignore="true" placeholder="SAR Agency" />
-            </div>
-            <div className="form-field">
-              <label className="form-label" htmlFor="user_id">Identifier</label>
-              <input id="user_id" type="text" name="identifier" className="form-input" value={formData.identifier} onChange={handleChange} data-lpignore="true" placeholder="JD-1" />
-            </div>
-          </div>
-
-          <div className="form-grid" style={{ marginBottom: '16px' }}>
-            <div className="form-field">
-              <label className="form-label" htmlFor="user_level">Access Level</label>
-              <select id="user_level" name="access_level" className="form-select" value={formData.access_level} onChange={handleChange} disabled={isProfileSettings}>
+              <label className="form-label" htmlFor="user_level">Access Level *</label>
+              <select id="user_level" name="access_level" className="form-select" value={formData.access_level} onChange={handleChange} disabled={isProfileSettings} required>
                 <option value="responder">Responder</option>
                 <option value="staff">Staff</option>
                 <option value="admin">Admin</option>
               </select>
-              {isProfileSettings && <small className="form-hint" style={{ display: 'block', marginTop: '4px' }}>Contact an administrator to change permissions.</small>}
+              {(isProfileSettings || isNewRegistration) && <small className="form-hint" style={{ display: 'block', marginTop: '4px' }}>Access level cannot be changed during initial setup.</small>}
             </div>
             <div className="form-field">
               <label className="form-label">Display Density</label>

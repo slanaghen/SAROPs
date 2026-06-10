@@ -10,6 +10,7 @@ import './styles.css';
 function App() {
   const [offline, setOffline] = useState(!navigator.onLine);
   const [user, setUser] = useState(null);
+  const [env, setEnv] = useState(() => localStorage.getItem('sarops_env') || 'remote');
   const [displayDensity, setDisplayDensity] = useState('comfortable');
   const [menuOpen, setMenuOpen] = useState(false);
   const navigate = useNavigate();
@@ -115,6 +116,15 @@ function App() {
     window.addEventListener('focus', handleFocus);
     return () => window.removeEventListener('focus', handleFocus);
   }, [isActive, responderId, refetch]);
+
+  const toggleEnvironment = () => {
+    const newEnv = env === 'local' ? 'remote' : 'local';
+    if (window.confirm(`Switch to ${newEnv.toUpperCase()} environment? This will sign you out and reload the application.`)) {
+      localStorage.setItem('sarops_env', newEnv);
+      localStorage.removeItem('sarops_user_email');
+      window.location.reload();
+    }
+  };
 
   const handleSignOut = async () => {
     // Perform operational checkout if responder is still active
@@ -288,8 +298,17 @@ function App() {
                     </>
                   )}
                   {accessLevel === 'admin' && <Link to="/admin" onClick={() => setMenuOpen(false)}>Administration</Link>}
-                  <div className="dropdown-divider"></div>
                   <Link to="/checkout" onClick={() => setMenuOpen(false)} className="dropdown-item">Check Out</Link>
+                  <div className="dropdown-divider"></div>
+                  <div className="dropdown-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'default' }}>
+                    <span style={{ fontSize: '11px', color: env === 'local' ? '#dc2626' : '#94a3b8', fontWeight: env === 'local' ? 'bold' : 'normal' }}>DB ENV: {env.toUpperCase()}</span>
+                    <button 
+                      onClick={toggleEnvironment}
+                      style={{ background: '#334155', color: '#38bdf8', border: '1px solid #475569', borderRadius: '4px', fontSize: '10px', padding: '2px 6px', cursor: 'pointer' }}
+                    >
+                      Switch
+                    </button>
+                  </div>
                   <button onClick={handleSignOut} className="dropdown-item checkout">Sign Out / Clear All</button>
                 </div>
               )}

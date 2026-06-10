@@ -1,9 +1,34 @@
+-- View: full_responder_profiles
+-- The single source of truth for responder identity, merging persistent user
+-- profiles with incident-specific responder records.
+CREATE OR REPLACE VIEW full_responder_profiles WITH (security_invoker = on) AS
+SELECT
+  r.responder_id,
+  r.incident_id,
+  r.auth_uid,
+  r.user_email,
+  r.device_id,
+  r.status, -- Operational status from responders table
+  r.checkin_datetime,
+  r.checkout_datetime,
+  r.created_at,
+  r.updated_at,
+  COALESCE(u.name, r.name) AS name,
+  COALESCE(u.agency, r.agency) AS agency,
+  COALESCE(u.identifier, r.identifier) AS identifier,
+  COALESCE(u.cell_phone, r.cell_phone) AS cell_phone,
+  COALESCE(u.responder_type, r.responder_type) AS responder_type,
+  COALESCE(u.special_skills, r.special_skills) AS special_skills,
+  COALESCE(u.access_level, r.access_level) AS access_level
+FROM responders r
+LEFT JOIN users u ON r.user_email = u.email;
+
 -- View: team_current_responders
 CREATE OR REPLACE VIEW team_current_responders WITH (security_invoker = on) AS
 SELECT
   t.*,
-  r.name AS leader_name,
-  r.identifier AS leader_identifier,
+  fr.name AS leader_name,
+  fr.identifier AS leader_identifier,
   (SELECT COUNT(*) FROM team_responders tr_count WHERE tr_count.team_id = t.team_id) AS member_count,
   i.name AS incident_name,
   i.number AS incident_number,
@@ -12,15 +37,20 @@ SELECT
     (
       SELECT json_agg(
         json_build_object(
-          'responder_id', r.responder_id,
-          'name', r.name,
-          'agency', r.agency,
-          'status', r.status,
+          'responder_id', fr_m.responder_id,
+          'name', fr_m.name,
+          'agency', fr_m.agency,
+          'identifier', fr_m.identifier,
+          'cell_phone', fr_m.cell_phone,
+          'responder_type', fr_m.responder_type,
+          'special_skills', fr_m.special_skills,
+          'access_level', fr_m.access_level,
+          'status', fr_m.status,
           'role', tr.role
         )
       )
       FROM team_responders tr
-      JOIN responders r ON tr.responder_id = r.responder_id
+      JOIN full_responder_profiles fr_m ON tr.responder_id = fr_m.responder_id
       WHERE tr.team_id = t.team_id
     ),
     '[]'::json
@@ -41,7 +71,7 @@ SELECT
     '[]'::json
   ) AS current_vehicles
 FROM teams t
-LEFT JOIN responders r ON t.leader_responder_id = r.responder_id
+LEFT JOIN full_responder_profiles fr ON t.leader_responder_id = fr.responder_id
 JOIN operational_periods op ON t.op_period_id = op.op_period_id
 JOIN incidents i ON op.incident_id = i.incident_id;
 

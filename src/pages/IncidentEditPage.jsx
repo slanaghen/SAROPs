@@ -31,7 +31,8 @@ const getDefaultIncidentNumber = () => {
   const day = pad(now.getDate());
   const hours = pad(now.getHours());
   const minutes = pad(now.getMinutes());
-  return `${year}-${month}-${day}-${hours}${minutes}`;
+  const seconds = pad(now.getSeconds());
+  return `${year}-${month}-${day}-${hours}${minutes}${seconds}`;
 };
 
 const defaultIncident = {
@@ -57,6 +58,7 @@ const IncidentEditPage = () => {
   const location = useLocation();
   const { 
     isActive, 
+    setIsAdmin,
     incidentId: contextIncidentId, 
     incidentData, 
     responderName,
@@ -372,33 +374,32 @@ const IncidentEditPage = () => {
           );
         }
       } else {
-        // 1. Create Incident in Supabase
+        // 1. Create Incident in Supabase (use upsert to gracefully handle collisions on ID/Number)
         const { error: incError } = await supabase
           .from('incidents')
-          .insert({
+          .upsert({
             incident_id: newIncidentId,
             name: incident.name,
             number: incident.number,
             sartopo_id: incident.sartopo_id || null,
             start_datetime: incident.start_datetime,
             notes: incident.notes
-          });
+          }, { onConflict: 'incident_id' });
         console.debug('[IncidentEdit] Insert incident response:', { error: incError });
 
         if (incError) throw incError;
 
-        // 2. Create initial Operational Period in Supabase
+        // 2. Create initial Operational Period in Supabase (use upsert to handle concurrent creation)
         const { error: opError } = await supabase
           .from('operational_periods')
-          .insert({
-            op_period_id: opPeriodId,
+          .upsert({
             incident_id: newIncidentId,
-            op_number: operationalPeriod.op_number,
+            op_number: parseInt(operationalPeriod.op_number, 10),
             start_datetime: operationalPeriod.start_datetime,
             situation_narrative: operationalPeriod.situation_narrative,
             situational_awareness_narrative: operationalPeriod.situational_awareness_narrative,
             par_check_interval: finalParInterval
-          });
+          }, { onConflict: 'incident_id,op_number' });
         console.debug('[IncidentEdit] Insert op_period response:', { error: opError });
 
         if (opError) throw opError;
@@ -511,7 +512,11 @@ const IncidentEditPage = () => {
               setResponderName(finalResponder.name);
               setResponderStatus(finalResponder.status);
             }
-          if (setAccessLevel) setAccessLevel(userAccessLevel);
+          // The creator is the Incident Commander. Elevate context to 'staff' 
+          // (or keep 'admin') to ensure dashboard navigation and visibility.
+          if (setAccessLevel) setAccessLevel(userAccessLevel === 'admin' ? 'admin' : 'staff');
+          // Establish management identity for the session
+          if (setIsAdmin) setIsAdmin(true); 
 
           // Refresh Supabase session to apply new JWT claims (IC role and incident context)
           await supabase.auth.refreshSession();
@@ -521,11 +526,7 @@ const IncidentEditPage = () => {
           return; // Stop navigation if session setup failed
         }
       }
-      if (fromAdmin) {
-        navigate('/admin');
-      } else {
-        navigate('/operations');
-      }
+      navigate('/operations'); // Always navigate to operations after creating a new incident
     } else {
       setIsSubmitting(false);
       setIsSaving(false); // Reset if save failed
@@ -865,7 +866,7 @@ const IncidentEditPage = () => {
               {isTransitioning ? 'Transitioning...' : 'Start Next OP'}
             </button>
           )}
-          <button type="submit" className="action-btn action-btn-primary" disabled={isSaving || isTransitioning || (existingId && !isDirty)}>
+          <button type="submit" className="action-btn action-btn-primary" disabled={isSaving || isSubmitting || isTransitioning || (existingId && !isDirty)}>
             {isSaving ? 'Saving...' : (existingId ? 'Update Incident Information' : 'Start Incident Tracking')}
           </button>
           {isActive && (

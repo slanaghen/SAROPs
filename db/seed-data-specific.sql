@@ -115,9 +115,6 @@ BEGIN
 END;
 $$;
 
--- Execute the function immediately so running the file in the SQL editor adds data
-SELECT public.seed_data_specific();
-
 -- Grant access to authenticated and anonymous users
 GRANT EXECUTE ON FUNCTION public.seed_data_specific() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.seed_data_specific() TO anon;

@@ -54,8 +54,12 @@ const Login = ({ onLoginSuccess }) => {
       let currentAuthUid = sessionRes?.session?.user?.id;
 
       if (!currentAuthUid) {
-        const { data: signInRes } = await supabase.auth.signInAnonymously();
-        currentAuthUid = signInRes?.user?.id;
+        try {
+          const { data: signInRes } = await supabase.auth.signInAnonymously();
+          currentAuthUid = signInRes?.user?.id;
+        } catch (authErr) {
+          console.warn('Anonymous sign-in not available. Attempting direct login.', authErr);
+        }
       }
 
       const { data, error: queryError } = await supabase
@@ -161,21 +165,18 @@ const Login = ({ onLoginSuccess }) => {
       });
       if (verifyError) throw verifyError;
 
+      // After successful OTP verification, the user is authenticated.
+      // Now, create the user record in the 'users' table with default responder access.
       const { error: rpcError } = await supabase.rpc('admin_add_user', {
         p_email: email.trim().toLowerCase(),
         p_username: email.trim().toLowerCase(),
-        p_password: Math.random().toString(36).slice(-12),
+        p_password: null, // No password provided by OTP, admin_add_user will handle default or leave blank
         p_access_level: 'responder'
       });
       if (rpcError) throw rpcError;
 
-      const { data: userRecord } = await supabase
-        .from('users')
-        .select('email, username, name, agency, identifier, cell_phone, responder_type, special_skills, access_level, display_density')
-        .eq('email', email.trim().toLowerCase())
-        .maybeSingle();
-
-      onLoginSuccess('', userRecord, null);
+      // Redirect to settings page for the new user to complete their profile
+      navigate('/settings', { state: { newRegistrationEmail: email.trim().toLowerCase(), isNewRegistration: true } });
     } catch (err) {
       setError(err.message);
     } finally {

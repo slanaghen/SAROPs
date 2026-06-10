@@ -265,17 +265,30 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
       if (!session?.user?.id) throw new Error('Authentication required to complete check-in.');
       const auth_uid = session.user.id;
 
-      // Pass the auth_uid to the checkIn function
-      await checkIn({ ...responder, auth_uid });
+      // Use the secure check-in RPC to establish operational identity and handle vehicle records.
+      // Direct table insertion via the hook's checkIn method is avoided to prevent schema cache 
+      // errors regarding the non-existent 'vehicles' column on the responders table.
+      const { data: rpcData, error: rpcError } = await supabase.rpc('checkin_responder_securely', {
+        p_incident_id: targetIncidentId,
+        p_auth_uid: auth_uid,
+        p_name: responder.name,
+        p_agency: responder.agency,
+        p_identifier: responder.identifier,
+        p_cell_phone: responder.cell_phone,
+        p_responder_type: responder.responder_type || 'SAR',
+        p_special_skills: responder.special_skills,
+        p_vehicles: (responder as any).vehicles,
+        p_access_level: responder.access_level,
+        p_status: responder.status,
+        p_device_id: responder.device_id
+      }).maybeSingle();
 
-      // Fetch the latest responder record to catch trigger-updated access_level
-      const { data: updatedResp } = await supabase
-        .from('responders')
-        .select('*')
-        .eq('responder_id', responder.responder_id)
-        .maybeSingle();
+      if (rpcError) throw rpcError;
 
-      let finalResponder = updatedResp || responder;
+      // The RPC returns the created/updated responder record which is already sanitized (no 'vehicles' property).
+      // We pass this to the hook's checkIn method to ensure internal React state is correctly updated.
+      let finalResponder = (Array.isArray(rpcData) ? rpcData[0] : rpcData) || responder;
+      await checkIn({ ...finalResponder, auth_uid });
 
       // Set responder email and incident in context after successful check-in
       if (setResponderId) setResponderId(finalResponder.responder_id);
@@ -316,7 +329,12 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
           // 3. Re-fetch responder to get updated access_level from trigger
           const { data: reFetchedResp } = await supabase
             .from('responders')
-            .select('*')
+            .select(`
+              responder_id, name, incident_id, agency, auth_uid, identifier, 
+              cell_phone, device_id, special_skills, access_level, 
+              responder_type, status, checkin_datetime, checkout_datetime,
+              created_at, updated_at
+            `)
             .eq('responder_id', finalResponder.responder_id)
             .maybeSingle();
           

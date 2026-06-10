@@ -1,6 +1,6 @@
 -- Table: users (System Admin access)
-DROP TABLE IF EXISTS users CASCADE;
-CREATE TABLE users (
+DROP TABLE IF EXISTS public.users CASCADE;
+CREATE TABLE public.users (
   email TEXT PRIMARY KEY,
   username TEXT NOT NULL UNIQUE,
   password TEXT NOT NULL,
@@ -12,22 +12,27 @@ CREATE TABLE users (
   responder_type responder_type,
   special_skills TEXT,
   display_density display_density DEFAULT 'comfortable',
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Force immediate schema reload for the users table
+NOTIFY pgrst, 'reload schema';
 
 -- Table: responders
 DROP TABLE IF EXISTS responders CASCADE;
 CREATE TABLE responders (
   responder_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name TEXT NOT NULL,
+  name TEXT, -- Nullable: persistent info sourced from public.users via user_email link
   incident_id TEXT NOT NULL REFERENCES incidents(incident_id) ON DELETE CASCADE ON UPDATE CASCADE,
-  agency TEXT NOT NULL,
+  agency TEXT, -- Nullable: persistent info sourced from public.users via user_email link
+  user_email TEXT REFERENCES users(email) ON DELETE SET NULL ON UPDATE CASCADE,
   auth_uid UUID REFERENCES auth.users(id) ON DELETE SET NULL,
-  identifier TEXT NOT NULL,
+  identifier TEXT, -- Nullable: persistent info sourced from public.users via user_email link
   cell_phone TEXT,
   device_id TEXT NOT NULL,
   special_skills TEXT,
-  access_level access_level NOT NULL DEFAULT 'responder',
+  access_level access_level, -- Nullable: persistent info sourced from public.users via user_email link
   responder_type responder_type,
   status responder_status NOT NULL DEFAULT 'Staged',
   checkin_datetime TIMESTAMP WITH TIME ZONE NOT NULL,

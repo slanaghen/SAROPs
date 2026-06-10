@@ -500,6 +500,16 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
                   <input type="radio" name="responder_type" value="Medical" checked={formData.responder_type === 'Medical'} onChange={handleInputChange} disabled={displayLoading} />
                   Medical
                 </label>
+                <label className="radio-label">
+                  <input
+                    type="radio"
+                    name="responder_type"
+                    value="Other"
+                    checked={formData.responder_type === 'Other'}
+                    onChange={handleInputChange}
+                    disabled={displayLoading} />
+                  Other
+                </label>
               </div>
               <small className="form-hint" style={{ fontSize: 'var(--text-xs)', marginTop: 'var(--space-xs)' }}>
                 Your primary operational role/agency type.

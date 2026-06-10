@@ -31,3 +31,5 @@ BEFORE UPDATE OF status ON teams FOR EACH ROW EXECUTE FUNCTION validate_team_act
 
 CREATE TRIGGER trigger_check_team_leader_membership
 BEFORE INSERT OR UPDATE OF leader_responder_id ON teams FOR EACH ROW EXECUTE FUNCTION validate_team_leader_membership();
+
+CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON public.users FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

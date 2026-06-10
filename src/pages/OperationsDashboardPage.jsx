@@ -128,7 +128,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
         assignmentType: asnItem.resource_type || '—',
         assignmentStatus: asnItem.status,
         teamName: matchingTeam?.team_name_number || asnItem.team_name || '',
-        teamType: matchingTeam?.type || asnItem.team_type || '',
+        teamType: matchingTeam?.type || asnItem.team_type || (asnItem.resource_type === 'Staff' || asnItem.title === 'Command Staff' ? 'Staff' : ''),
         teamLeader: matchingTeam?.leader_name || asnItem.leader_name || leaderById[matchingTeam?.leader_responder_id || asnItem.leader_responder_id] || '',
         leaderIdentifier: matchingTeam?.leader_identifier || asnItem.leader_identifier || leaderIdentifierById[matchingTeam?.leader_responder_id || asnItem.leader_responder_id] || '—',
         teamSize: asnItem.team_id ? (matchingTeam?.member_count ?? asnItem.member_count ?? matchingTeam?.current_responders?.length ?? 0) : null,
@@ -160,9 +160,9 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
 
     let result = [...assignmentRows, ...teamOnlyRows];
     if (viewMode === 'Operations') {
-      result = result.filter(r => r.teamType === 'Staff' || (r.teamStatus === 'Assigned' || r.teamStatus === 'Deployed' || r.assignmentStatus === 'Completed' || r.assignmentStatus === 'Incomplete'));
+      result = result.filter(r => r.teamType === 'Staff' || r.assignmentName === 'Command Staff' || (r.teamStatus === 'Assigned' || r.teamStatus === 'Deployed' || r.assignmentStatus === 'Completed' || r.assignmentStatus === 'Incomplete'));
     } else if (viewMode === 'Planning') {
-      result = result.filter(r => r.teamType === 'Staff' || (!['Completed', 'Incomplete'].includes(r.assignmentStatus) && (r.assignmentStatus === 'Planned' || r.teamStatus === 'Staged')));
+      result = result.filter(r => r.teamType === 'Staff' || r.assignmentName === 'Command Staff' || (!['Completed', 'Incomplete'].includes(r.assignmentStatus) && (r.assignmentStatus === 'Planned' || r.teamStatus === 'Staged')));
     }
 
     const aTerm = assignmentFilter.toLowerCase().trim();
@@ -170,12 +170,14 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
 
     if (aTerm) {
       result = result.filter(row => {
+        if (row.teamType === 'Staff' || row.assignmentName === 'Command Staff') return true; // Don't filter out staff via assignment search
         const fields = ['assignmentName', 'assignmentType', 'assignmentPriority', 'tacChannel', 'assignmentStatus'];
         return fields.some(key => (row[key] || '').toString().toLowerCase().includes(aTerm));
       });
     }
     if (tTerm) {
       result = result.filter(row => {
+        if (row.teamType === 'Staff' || row.assignmentName === 'Command Staff') return true; // Don't filter out staff via team search
         const fields = ['teamName', 'teamType', 'teamLeader', 'leaderIdentifier'];
         return fields.some(key => (row[key] || '').toString().toLowerCase().includes(tTerm));
       });
@@ -184,6 +186,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     result.sort((a, b) => {
       // Custom operational priority sort
       const getPriority = (row) => {
+        if (row.teamType === 'Staff' || row.assignmentName === 'Command Staff') return 0; // Command Staff ALWAYS at top
         if (row.assignmentStatus === 'Deployed') return 1;
         if (row.assignmentStatus === 'Assigned') return 2;
         if (row.assignmentId && !row.teamId) return 3; // Assignment with no team

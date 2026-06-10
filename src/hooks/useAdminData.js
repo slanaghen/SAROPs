@@ -6,17 +6,19 @@ export const useAdminData = () => {
     users: [],
     incidents: [],
     responders: [],
+    vehicles: [], // Add vehicles to initial state
     teams: [],
-    assignments: []
+    assignments: [],
   });
   const [loading, setLoading] = useState(false);
 
   const refresh = useCallback(async (table) => {
     setLoading(true);
     try {
-      const { data: result, error } = await supabase.from(table).select('*');
-      if (error) console.error(`[useAdminData] Error fetching ${table}:`, error);
-      setData(prev => ({ ...prev, [table]: result || [] }));
+      const target = table === 'responders' ? 'full_responder_profiles' : table;
+      const { data, error } = await supabase.from(target).select('*');
+      if (error) console.error(`[useAdminData] Error fetching ${target}:`, error);
+      setData(prev => ({ ...prev, [table]: data || [] }));
     } finally {
       setLoading(false);
     }
@@ -27,6 +29,7 @@ export const useAdminData = () => {
       refresh('users'),
       refresh('incidents'),
       refresh('responders'),
+      refresh('vehicles'), // Add vehicles to refreshAll
       refresh('teams'),
       refresh('assignments')
     ]);

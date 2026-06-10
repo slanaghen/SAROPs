@@ -46,6 +46,7 @@ const AdminPage = () => {
   const [loading, setLoading] = useState(false);
   const [isRespondersExpanded, setIsRespondersExpanded] = useState(true);
   const [isVehiclesExpanded, setIsVehiclesExpanded] = useState(true);
+  const [env] = useState(() => localStorage.getItem('sarops_env') || 'remote');
   const [currentTime, setCurrentTime] = useState(Date.now());
 
   const recordAction = useCallback(async (actionText) => {
@@ -1054,6 +1055,15 @@ const AdminPage = () => {
     }
   };
 
+  const toggleEnvironment = () => {
+    const newEnv = env === 'local' ? 'remote' : 'local';
+    if (window.confirm(`Switch to ${newEnv.toUpperCase()} environment? This will sign you out and reload the application.`)) {
+      localStorage.setItem('sarops_env', newEnv);
+      localStorage.removeItem('sarops_user_email');
+      window.location.reload();
+    }
+  };
+
   const handleOpenUserModal = (user = null) => {
     setEditingUser(user);
     setShowUserModal(true);
@@ -1196,6 +1206,14 @@ const AdminPage = () => {
             disabled={loading} 
           >
             {loading ? 'Clearing...' : 'Clear Data'}
+          </button>
+          <button 
+            onClick={toggleEnvironment} 
+            className="action-btn action-btn-secondary" 
+            style={{ marginLeft: 'auto', color: env === 'local' ? '#dc2626' : undefined, fontWeight: env === 'local' ? 'bold' : 'normal' }}
+            title={`Currently connected to ${env.toUpperCase()}. Click to switch.`}
+          >
+            Switch to {env === 'local' ? 'REMOTE' : 'LOCAL'} DB
           </button>
         </div>
       </div>
