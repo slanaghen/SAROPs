@@ -20,7 +20,8 @@ BEGIN
         latest_incident_id := 'DEV-' || TO_CHAR(NOW(), 'YYYYMMDD-HH24MI');
         incident_start_time := NOW();
         INSERT INTO incidents (incident_id, name, number, start_datetime)
-        VALUES (latest_incident_id, 'Development Seed Incident', latest_incident_id, incident_start_time);
+        VALUES (latest_incident_id, 'Development Seed Incident', latest_incident_id, incident_start_time)
+        ON CONFLICT (incident_id) DO NOTHING;
     END IF;
 
     SELECT op_period_id INTO latest_op_id
@@ -32,7 +33,8 @@ BEGIN
     IF latest_op_id IS NULL THEN
         latest_op_id := gen_random_uuid();
         INSERT INTO operational_periods (op_period_id, incident_id, op_number, start_datetime)
-        VALUES (latest_op_id, latest_incident_id, 1, incident_start_time);
+        VALUES (latest_op_id, latest_incident_id, 1, incident_start_time)
+        ON CONFLICT (incident_id, op_number) DO NOTHING;
     END IF;
 
     -- 2. Identify the auth_uid for testing (Current user or latest Assigned responder)
