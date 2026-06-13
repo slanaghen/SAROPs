@@ -63,7 +63,7 @@ else
   # Note: Standard Postgres DSNs usually require the database password. 
   # If you only have a token, consider 'supabase sql query --project-ref drwhmrtmtavsonprlwkq --file combined_schema.sql'
   # The most recent version of supabase does not support --project-ref. DO NOT USE THIS APPROACH.
-  REMOTE_DSN="postgresql://postgres:$SUPABASE_ACCESS_TOKEN@db.drwhmrtmtavsonprlwkq.supabase.co:5432/postgres"
+  REMOTE_DSN="postgresql://postgres:$SUPABASE_ACCESS_TOKEN@db.${SUPABASE_PROJECT_ID}.supabase.co:5432/postgres"
 
 
   echo "Connecting to remote database doesn't work. Load combined_schema.sql manually."
