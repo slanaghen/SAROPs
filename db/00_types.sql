@@ -29,7 +29,7 @@ CREATE TYPE responder_status AS ENUM (
 
 DROP TYPE IF EXISTS responder_type CASCADE;
 CREATE TYPE responder_type AS ENUM (
-  'SAR', 'Fire', 'Law', 'Medical'
+  'SAR', 'Fire', 'Law', 'Medical', 'Other'
 );
 
 DROP TYPE IF EXISTS display_density CASCADE;

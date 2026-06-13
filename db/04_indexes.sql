@@ -3,11 +3,22 @@ CREATE INDEX idx_operational_periods_start_datetime ON operational_periods(start
 
 -- Secondary Indexes for Teams
 CREATE INDEX idx_teams_leader_responder_id ON teams(leader_responder_id);
+
+-- Partial unique index to enforce one active Staff team per OP
+CREATE UNIQUE INDEX idx_one_staff_per_op 
+ON teams (op_period_id) 
+WHERE type = 'Staff' AND status != 'Disbanded';
+
 CREATE INDEX idx_teams_status ON teams(status);
 
 -- Secondary Indexes for Assignments
 CREATE INDEX idx_assignments_team_id ON assignments(team_id);
 CREATE INDEX idx_assignments_status ON assignments(status);
+
+-- Unique index for manual assignments to support upsert and prevent duplicates in the same OP
+CREATE UNIQUE INDEX idx_assignment_title_per_op 
+ON assignments (op_period_id, title) 
+WHERE (sartopo_id IS NULL);
 
 -- Secondary Indexes for History and Audit
 CREATE INDEX idx_responder_team_history_responder_id ON responder_team_history(responder_id);
