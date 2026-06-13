@@ -15,7 +15,7 @@ DECLARE
 BEGIN
     INSERT INTO teams (op_period_id, team_name_number, sartopo_color_hex, type, status, last_par_check)
     VALUES (NEW.op_period_id, 'Staff', '#0000FF', 'Staff', 'Deployed', CURRENT_TIMESTAMP)
-    ON CONFLICT (op_period_id) WHERE type = 'Staff' AND status != 'Disbanded'
+    ON CONFLICT (op_period_id) WHERE (type = 'Staff' AND status != 'Disbanded')
     DO UPDATE SET updated_at = CURRENT_TIMESTAMP
     RETURNING team_id INTO _team_id;
 

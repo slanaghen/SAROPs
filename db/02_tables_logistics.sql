@@ -11,6 +11,7 @@ CREATE TABLE users (
   cell_phone TEXT,
   responder_type responder_type,
   special_skills TEXT,
+  vehicles TEXT,
   display_density display_density DEFAULT 'comfortable',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -26,6 +27,7 @@ CREATE TABLE responders (
   identifier TEXT NOT NULL,
   cell_phone TEXT,
   device_id TEXT NOT NULL,
+  vehicles TEXT,
   special_skills TEXT,
   access_level access_level NOT NULL DEFAULT 'responder',
   responder_type responder_type,
@@ -60,6 +62,7 @@ DROP TABLE IF EXISTS vehicles CASCADE;
 CREATE TABLE vehicles (
   vehicle_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   incident_id TEXT NOT NULL REFERENCES incidents(incident_id) ON DELETE CASCADE ON UPDATE CASCADE,
+  responder_id UUID REFERENCES responders(responder_id) ON DELETE CASCADE,
   designation TEXT NOT NULL,
   type TEXT,
   team_id UUID REFERENCES teams(team_id) ON DELETE SET NULL,
@@ -68,5 +71,6 @@ CREATE TABLE vehicles (
   checkout_datetime TIMESTAMP WITH TIME ZONE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT vehicle_incident_designation_unique UNIQUE (incident_id, designation)
+  CONSTRAINT vehicle_incident_designation_unique UNIQUE (incident_id, designation),
+  CONSTRAINT check_vehicle_checkout_date_presence CHECK (status != 'CheckedOut' OR checkout_datetime IS NOT NULL)
 );

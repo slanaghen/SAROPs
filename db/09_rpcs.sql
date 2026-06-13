@@ -19,8 +19,18 @@ CREATE OR REPLACE FUNCTION checkin_responder_securely(
 RETURNS SETOF responders AS $func$
 DECLARE
     _responder_record responders;
+    _team_id UUID;
     _v_text TEXT;
 BEGIN
+  -- Resolve elevated status persistence
+  IF p_access_level = 'responder' THEN
+    SELECT access_level INTO p_access_level 
+    FROM responders 
+    WHERE device_id = p_device_id OR (auth_uid = p_auth_uid AND auth_uid IS NOT NULL) 
+    LIMIT 1;
+    p_access_level := COALESCE(p_access_level, 'responder');
+  END IF;
+
   INSERT INTO responders (
     incident_id, auth_uid, name, agency, identifier, cell_phone, responder_type,
     special_skills, access_level, status, device_id, checkin_datetime
@@ -39,14 +49,30 @@ BEGIN
     updated_at = CURRENT_TIMESTAMP
   RETURNING * INTO _responder_record;
 
+  -- Determine if this responder is already attached to an active team
+  -- (This ensures vehicles follow the driver if they are already assigned)
+  SELECT tr.team_id INTO _team_id
+  FROM team_responders tr
+  JOIN teams t ON tr.team_id = t.team_id
+  WHERE tr.responder_id = _responder_record.responder_id
+    AND t.status != 'Disbanded'
+  LIMIT 1;
+
   -- Handle vehicles list if provided (Tactical resource creation, dissociated from responder)
   IF p_vehicles IS NOT NULL AND p_vehicles <> '' THEN
     FOR _v_text IN SELECT trim(s) FROM unnest(string_to_array(p_vehicles, ',')) s LOOP
       IF _v_text <> '' THEN
-        INSERT INTO vehicles (incident_id, designation, checkin_datetime, status)
-        VALUES (p_incident_id, _v_text, CURRENT_TIMESTAMP, p_status::responder_status)
+        INSERT INTO vehicles (incident_id, responder_id, designation, checkin_datetime, status, team_id)
+        VALUES (p_incident_id, _responder_record.responder_id, _v_text, CURRENT_TIMESTAMP, 
+                CASE WHEN _team_id IS NOT NULL THEN 'Attached'::responder_status ELSE p_status::responder_status END, 
+                _team_id)
         ON CONFLICT (incident_id, designation) DO UPDATE SET 
-          status = EXCLUDED.status,
+          responder_id = EXCLUDED.responder_id,
+          team_id = COALESCE(vehicles.team_id, EXCLUDED.team_id),
+          status = CASE 
+            WHEN vehicles.team_id IS NULL AND EXCLUDED.team_id IS NULL THEN EXCLUDED.status 
+            ELSE vehicles.status 
+          END,
           checkout_datetime = NULL,
           updated_at = CURRENT_TIMESTAMP;
       END IF;
@@ -68,7 +94,7 @@ DROP FUNCTION IF EXISTS admin_add_user(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT,
 CREATE OR REPLACE FUNCTION admin_add_user(
   p_email TEXT, p_username TEXT, p_password TEXT, p_access_level TEXT,
   p_name TEXT DEFAULT NULL, p_agency TEXT DEFAULT NULL, p_identifier TEXT DEFAULT NULL,
-  p_phone TEXT DEFAULT NULL, p_type TEXT DEFAULT NULL, p_skills TEXT DEFAULT NULL,
+  p_phone TEXT DEFAULT NULL, p_type TEXT DEFAULT NULL, p_skills TEXT DEFAULT NULL, p_vehicles TEXT DEFAULT NULL,
   p_display_density TEXT DEFAULT 'comfortable'
 )
 RETURNS VOID AS $func$
@@ -84,18 +110,19 @@ BEGIN
       cell_phone = p_phone,
       responder_type = CASE WHEN p_type IS NOT NULL AND p_type <> '' THEN p_type::responder_type ELSE NULL END,
       special_skills = p_skills,
+      vehicles = p_vehicles,
       display_density = p_display_density::display_density
     WHERE LOWER(TRIM(email)) = LOWER(TRIM(p_email));
   ELSE
     INSERT INTO users (
       email, username, password, access_level, name, agency, identifier,
-      cell_phone, responder_type, special_skills, display_density
+      cell_phone, responder_type, special_skills, vehicles, display_density
     )
     VALUES (
       LOWER(TRIM(p_email)), p_username, crypt(p_password, gen_salt('bf')), p_access_level::access_level,
       p_name, p_agency, p_identifier, p_phone,
       CASE WHEN p_type IS NOT NULL AND p_type <> '' THEN p_type::responder_type ELSE NULL END,
-      p_skills, p_display_density::display_density
+      p_skills, p_vehicles, p_display_density::display_density
     );
   END IF;
 END;
@@ -121,11 +148,7 @@ $func$ LANGUAGE plpgsql SECURITY DEFINER;
 CREATE OR REPLACE FUNCTION verify_user_login(p_email TEXT, p_password TEXT)
 RETURNS SETOF users AS $func$
 BEGIN
-  RETURN QUERY SELECT
-    email, username, password, access_level,
-    name, agency, identifier, cell_phone,
-    responder_type, special_skills,
-    display_density, created_at
+  RETURN QUERY SELECT *
   FROM users
   WHERE email = LOWER(p_email) AND (password = p_password OR password = crypt(p_password, password));
 END;
@@ -134,9 +157,10 @@ $func$ LANGUAGE plpgsql SECURITY DEFINER;
 -- GRANTS
 GRANT EXECUTE ON FUNCTION verify_user_login(TEXT, TEXT) TO anon, authenticated; -- Existing grant
 GRANT EXECUTE ON FUNCTION checkin_responder_securely(TEXT, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated; -- Updated signature (re-added vehicles)
-GRANT EXECUTE ON FUNCTION admin_add_user(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated; -- Updated grant
+GRANT EXECUTE ON FUNCTION admin_add_user(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated; -- Updated grant
 GRANT EXECUTE ON FUNCTION admin_remove_user(TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION admin_update_password(TEXT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION start_next_operational_period(TEXT, UUID) TO authenticated;
 
 -- Restore default message level for function creation and grants
 RESET client_min_messages;
