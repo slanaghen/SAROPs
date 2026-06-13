@@ -54,13 +54,13 @@ if [ "$DB_INSTANCE" = "LOCAL" ]; then
 
   # Execute the script against the local Supabase Postgres container
   # -v ON_ERROR_STOP=1 ensures the script stops immediately if any command fails
-  PGPASSWORD=postgres psql -h 127.0.0.1 -p 54322 -U postgres -d postgres -v ON_ERROR_STOP=1 -f $COMBINED_SQL 
+  PGPASSWORD=postgres psql -h 127.0.0.1 -p $SUPABASE_PORT -U postgres -d postgres -v ON_ERROR_STOP=1 -f $COMBINED_SQL 
   rm $COMBINED_SQL
 else 
   echo "Connecting to remote database..."
 
   # Remote DSN for direct Postgres connection. 
-  REMOTE_DSN="postgresql://postgres:${SUPABASE_ACCESS_TOKEN}@db.${SUPABASE_PROJECT_ID}.supabase.co:5432/postgres"
+  REMOTE_DSN="postgresql://postgres:${SUPABASE_ACCESS_TOKEN}@db.${SUPABASE_PROJECT_ID}.supabase.co:${SUPABASE_PORT}/postgres"
 
 
   echo "Connecting to remote database doesn't work. Load combined_schema.sql manually."
