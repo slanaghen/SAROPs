@@ -5,6 +5,7 @@
 
 DB_DIR="./db"
 COMBINED_SQL="combined_schema.sql"
+source .env
 
 echo "--- Building combined schema ---"
 
@@ -56,17 +57,19 @@ if [ "$DB_INSTANCE" = "LOCAL" ]; then
   # -v ON_ERROR_STOP=1 ensures the script stops immediately if any command fails
   PGPASSWORD=postgres psql -h 127.0.0.1 -p $SUPABASE_PORT -U postgres -d postgres -v ON_ERROR_STOP=1 -f $COMBINED_SQL 
   rm $COMBINED_SQL
-else 
-  echo "Connecting to remote database..."
-
-  # Remote DSN for direct Postgres connection. 
-  REMOTE_DSN="postgresql://postgres:${SUPABASE_ACCESS_TOKEN}@db.${SUPABASE_PROJECT_ID}.supabase.co:${SUPABASE_PORT}/postgres"
-
-
-  echo "Connecting to remote database doesn't work. Load combined_schema.sql manually."
-  #if ! supabase db query --db-url "$REMOTE_DSN" --file "$COMBINED_SQL"; then
-  #  echo "❌ Error: Failed to execute query on remote database."
-  #  exit 1
-  #fi
+else
+  if ! supabase db query --db-url "$REMOTE_DSN" --file "$COMBINED_SQL"; then
+    # TODO
+    #echo "❌ Error: Failed to execute query on remote database."
+    #rm $COMBINED_SQL
+    echo DEBUG: ${REMOTE_DSN}
+    echo "Connecting to remote database doesn't work. Load combined_schema.sql manually."
+    exit 1
+  fi
 fi
+<<<<<<< HEAD
 echo "✅ Database reinitialized successfully."
+=======
+rm $COMBINED_SQL
+echo "✅ Database reinitialized successfully."
+>>>>>>> a83d503... quick commit amend to remove secrets
