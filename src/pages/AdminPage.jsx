@@ -170,8 +170,8 @@ const AdminPage = () => {
       addToast('Database successfully seeded with test data.', 'success');
     } catch (err) {
       let userFriendlyMessage = err.message;
-      // Specifically catch the "missing function" error to provide a setup hint
-      if (err.message?.includes('seed_data_specific') && err.message?.includes('schema cache')) {
+      // Specifically catch the "missing function" error (PGRST 404 or cache error)
+      if (err.message?.includes('seed_data_specific') || err.message?.includes('schema cache')) {
         userFriendlyMessage = 'The database function "seed_data_specific" is not defined. Please run the seeding SQL script in your Supabase SQL Editor.';
       }
       addToast('Failed to seed database: ' + userFriendlyMessage, 'error');
@@ -201,7 +201,11 @@ const AdminPage = () => {
       await refreshDashboardData();
       addToast('Operational data cleared successfully.', 'success');
     } catch (err) {
-      addToast('Failed to clear data: ' + err.message, 'error');
+      let userFriendlyMessage = err.message;
+      if (err.message?.includes('clear_data') || err.message?.includes('schema cache')) {
+        userFriendlyMessage = 'The database function "clear_data" is not defined. Ensure 99_clear_data.sql is included in your database reinitialization.';
+      }
+      addToast('Failed to clear data: ' + userFriendlyMessage, 'error');
     } finally {
       setLoading(false);
     }
@@ -988,6 +992,9 @@ const AdminPage = () => {
     try {
       setLoading(true);
 
+      // Log the intent to delete before the record and its associated logs are purged
+      await recordAction?.(`Admin initiated permanent deletion of incident "${name}" (ID: ${id}). All associated operational periods, assignments, teams, and responder records will be removed.`);
+
       // Delete the incident record.
       // This will automatically cascade through operational_periods, teams, 
       // assignments, action_logs, and clues due to PostgreSQL foreign key constraints.
@@ -997,8 +1004,6 @@ const AdminPage = () => {
         .eq('incident_id', id);
 
       if (deleteError) throw deleteError;
-
-      await recordAction?.(`Admin deleted incident "${name}" (ID: ${id}).`);
       // 3. Update context if we deleted the current active session
       if (id === incidentId) {
         logout();
@@ -1085,8 +1090,7 @@ const AdminPage = () => {
             </div>
             <div style={{ display: 'flex', gap: '12px' }}>
               <button 
-                className="action-btn action-btn-secondary" 
-                style={{ borderColor: '#fecaca' }} 
+                className="action-btn action-btn-warning" 
                 onClick={handleLeaveIncident}
                 disabled={responderStatus !== 'Staged'}
                 title={responderStatus !== 'Staged' ? "You must return to 'Staged' status before checking out. Use the Operations dashboard to release yourself from your current team." : "End your operational session for this incident"}

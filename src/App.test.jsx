@@ -26,6 +26,7 @@ vi.mock('./hooks/useResponderTeamAndAssignment', () => ({
 }));
 
 vi.mock('./lib/supabase', () => ({
+  SAROPS_DB_INSTANCE: 'LOCAL',
   supabase: {
     auth: {
       getSession: vi.fn().mockResolvedValue({ data: { session: null } }),

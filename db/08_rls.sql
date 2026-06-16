@@ -9,6 +9,8 @@ ALTER TABLE team_responders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE action_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE team_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE vehicles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE responder_team_history ENABLE ROW LEVEL SECURITY;
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 
 -- RLS HELPERS
 CREATE OR REPLACE FUNCTION is_anonymous_responder()
@@ -82,8 +84,13 @@ $func$ LANGUAGE sql STABLE SECURITY DEFINER;
 
 CREATE OR REPLACE FUNCTION is_incident_active(_incident_id TEXT)
 RETURNS BOOLEAN AS $func$
-  SELECT EXISTS (SELECT 1 FROM incidents WHERE incident_id = _incident_id AND end_datetime IS NULL);
-$func$ LANGUAGE sql STABLE SECURITY DEFINER;
+BEGIN
+  RETURN EXISTS (
+    SELECT 1 FROM incidents 
+    WHERE incident_id = _incident_id AND end_datetime IS NULL
+  );
+END;
+$func$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
 
 CREATE OR REPLACE FUNCTION is_active_op_period(_op_period_id UUID)
 RETURNS BOOLEAN AS $func$
@@ -99,12 +106,12 @@ RETURNS BOOLEAN AS $func$
 $func$ LANGUAGE sql STABLE SECURITY DEFINER;
 
 -- POLICIES: Incidents
-CREATE POLICY "Visible to all authenticated" ON incidents FOR SELECT TO authenticated USING (TRUE);
+CREATE POLICY "Visible to everyone" ON incidents FOR SELECT TO anon, authenticated USING (TRUE);
 CREATE POLICY "Admins manage incidents" ON incidents FOR ALL TO authenticated USING (check_is_operational_staff());
 CREATE POLICY "Allow all authenticated to start an incident" ON incidents FOR INSERT TO authenticated WITH CHECK (TRUE);
 
 -- POLICIES: Operational Periods
-CREATE POLICY "Visible to all authenticated" ON operational_periods FOR SELECT TO authenticated USING (TRUE);
+CREATE POLICY "Visible to everyone" ON operational_periods FOR SELECT TO anon, authenticated USING (TRUE);
 CREATE POLICY "Admins manage OPs" ON operational_periods FOR ALL TO authenticated USING (check_is_operational_staff());
 CREATE POLICY "Allow all authenticated to create OPs" ON operational_periods FOR INSERT TO authenticated WITH CHECK (TRUE);
 
@@ -162,6 +169,15 @@ CREATE POLICY "Allow team members to update their assignment" ON assignments
 -- POLICIES: Messaging
 CREATE POLICY "View relevant messages" ON team_messages FOR SELECT TO authenticated 
   USING (team_id IN (SELECT team_id FROM team_responders WHERE responder_id = get_my_responder_id()) OR check_is_operational_staff());
+CREATE POLICY "Allow all authenticated to insert messages to their team or staff" ON team_messages
+  FOR INSERT TO authenticated 
+  WITH CHECK (
+    is_member_of_team(team_id) 
+    OR EXISTS (SELECT 1 FROM teams WHERE team_id = team_messages.team_id AND type = 'Staff') 
+    OR check_is_operational_staff()
+  );
+CREATE POLICY "Admins/Staff can manage all team messages" ON team_messages
+  FOR ALL TO authenticated USING (check_is_operational_staff()) WITH CHECK (check_is_operational_staff());
 
 -- POLICIES: Action Logs
 CREATE POLICY "Visible to relevant responders" ON action_logs FOR SELECT TO authenticated
@@ -173,7 +189,9 @@ CREATE POLICY "Allow all authenticated to record action logs in active incidents
   WITH CHECK (is_incident_active(incident_id));
 
 -- POLICIES: Users (Staff Only)
-CREATE POLICY "Staff view users" ON users FOR SELECT TO authenticated USING (check_is_operational_staff());
+-- Allow users to view their own profile, and staff/admins to view all users
+CREATE POLICY "Allow authenticated to view own profile" ON users FOR SELECT TO authenticated USING (auth.jwt() ->> 'email' = users.email OR check_is_operational_staff());
+CREATE POLICY "Admins can manage all users" ON users FOR ALL TO authenticated USING (check_is_operational_staff()) WITH CHECK (check_is_operational_staff());
 
 -- POLICIES: Clues
 CREATE POLICY "View clues in incident" ON clues 
@@ -187,6 +205,8 @@ CREATE POLICY "Allow anonymous to insert clues" ON clues
 CREATE POLICY "Allow authenticated to view their own team history" ON responder_team_history
   FOR SELECT TO authenticated 
   USING (responder_id IN (SELECT responder_id FROM responders WHERE auth_uid = auth.uid()));
+CREATE POLICY "Admins/Staff can manage all team history" ON responder_team_history
+  FOR ALL TO authenticated USING (check_is_operational_staff()) WITH CHECK (check_is_operational_staff());
 
 -- POLICIES: Team Responders (Junction Table)
 CREATE POLICY "Allow authenticated to view active team memberships" ON team_responders

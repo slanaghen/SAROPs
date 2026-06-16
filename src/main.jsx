@@ -30,7 +30,7 @@ const AdminProtectedRoute = ({ children }) => {
 
 const StaffProtectedRoute = ({ children }) => {
   const { accessLevel, isAdmin } = useIncident();
-  const isStaff = isAdmin && (accessLevel === 'staff' || accessLevel === 'admin');
+  const isStaff = isAdmin || accessLevel === 'staff' || accessLevel === 'admin';
   if (!isStaff) return <Navigate to="/responder" replace />;
   return children;
 };

@@ -21,7 +21,8 @@ BEGIN
 
     INSERT INTO assignments (op_period_id, title, resource_type, status, team_id)
     VALUES (NEW.op_period_id, 'Command Staff', 'Staff', 'Deployed', _team_id)
-    ON CONFLICT (op_period_id, sartopo_id) DO UPDATE SET team_id = EXCLUDED.team_id;
+    ON CONFLICT (op_period_id, title) WHERE (sartopo_id IS NULL)
+    DO UPDATE SET team_id = EXCLUDED.team_id, updated_at = CURRENT_TIMESTAMP;
 
     RETURN NEW;
 END;

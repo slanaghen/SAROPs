@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { Incident, Responder, Team, ResponderStatus } from '../types/sarops-types';
@@ -128,49 +128,55 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
     : incidentData?.opPeriodId;
 
   // Fetch active incidents for the dropdown and synchronize with real-time updates
-  useEffect(() => {
+  const fetchActiveIncidents = useCallback(async () => {
     if (isAuthenticating) return;
+    setLoadingIncidents(true);
+    try {
+      const { data, error: fetchError } = await supabase
+        .from('incidents')
+        .select(`
+          incident_id, 
+          name, 
+          number,
+          operational_periods (
+            op_period_id,
+            op_number,
+            start_datetime
+          )
+        `)
+        .is('end_datetime', null) // Filter for active incidents
+        .order('start_datetime', { ascending: false });
 
-    const fetchActiveIncidents = async () => {
-      setLoadingIncidents(true);
-      try {
-        const { data, error: fetchError } = await supabase
-          .from('incidents')
-          .select(`
-            incident_id, 
-            name, 
-            number,
-            operational_periods (
-              op_period_id,
-              op_number,
-              start_datetime
-            )
-          `)
-          .is('end_datetime', null) // Filter for active incidents
-          .order('start_datetime', { ascending: false });
-
-        if (fetchError) throw fetchError;
-        setIncidents(data || []);
-        
-        if (data && data.length > 0) {
-          const incidentFromState = location.state?.newIncidentId;
-          if (incidentFromState && data.some(inc => inc.incident_id === incidentFromState)) {
-            setSelectedIncidentId(incidentFromState);
-          } else if (contextIncidentId && data.some(inc => inc.incident_id === contextIncidentId)) {
-            setSelectedIncidentId(contextIncidentId);
-          } else {
-            setSelectedIncidentId(data[0].incident_id);
-          }
+      if (fetchError) throw fetchError;
+      const freshIncidents = data || [];
+      setIncidents(freshIncidents);
+      
+      if (freshIncidents.length > 0) {
+        const incidentFromState = location.state?.newIncidentId;
+        if (incidentFromState && freshIncidents.some(inc => inc.incident_id === incidentFromState)) {
+          setSelectedIncidentId(incidentFromState);
+        } else if (contextIncidentId && freshIncidents.some(inc => inc.incident_id === contextIncidentId)) {
+          setSelectedIncidentId(contextIncidentId);
+        } else {
+          // Maintain selection if valid, otherwise default to first available
+          setSelectedIncidentId(prev => (prev && freshIncidents.some(inc => inc.incident_id === prev)) ? prev : freshIncidents[0].incident_id);
         }
-      } catch (err) {
-        console.error('Failed to load active incidents:', err);
-        setIncidentError('Failed to load active incidents. Please check your connection.');
-      } finally {
-        setLoadingIncidents(false);
+      } else {
+        setSelectedIncidentId('');
       }
-    };
+    } catch (err) {
+      console.error('Failed to load active incidents:', err);
+      setIncidentError('Failed to load active incidents. Please check your connection.');
+    } finally {
+      setLoadingIncidents(false);
+    }
+  }, [isAuthenticating, contextIncidentId, location.state?.newIncidentId]);
 
+  useEffect(() => {
     fetchActiveIncidents();
+
+    // Refresh data when browser tab regains focus (e.g. after reinitializing DB in terminal)
+    window.addEventListener('focus', fetchActiveIncidents);
 
     // Set up real-time listener to ensure incidents that end are removed from the list immediately
     const channel = supabase
@@ -182,8 +188,9 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
 
     return () => {
       supabase.removeChannel(channel);
+      window.removeEventListener('focus', fetchActiveIncidents);
     };
-  }, [isAuthenticating, contextIncidentId, location.state?.newIncidentId]);
+  }, [fetchActiveIncidents, location.pathname]);
 
   /**
    * Handles navigation after check-in or team assignment is complete
@@ -562,7 +569,6 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
           onCreateIncident={handleCreateIncident}
           isAdmin={isAdmin} // Pass isAdmin to ResponderCheckin
           selectedIncidentId={selectedIncidentId}
-          initialData={location.state?.responderData}
         />
       )}
     </div>
@@ -570,22 +576,3 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
 };
 
 export default ResponderCheckinPage;
-
-/**
- * USAGE
- * 
- * import ResponderCheckinPage from './pages/ResponderCheckinPage';
- * 
- * export default function App() {
- *   return (
- *     <ResponderCheckinPage 
- *       incidentId="incident-uuid"
- *       operationalPeriodId="op-period-uuid"
- *       onResponderCheckedIn={(responder) => {
- *         console.log('Responder checked in:', responder);
- *         // Navigate to next screen
- *       }}
- *     />
- *   );
- * }
- */

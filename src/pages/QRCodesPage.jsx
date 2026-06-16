@@ -103,7 +103,7 @@ const QRCodesPage = () => {
           </div>
           <p style={{ marginTop: '16px', fontSize: '14px', fontWeight: 600, color: '#1e293b' }}>Scan to Check-In</p>
           <p style={{ fontSize: '11px', color: '#94a3b8', wordBreak: 'break-all', maxWidth: '250px' }}>{checkinUrl}</p>
-          <button className="action-btn action-btn-secondary action-btn-header no-print" style={{ marginTop: '12px' }} onClick={() => downloadQR(checkinUrl, 'SAROps-CheckIn-QR')}>
+          <button className="action-btn action-btn-primary action-btn-header no-print" style={{ marginTop: '12px' }} onClick={() => downloadQR(checkinUrl, 'SAROps-CheckIn-QR')}>
             Download PNG
           </button>
         </div>
@@ -121,7 +121,7 @@ const QRCodesPage = () => {
               </div>
               <p style={{ marginTop: '16px', fontSize: '14px', fontWeight: 600, color: '#1e293b' }}>Operational Map ID: {sartopoId}</p>
               <p style={{ fontSize: '11px', color: '#94a3b8', wordBreak: 'break-all', maxWidth: '250px' }}>{sartopoUrl}</p>
-              <button className="btn btn-secondary btn-sm no-print" style={{ marginTop: '12px' }} onClick={() => downloadQR(sartopoUrl, 'SAROps-Map-QR')}>
+              <button className="action-btn action-btn-primary no-print" style={{ marginTop: '12px' }} onClick={() => downloadQR(sartopoUrl, 'SAROps-Map-QR')}>
                 Download PNG
               </button>
             </>
@@ -153,14 +153,13 @@ const QRCodesPage = () => {
           border: 1px solid #eee;
           border-radius: 16px;
           text-align: center;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
+          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+          width: 350px;
         }
         @media print {
           .no-print { display: none !important; }
-          body { background: white !important; }
-          .qr-card { border: none !important; padding: 10px !important; break-inside: avoid; }
+          .qr-codes-page { padding: 0 !important; margin: 0 !important; maxWidth: none !important; }
+          .qr-card { border: none !important; box-shadow: none !important; break-inside: avoid; }
         }
       `}</style>
     </div>

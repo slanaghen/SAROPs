@@ -5,6 +5,7 @@
 
 DB_DIR="./db"
 COMBINED_SQL="combined_schema.sql"
+source .env
 
 echo "--- Building combined schema ---"
 
@@ -22,6 +23,8 @@ REQUIRED_FILES=(
   "$DB_DIR/09_rpcs.sql"
   "$DB_DIR/10_seed.sql"
   "$DB_DIR/11_admin_rpcs.sql"
+  "$DB_DIR/seed-data-specific.sql"
+  "$DB_DIR/99_clear_data.sql"
 )
 
 for file in "${REQUIRED_FILES[@]}"; do
@@ -34,9 +37,9 @@ done
 # Order is critical due to foreign key and type dependencies
 cat "${REQUIRED_FILES[@]}" > $COMBINED_SQL
 
-echo "--- Executing ${DB_INSTANCE} reinitialization ---"
+echo "--- Executing ${SAROPS_DB_INSTANCE} reinitialization ---"
 
-if [ "$DB_INSTANCE" = "LOCAL" ]; then
+if [ "$SAROPS_DB_INSTANCE" = "LOCAL" ]; then
   # Check if Supabase local services are running
   if ! supabase status > /dev/null 2>&1; then
     echo "❌ Error: Supabase local services are not running."
@@ -45,31 +48,29 @@ if [ "$DB_INSTANCE" = "LOCAL" ]; then
     exit 1
   fi
 
-  echo "Connecting to local database via psql..."
+  echo "Connecting to local database via psql (port ${DB_LOCAL_PORT:-54322})..."
+
   if ! command -v psql &> /dev/null; then
     echo "❌ Error: 'psql' client not found. Please run scripts/SAROPs-Install.sh first."
     rm $COMBINED_SQL
     exit 1
   fi
 
-  # Execute the script against the local Supabase Postgres container
-  # -v ON_ERROR_STOP=1 ensures the script stops immediately if any command fails
-  PGPASSWORD=postgres psql -h 127.0.0.1 -p 54322 -U postgres -d postgres -v ON_ERROR_STOP=1 -f $COMBINED_SQL 
+  if ! PGPASSWORD=postgres psql -h 127.0.0.1 -p ${DB_LOCAL_PORT:-54322} -U postgres -d postgres -v ON_ERROR_STOP=1 -f $COMBINED_SQL; then
+    echo "❌ Error: Failed to execute query on local database. Ensure port ${DB_LOCAL_PORT:-54322} is correct and 'supabase start' has finished."
+    rm $COMBINED_SQL
+    exit 1
+  fi
   rm $COMBINED_SQL
-else 
-  echo "Connecting to remote database..."
-
-  # Remote DSN for direct Postgres connection. 
-  # Note: Standard Postgres DSNs usually require the database password. 
-  # If you only have a token, consider 'supabase sql query --project-ref drwhmrtmtavsonprlwkq --file combined_schema.sql'
-  # The most recent version of supabase does not support --project-ref. DO NOT USE THIS APPROACH.
-  REMOTE_DSN="postgresql://postgres:$SUPABASE_ACCESS_TOKEN@db.drwhmrtmtavsonprlwkq.supabase.co:5432/postgres"
-
-
-  echo "Connecting to remote database doesn't work. Load combined_schema.sql manually."
-  #if ! supabase db query --db-url "$REMOTE_DSN" --file "$COMBINED_SQL"; then
-  #  echo "❌ Error: Failed to execute query on remote database."
-  #  exit 1
-  #fi
+  # Notify PostgREST to reload schema after local DB changes
+  PGPASSWORD=postgres psql -h 127.0.0.1 -p ${DB_LOCAL_PORT:-54322} -U postgres -d postgres -c "NOTIFY pgrst, 'reload schema';"
+else
+  if ! supabase sql query --project-ref $SUPABASE_PROJECT_ID --file "$COMBINED_SQL"; then
+    echo "❌ Error: Failed to execute query on remote database."
+    exit 1
+  fi
+  # Notify PostgREST to reload schema after remote DB changes
+  # Note: The project-ref needs to be passed again for the NOTIFY command.
+  supabase sql query --project-ref $SUPABASE_PROJECT_ID "NOTIFY pgrst, 'reload schema';"
 fi
-echo "✅ Database reinitialized successfully."
+echo "✅ ${SAROPS_DB_INSTANCE} Database reinitialized successfully."

@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import '../../styles/ActionButtons.css';
 import '../../styles/FormElements.css';
 
 const Login = ({ onLoginSuccess }) => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [incidents, setIncidents] = useState([]);
@@ -28,8 +29,8 @@ const Login = ({ onLoginSuccess }) => {
     fetchDensity();
   }, []);
 
-  useEffect(() => {
-    const fetchActiveIncidents = async () => {
+  const fetchActiveIncidents = useCallback(async () => {
+    try {
       const { data, error: fetchError } = await supabase
         .from('incidents')
         .select('incident_id, name, number')
@@ -38,10 +39,33 @@ const Login = ({ onLoginSuccess }) => {
 
       if (!fetchError && data) {
         setIncidents(data);
+        // Reset selection if the current one is no longer in the list
+        setSelectedIncidentId(prev => (prev && data.some(inc => inc.incident_id === prev)) ? prev : (data.length > 0 ? data[0].incident_id : ''));
+      } else if (!fetchError) {
+        setIncidents([]);
+        setSelectedIncidentId('');
       }
-    };
-    fetchActiveIncidents();
+    } catch (err) {
+      console.error('Login: Failed to refresh incidents:', err);
+    }
   }, []);
+
+  useEffect(() => {
+    fetchActiveIncidents();
+
+    // Real-time listener for incident changes (newly started or ended missions)
+    const channel = supabase
+      .channel('public:incidents-login')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'incidents' }, fetchActiveIncidents)
+      .subscribe();
+
+    window.addEventListener('focus', fetchActiveIncidents);
+
+    return () => {
+      supabase.removeChannel(channel);
+      window.removeEventListener('focus', fetchActiveIncidents);
+    };
+  }, [fetchActiveIncidents, location.pathname]);
 
   const handleAdminLogin = async (e) => {
     e.preventDefault();
@@ -244,40 +268,37 @@ const Login = ({ onLoginSuccess }) => {
               />
             </div>
             <button type="submit" className="action-btn action-btn-primary action-btn-full" disabled={loading} style={{ marginTop: 'var(--space-lg)' }}>
-              {loading ? 'Sending...' : 'Send Verification Code'}
+              {loading ? 'Sending Code...' : 'Register'}
             </button>
-            <button type="button" onClick={() => setView('login')} className="action-btn action-btn-secondary action-btn-full" style={{ marginTop: 'var(--space-md)' }}>
-              Back to Login
-            </button>
+            <button type="button" onClick={() => setView('login')} className="action-btn action-btn-secondary action-btn-full" style={{ marginTop: 'var(--space-md)' }}>Back to Login</button>
           </form>
         )}
 
         {view === 'verify' && (
           <form onSubmit={handleVerifyOtp}>
             <div className="form-field">
-              <label className="form-label">
-                6-Digit Code
-              </label>
+              <label className="form-label">Verification Code</label>
               <input 
                 type="text" 
                 className="form-input"
                 value={otpToken} 
                 onChange={(e) => setOtpToken(e.target.value)} 
                 placeholder="123456"
-                maxLength={6}
                 required 
               />
             </div>
             <button type="submit" className="action-btn action-btn-primary action-btn-full" disabled={loading} style={{ marginTop: 'var(--space-lg)' }}>
-              {loading ? 'Verifying...' : 'Verify & Continue'}
+              {loading ? 'Verifying...' : 'Verify & Login'}
             </button>
-            <button type="button" onClick={() => setView('register')} className="action-btn action-btn-secondary action-btn-full" style={{ marginTop: 'var(--space-md)' }}>
-              Back
-            </button>
+            <button type="button" onClick={() => setView('register')} className="action-btn action-btn-secondary action-btn-full" style={{ marginTop: 'var(--space-md)' }}>Try Different Email</button>
           </form>
         )}
 
-        {error && <p className="alert alert-error">{error}</p>}
+        {error && (
+          <div className="alert alert-error" style={{ marginTop: 'var(--space-lg)' }}>
+            {error}
+          </div>
+        )}
       </div>
     </div>
   );
