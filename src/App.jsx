@@ -13,6 +13,7 @@ function App() {
   const [user, setUser] = useState(null);
   const [displayDensity, setDisplayDensity] = useState('comfortable');
   const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
+  const [incidentMetadata, setIncidentMetadata] = useState(null);
   const { addToast } = useToast();
   const [menuOpen, setMenuOpen] = useState(false);
   const navigate = useNavigate();
@@ -28,7 +29,7 @@ function App() {
       
       // Fetch initial user settings
       const { data } = await supabase.from('users')
-        .select('display_density')
+        .select('display_density, access_level, name, agency, identifier, cell_phone, responder_type, special_skills, vehicles')
         .eq('email', normalizedEmail)
         .maybeSingle();
       
@@ -102,6 +103,41 @@ function App() {
     logout
   } = useIncident();
 
+  // Reactive Incident Metadata Synchronization
+  // Ensures sarstream status and URLs are live across all connected clients.
+  useEffect(() => {
+    if (!isActive || !incidentId) {
+      setIncidentMetadata(null);
+      return;
+    }
+
+    const syncMetadata = async () => {
+      const { data } = await supabase
+        .from('incidents')
+        .select('sarstream, sarstream_data, sartopo_id')
+        .eq('incident_id', incidentId)
+        .maybeSingle();
+      if (data) setIncidentMetadata(data);
+    };
+
+    syncMetadata();
+
+    const channel = supabase
+      .channel(`incident-metadata-sync-${incidentId}`)
+      .on('postgres_changes', { 
+        event: 'UPDATE', 
+        schema: 'public', 
+        table: 'incidents', 
+        filter: `incident_id=eq.${incidentId}` 
+      }, payload => {
+        // Update local metadata state with new DB values
+        setIncidentMetadata(payload.new);
+      })
+      .subscribe();
+
+    return () => { if (channel) supabase.removeChannel(channel); };
+  }, [isActive, incidentId]);
+
   // Centralized Real-time Session Sync
   // Uses the shared operational hook to ensure the banner and global context
   // are perfectly synchronized with the database state at all times.
@@ -146,11 +182,17 @@ function App() {
     const fetchPending = async () => {
       // Fetch messages since last read that are either for the user's team 
       // OR for the Staff team (acting as a broadcast) in the current operational period.
+      let queryOrConditions = [];
+      if (team?.team_id) {
+        queryOrConditions.push(`team_id.eq.${team.team_id}`);
+      }
+      queryOrConditions.push(`and(teams.type.eq.Staff,teams.op_period_id.eq.${incidentData.opPeriodId})`);
+
       const { data: recentMsgs } = await supabase
         .from('team_messages')
         .select('*, teams!inner(type, op_period_id)')
         .gt('created_at', lastRead)
-        .or(`team_id.eq.${team?.team_id},and(teams.type.eq.Staff,teams.op_period_id.eq.${incidentData.opPeriodId})`);
+        .or(queryOrConditions.join(','));
 
       if (recentMsgs?.some(m => !m.sender_name?.startsWith(responderName))) {
         setHasUnreadMessages(true);
@@ -302,7 +344,7 @@ function App() {
     const publicPaths = ['/', '/checkin', '/admin', '/incident', '/qrcodes', '/login'];
     
     const isStaffOrAdmin = accessLevel === 'staff' || accessLevel === 'admin';
-    const responderOnlyPaths = ['/', '/checkin', '/login', '/responder', '/settings', '/qrcodes', '/ics', '/checkout'];
+    const responderAllowedPaths = ['/', '/checkin', '/login', '/responder', '/settings', '/qrcodes', '/ics', '/checkout'];
 
     // Combined check for system-level staff or operational-level staff
     const hasStaffPrivileges = isAdmin || isStaffOrAdmin;
@@ -311,7 +353,7 @@ function App() {
     if (!isActive && !hasStaffPrivileges && !user && !hookLoading && !publicPaths.includes(location.pathname)) {
       console.warn(`[App Guard] Unauthorized access attempt to ${location.pathname}. Redirecting to /checkin.`);
       navigate('/checkin');
-    } else if (!hasStaffPrivileges && !responderOnlyPaths.includes(location.pathname)) {
+    } else if (!hasStaffPrivileges && !responderAllowedPaths.includes(location.pathname)) {
       // Enforce: Standard field responders are restricted to the responder dashboard
       console.warn(`[App Guard] Access denied for non-staff responder: ${location.pathname}`);
       navigate('/responder');
@@ -322,6 +364,11 @@ function App() {
     }
   }, [isActive, isAdmin, accessLevel, location.pathname, navigate]);
 
+  // Simplified status determination logic: prioritizing active field status over staging
+  const effectiveStatus = (responderStatus && responderStatus !== 'Staged') 
+    ? responderStatus 
+    : (currentTeamStatus || responderStatus || 'Staged');
+
   return (
     <div className={`app-shell density-${displayDensity} ${displayDensity === 'compact' ? 'compact-mode' : ''}`}>
       <div className="incident-banner">
@@ -329,12 +376,15 @@ function App() {
           <div className="banner-logo-container">
             <img src={logo} alt="SAROps Logo" className="banner-logo" />
             <span className="banner-brand">SAROps</span>
-            <span style={{ 
-              fontSize: '9px', fontWeight: 800, padding: '2px 5px', borderRadius: '4px', marginLeft: '6px',
-              background: SAROPS_DB_INSTANCE === 'REMOTE' ? '#fef3c7' : '#f1f5f9',
-              color: SAROPS_DB_INSTANCE === 'REMOTE' ? '#92400e' : '#475569',
-              border: `1px solid ${SAROPS_DB_INSTANCE === 'REMOTE' ? '#f59e0b' : '#cbd5e1'}`
-            }}>{SAROPS_DB_INSTANCE}</span>
+              {SAROPS_DB_INSTANCE === 'LOCAL' && (
+                <span style={{ 
+                  fontSize: '9px', fontWeight: 800, padding: '2px 5px', borderRadius: '4px', marginLeft: '6px',
+                  background: '#f1f5f9', // Consistent light background for LOCAL
+                  color: '#475569',      // Consistent dark text for LOCAL
+                  border: `1px solid #cbd5e1` // Consistent border for LOCAL
+                }}>{SAROPS_DB_INSTANCE}</span>
+              )}
+            </div>
           </div>
           {isActive && (
             <>
@@ -342,9 +392,7 @@ function App() {
               <div className="banner-item">{incidentData?.opNumber || '—'}</div>
             </>
           )}
-        </div>
-
-        <div className="banner-right">
+          <div className="banner-right">
           <div className="banner-item">
             {responderName ? (
               <>
@@ -358,10 +406,8 @@ function App() {
             ) : (user?.email || 'Guest')}
           </div>
           {(isActive || responderStatus === 'CheckedOut') && (responderStatus || currentTeamStatus) && (
-            <span className={`status-indicator ${(
-              (responderStatus && responderStatus !== 'Staged') ? responderStatus : (currentTeamStatus || responderStatus || 'Staged')
-            ).toLowerCase()}`}>
-              {(responderStatus && responderStatus !== 'Staged') ? responderStatus : (currentTeamStatus || responderStatus || 'Staged')}
+            <span className={`status-indicator ${effectiveStatus.toLowerCase()}`}>
+              {effectiveStatus}
             </span>
           )}
           {isActive && notificationPermission === 'denied' && (
@@ -400,6 +446,19 @@ function App() {
                   {isActive && <Link to="/ics" onClick={() => setMenuOpen(false)}>ICS Chart</Link>}
                   {isActive && <Link to="/qrcodes" onClick={() => setMenuOpen(false)}>QR Codes</Link>}
                   {isActive && <Link to="/checkout" onClick={() => setMenuOpen(false)}>Check Out</Link>}
+                  
+                  {/* Use incidentMetadata for real-time sarstream reactivity */}
+                  {isActive && (incidentMetadata?.sarstream || incidentData?.sarstream) && 
+                    (incidentMetadata?.sarstream_data?.url || incidentMetadata?.sarstream_data?.view_url || 
+                     incidentData?.sarstream_data?.url || incidentData?.sarstream_data?.view_url) && (
+                    <a 
+                      href={incidentMetadata?.sarstream_data?.url || incidentMetadata?.sarstream_data?.view_url || 
+                            incidentData?.sarstream_data?.url || incidentData?.sarstream_data?.view_url} 
+                      target="_blank" 
+                      rel="noopener noreferrer" 
+                      onClick={() => setMenuOpen(false)}
+                    >Live Feed</a>
+                  )}
                   {(isAdmin || accessLevel === 'staff' || accessLevel === 'admin') && (
                     <>
                       <div className="dropdown-divider"></div>

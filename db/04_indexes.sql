@@ -33,6 +33,7 @@ CREATE INDEX idx_clues_coordinates ON clues(latitude, longitude);
 -- Secondary Indexes for Logistics
 CREATE INDEX idx_responders_device_id ON responders(device_id);
 CREATE INDEX idx_responders_access_level ON responders(access_level);
+CREATE INDEX idx_responders_auth_uid ON responders(auth_uid); -- Added for RLS helper performance
 CREATE INDEX idx_vehicles_status ON vehicles(status);
 
 -- Messaging Performance

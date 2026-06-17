@@ -557,22 +557,3 @@ h3 { font-size: 1.05rem; margin: 0.3em 0; }
 .banner-dropdown .checkout {
   color: #fb7185; /* Soft red for the destructive action */
 }
-
-/* Standardized Action Buttons */
-.action-btn-danger {
-  background-color: #fee2e2 !important; /* Light red */
-  color: #991b1b !important;            /* Dark red */
-  border: 1px solid #fecaca !important;
-}
-.action-btn-danger:hover {
-  background-color: #fecaca !important;
-}
-
-.action-btn-warning {
-  background-color: #fef3c7 !important; /* Light yellow/amber */
-  color: #92400e !important;            /* Dark yellow/amber */
-  border: 1px solid #fde68a !important;
-}
-.action-btn-warning:hover {
-  background-color: #fde68a !important;
-}

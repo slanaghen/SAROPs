@@ -45,7 +45,7 @@ const PlanningDashboard = ({
   deleteTeam,
 }) => {
   const { addToast } = useToast();
-  const [loading, setLoading] = useState(false); // Local loading state for individual actions
+  const [actionLoading, setActionLoading] = useState(false); // Local loading state for individual actions
   const [showTeamForm, setShowTeamForm] = useState(false);
   const [showAssignmentForm, setShowAssignmentForm] = useState(false);
   const [showResponderForm, setShowResponderForm] = useState(false);
@@ -119,7 +119,7 @@ const PlanningDashboard = ({
 
       if (team && assignment) {
         handleDragEnd(); // Reset drag state
-        setLoading(true);
+        setActionLoading(true);
         try {
           if (onTeamAssigned) {
             await onTeamAssigned({ teamId, assignmentId, team, assignment }); // Hook handles its own error
@@ -129,7 +129,7 @@ const PlanningDashboard = ({
         } catch (err) {
           addToast(err.message || 'Failed to assign team', 'error');
         } finally {
-          setLoading(false);
+          setActionLoading(false);
         }
       }
     } 
@@ -434,7 +434,7 @@ const PlanningDashboard = ({
     if (!window.confirm(msg)) return;
 
     try {
-      setLoading(true);
+      setActionLoading(true);
 
       // Ensure all members return to Staged status before deleting the team
       const rIds = (team.current_responders || []).map(r => r.responder_id);
@@ -451,7 +451,7 @@ const PlanningDashboard = ({
     } catch (err) {
       addToast(err.message || 'Failed to release team', 'error');
     } finally {
-      setLoading(false);
+      setActionLoading(false);
     }
   };
 
@@ -459,7 +459,7 @@ const PlanningDashboard = ({
     if (!window.confirm(`Are you sure you want to delete assignment "${assignment.title}"? This action cannot be undone.`)) return;
 
     try {
-      setLoading(true);
+      setActionLoading(true);
       if (deleteAssignment) {
         await deleteAssignment(assignment.assignment_id);
         addToast(`Assignment "${assignment.title}" deleted.`, 'success');
@@ -468,7 +468,7 @@ const PlanningDashboard = ({
     } catch (err) {
       addToast(err.message || 'Failed to delete assignment', 'error');
     } finally {
-      setLoading(false);
+      setActionLoading(false);
     }
   };
 
@@ -478,7 +478,7 @@ const PlanningDashboard = ({
     }
 
     try {
-      setLoading(true);
+      setActionLoading(true);
       
       // Auto-generate team name if blank
       let finalTeamName = formData.team_name_number?.trim();
@@ -509,8 +509,7 @@ const PlanningDashboard = ({
           op_period_id: formData.op_period_id,
           status: formData.status,
           leader_responder_id: formData.leader_responder_id,
-          equipment: formData.equipment,
-          responder_ids: finalResponderIds
+          equipment: formData.equipment
         };
         await updateTeam(formData.team_id, payload, formData.responder_roles, formData.vehicle_ids);
         addToast('Team updated.', 'success');
@@ -521,8 +520,7 @@ const PlanningDashboard = ({
           sartopo_color_hex: formData.sartopo_color_hex || '#ff0000',
           status: formData.status || 'Staged',
           leader_responder_id: formData.leader_responder_id,
-          equipment: formData.equipment,
-          responder_ids: finalResponderIds
+          equipment: formData.equipment
         };
         await createTeam(payload, formData.responder_roles, formData.vehicle_ids);
         addToast('Team created.', 'success');
@@ -535,13 +533,13 @@ const PlanningDashboard = ({
     } catch (err) {
       addToast(err.message || 'Failed to save team.', 'error');
     } finally {
-      setLoading(false);
+      setActionLoading(false);
     }
   };
 
   const handleSaveAssignment = async (formData, stayOpen = false) => {
     try {
-      setLoading(true);
+      setActionLoading(true);
 
       // Auto-generate assignment title if blank (Requirement: next sequential AA, AB...)
       // Note: AA, AB pattern is the standard nomenclature for Assignment segments.
@@ -642,13 +640,13 @@ const PlanningDashboard = ({
     } catch (err) { // Error is handled by the hook's setError
       addToast(err.message || 'Failed to save responder', 'error');
     } finally {
-      setLoading(false);
+      setActionLoading(false);
     }
   };
 
   const handleSaveVehicle = async (formData, stayOpen = false) => {
     try {
-      setLoading(true);
+      setActionLoading(true);
       if (formData.vehicle_id && updateVehicle) {
         await updateVehicle(formData.vehicle_id, formData); // Hook handles its own error
         addToast('Vehicle updated.', 'success');
@@ -668,7 +666,7 @@ const PlanningDashboard = ({
     } catch (err) { // Error is handled by the hook's setError
       addToast(err.message || 'Failed to save vehicle', 'error');
     } finally {
-      setLoading(false);
+      setActionLoading(false);
     }
   };
 
@@ -676,7 +674,7 @@ const PlanningDashboard = ({
     if (!window.confirm(`Are you sure you want to check out vehicle ${vehicle.designation}?`)) return;
     
     try {
-      setLoading(true);
+      setActionLoading(true);
       if (updateVehicle) {
         await updateVehicle(vehicle.vehicle_id, { 
           status: 'CheckedOut', 
@@ -687,7 +685,7 @@ const PlanningDashboard = ({
     } catch (err) {
       addToast(err.message || 'Failed to check out vehicle', 'error');
     } finally {
-      setLoading(false);
+      setActionLoading(false);
     }
   };
 
@@ -695,7 +693,7 @@ const PlanningDashboard = ({
     if (!window.confirm(`Are you sure you want to check out ${responder.name}?`)) return;
     
     try {
-      setLoading(true);
+      setActionLoading(true);
       if (checkOutResponder) {
         await checkOutResponder(responder.responder_id, responder.name); // Hook handles its own error
         addToast('Responder checked out.', 'success');
@@ -704,7 +702,7 @@ const PlanningDashboard = ({
     } catch (err) {
       addToast(err.message || 'Failed to check out responder', 'error');
     } finally {
-      setLoading(false);
+      setActionLoading(false);
     }
   };
 
@@ -717,7 +715,7 @@ const PlanningDashboard = ({
     if (!activeTeam) return;
     const isMember = (activeTeam.current_responders || []).some(r => r.responder_id === responder.responder_id);
     try {
-      setLoading(true);
+      setActionLoading(true);
       if (isMember && detachResponderFromTeam) {
         await detachResponderFromTeam(responder.responder_id, activeTeam.team_id); // Hook handles its own error
         addToast(`${responder.name} removed from team.`, 'success');
@@ -728,7 +726,7 @@ const PlanningDashboard = ({
     } catch (err) {
       addToast(err.message || 'Failed to update team members.', 'error');
     } finally {
-      setLoading(false);
+      setActionLoading(false);
     }
   };
 
@@ -761,7 +759,7 @@ const PlanningDashboard = ({
           <div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h2>Staged Responders ({availableRespondersList.length})</h2>
             <div>
-              <button className="btn btn-primary" onClick={() => openEditResponderForm(null)} style={{ fontSize: '14px' }}>
+              <button className="action-btn action-btn-primary" onClick={() => openEditResponderForm(null)}>
                 New Responder
               </button>
             </div>
@@ -777,7 +775,7 @@ const PlanningDashboard = ({
               style={{ flex: 1, padding: '6px 10px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
             />
             {responderFilter && (
-              <button className="btn btn-secondary btn-sm" onClick={() => setResponderFilter('')} style={{ fontSize: '10px' }}>
+              <button className="action-btn action-btn-secondary action-btn-header" onClick={() => setResponderFilter('')}>
                 Clear
               </button>
             )}
@@ -820,10 +818,9 @@ const PlanningDashboard = ({
 
                   <div className="team-actions" style={{ marginTop: '8px', display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
                     <button 
-                      className="btn btn-secondary btn-sm" 
+                      className="action-btn action-btn-warning action-btn-header" 
                       onClick={(e) => { e.stopPropagation(); handleCheckOutResponder(responder); }}
                       disabled={responder.status?.toLowerCase() !== 'staged'}
-                      style={{ color: '#dc2626' }}
                     >
                       Check Out
                     </button>
@@ -839,7 +836,7 @@ const PlanningDashboard = ({
           <div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h2>Staged Vehicles ({availableVehiclesList.length})</h2>
             <div>
-              <button className="btn btn-primary" onClick={openNewVehicleForm} style={{ fontSize: '14px' }}>
+              <button className="action-btn action-btn-primary" onClick={openNewVehicleForm}>
                 New Vehicle
               </button>
             </div>
@@ -855,7 +852,7 @@ const PlanningDashboard = ({
               style={{ flex: 1, padding: '6px 10px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
             />
             {vehicleFilter && (
-              <button className="btn btn-secondary btn-sm" onClick={() => setVehicleFilter('')} style={{ fontSize: '10px' }}>
+              <button className="action-btn action-btn-secondary action-btn-header" onClick={() => setVehicleFilter('')}>
                 Clear
               </button>
             )}
@@ -896,10 +893,9 @@ const PlanningDashboard = ({
 
                   <div className="team-actions" style={{ marginTop: '8px', display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
                     <button 
-                      className="btn btn-secondary btn-sm" 
+                      className="action-btn action-btn-warning action-btn-header" 
                       onClick={(e) => { e.stopPropagation(); handleCheckOutVehicle(vehicle); }}
                       disabled={vehicle.status?.toLowerCase() !== 'staged'}
-                      style={{ color: '#dc2626' }}
                     >
                       Check Out
                     </button>
@@ -915,7 +911,7 @@ const PlanningDashboard = ({
           <div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h2>Teams ({filteredTeams.length})</h2>
             <div>
-              <button className="btn btn-primary" onClick={openNewTeamForm} style={{ fontSize: '14px' }}>New Team</button>
+              <button className="action-btn action-btn-primary" onClick={openNewTeamForm}>New Team</button>
             </div>
           </div>
 
@@ -929,7 +925,7 @@ const PlanningDashboard = ({
               style={{ flex: 1, padding: '6px 10px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
             />
             {teamFilter && (
-              <button className="btn btn-secondary btn-sm" onClick={() => setTeamFilter('')} style={{ fontSize: '10px' }}>
+              <button className="action-btn action-btn-secondary action-btn-header" onClick={() => setTeamFilter('')}>
                 Clear
               </button>
             )}
@@ -982,10 +978,9 @@ const PlanningDashboard = ({
 
                   <div className="team-actions" style={{ marginTop: '4px', display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
                     <button 
-                      className="btn btn-secondary btn-sm" 
+                      className="action-btn action-btn-warning action-btn-header" 
                       onClick={(e) => { e.stopPropagation(); handleReleaseTeam(team); }}
                       disabled={team.status === 'Deployed'}
-                      style={{ color: '#dc2626' }}
                       title={team.status === 'Deployed' ? "Cannot disband team while deployed" : "Release team members to staging"}
                     >
                       Disband
@@ -1002,7 +997,7 @@ const PlanningDashboard = ({
           <div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h2>Assignments ({filteredAssignments.length})</h2>
             <div>
-              <button className="btn btn-primary" onClick={openNewAssignmentForm} style={{ fontSize: '14px' }}>New Assignment</button>
+              <button className="action-btn action-btn-primary" onClick={openNewAssignmentForm}>New Assignment</button>
             </div>
           </div>
 
@@ -1016,7 +1011,7 @@ const PlanningDashboard = ({
               style={{ flex: 1, padding: '6px 10px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
             />
             {assignmentFilter && (
-              <button className="btn btn-secondary btn-sm" onClick={() => setAssignmentFilter('')} style={{ fontSize: '10px' }}>
+              <button className="action-btn action-btn-secondary action-btn-header" onClick={() => setAssignmentFilter('')}>
                 Clear
               </button>
             )}
@@ -1062,9 +1057,8 @@ const PlanningDashboard = ({
 
                   <div className="team-actions" style={{ marginTop: '6px', display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
                     <button 
-                      className="btn btn-secondary btn-sm" 
+                      className="action-btn action-btn-danger action-btn-header" 
                       onClick={(e) => { e.stopPropagation(); handleDeleteAssignment(assignment); }}
-                      style={{ color: '#dc2626' }}
                     >
                       Delete
                     </button>
@@ -1085,7 +1079,7 @@ const PlanningDashboard = ({
           initialData={teamForm}
           responders={responders}
           vehicles={vehicles}
-          loading={loading}
+          loading={actionLoading}
           commandStaffExists={commandStaffExists}
           onEditVehicle={openEditVehicleForm}
         />
@@ -1098,7 +1092,7 @@ const PlanningDashboard = ({
           onClose={() => setShowAssignmentForm(false)}
           onSave={handleSaveAssignment}
           initialData={assignmentForm}
-          loading={loading}
+          loading={actionLoading}
         />
       )}
 
@@ -1110,7 +1104,7 @@ const PlanningDashboard = ({
           onSave={handleSaveResponder}
           onCheckOut={handleCheckOutResponder}
           initialData={responderForm}
-          loading={loading}
+          loading={actionLoading}
         />
       )}
 
@@ -1121,7 +1115,7 @@ const PlanningDashboard = ({
           onClose={() => setShowVehicleForm(false)}
           onSave={handleSaveVehicle}
           initialData={vehicleForm || {}}
-          loading={loading}
+          loading={actionLoading}
         />
       )}
 
@@ -1143,7 +1137,7 @@ const PlanningDashboard = ({
                         <div className="member-meta">{r.agency || ''}</div>
                       </div>
                       <div>
-                        <button className="btn btn-secondary btn-sm" onClick={() => handleToggleResponder(r)}>
+                        <button className="action-btn action-btn-secondary action-btn-header" onClick={() => handleToggleResponder(r)}>
                           {isMember ? 'Remove' : 'Attach'}
                         </button>
                       </div>
@@ -1153,7 +1147,7 @@ const PlanningDashboard = ({
               )}
             </div>
             <div className="modal-actions">
-              <button className="btn btn-secondary" onClick={() => setShowMembersModal(false)}>Close</button>
+              <button className="action-btn action-btn-secondary" onClick={() => setShowMembersModal(false)}>Close</button>
             </div>
           </div>
         </div>

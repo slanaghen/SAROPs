@@ -226,8 +226,6 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
     setSelectedIncidentId(id);
   };
 
-  const handleCreateIncident = (formData: any) => navigate('/incident', { state: { responderData: formData } });
-
   /**
    * Handle responder check-in
    */
@@ -294,44 +292,6 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
         startIncident(targetIncidentId, targetIncidentName, targetOpNumber, targetOpId || '');
       } else {
         console.warn('⚠️ Could not set active incident context: missing ID or Name', { targetIncidentId, targetIncidentName });
-      }
-
-      // Check if this is the first responder for this incident and assign to Staff team
-      if (targetIncidentId && targetOpId) {
-        const { data: staffTeam, error: staffTeamError } = await supabase
-          .from('teams')
-          .select('team_id, leader_responder_id')
-          .eq('op_period_id', targetOpId)
-          .eq('type', 'Staff')
-          .maybeSingle();
-
-        if (staffTeam && !staffTeam.leader_responder_id) {
-          console.log('First responder detected. Auto-assigning to Staff team as leader.');
-          
-          // 1. Assign responder to Staff team
-          await supabase.from('team_responders').insert({
-            team_id: staffTeam.team_id,
-            responder_id: finalResponder.responder_id,
-            role: 'Incident Commander'
-          });
-
-          // 2. Set responder as leader of the Staff team
-          await supabase.from('teams')
-            .update({ leader_responder_id: finalResponder.responder_id })
-            .eq('team_id', staffTeam.team_id);
-
-          // 3. Re-fetch responder to get updated access_level from trigger
-          const { data: reFetchedResp } = await supabase
-            .from('responders')
-            .select('*')
-            .eq('responder_id', finalResponder.responder_id)
-            .maybeSingle();
-          
-          finalResponder = reFetchedResp || finalResponder;
-          await completeCheckInFlow(finalResponder);
-          setCheckInInProgress(false);
-          return;
-        }
       }
 
       // If operational period provided, show team assignment or staff confirmation
@@ -566,7 +526,7 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
           loadingIncidents={loadingIncidents}
           incidentError={incidentError}
           onIncidentSelected={handleIncidentSelected}
-          onCreateIncident={handleCreateIncident}
+          // onCreateIncident={handleCreateIncident} // Removed as new incidents can only be created from the Admin page
           isAdmin={isAdmin} // Pass isAdmin to ResponderCheckin
           selectedIncidentId={selectedIncidentId}
         />

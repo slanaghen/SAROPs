@@ -3,6 +3,7 @@ import * as matchers from '@testing-library/jest-dom/matchers';
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import SettingsPage from './SettingsPage';
 import { supabase } from '../lib/supabase';
+import { useIncident } from '../context/IncidentContext';
 import { useToast } from '../context/ToastContext';
 
 expect.extend(matchers);
@@ -15,6 +16,11 @@ vi.mock('../lib/supabase', () => ({
     from: vi.fn(),
     rpc: vi.fn(),
   },
+}));
+
+// Mock the incident context to provide a controlled session to the component
+vi.mock('../context/IncidentContext', () => ({
+  useIncident: vi.fn(),
 }));
 
 // Mock the toast context to capture notification calls
@@ -40,6 +46,11 @@ describe('SettingsPage Functional Tests', () => {
     vi.clearAllMocks();
     localStorage.clear();
     vi.mocked(useToast).mockReturnValue({ addToast: mockAddToast });
+    // Default useIncident mock state
+    vi.mocked(useIncident).mockReturnValue({
+      user: null,
+      accessLevel: 'responder'
+    });
   });
 
   afterEach(() => {
@@ -48,6 +59,11 @@ describe('SettingsPage Functional Tests', () => {
 
   it('loads user profile using email identity from session', async () => {
     const mockUser = { email: 'session@example.com', name: 'Session User' };
+    vi.mocked(useIncident).mockReturnValue({
+      user: { email: 'session@example.com' },
+      accessLevel: 'staff'
+    });
+
     vi.mocked(supabase.auth.getSession).mockResolvedValue({
       data: { session: { user: { email: 'session@example.com' } } },
       error: null,
@@ -68,6 +84,11 @@ describe('SettingsPage Functional Tests', () => {
 
   it('successfully updates profile via administrative RPC', async () => {
     const mockUser = { email: 'test@example.com', name: 'Old Name' };
+    vi.mocked(useIncident).mockReturnValue({
+      user: { email: 'test@example.com' },
+      accessLevel: 'staff'
+    });
+
     vi.mocked(supabase.auth.getSession).mockResolvedValue({
       data: { session: { user: { email: 'test@example.com' } } },
       error: null,

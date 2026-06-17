@@ -6,6 +6,8 @@ import '../styles/ActionButtons.css';
 const QRCodesPage = () => {
   const { incidentId, incidentData, isActive, user } = useIncident();
   const [sartopoId, setSartopoId] = useState(null);
+  const [sarstreamEnabled, setSarstreamEnabled] = useState(false);
+  const [sarstreamData, setSarstreamData] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const [displayDensity, setDisplayDensity] = useState('comfortable');
@@ -18,7 +20,7 @@ const QRCodesPage = () => {
       if (data?.display_density) setDisplayDensity(data.display_density);
     };
     fetchDensity();
-  }, [user]);
+  }, [user?.email]);
 
   const currentUrl = window.location.origin;
   const checkinUrl = `${currentUrl}/checkin`;
@@ -31,6 +33,7 @@ const QRCodesPage = () => {
   };
 
   const sartopoUrl = getSartopoUrl(sartopoId);
+  const sarstreamUrl = sarstreamData?.url || sarstreamData?.view_url;
 
   useEffect(() => {
     if (!isActive || !incidentId) {
@@ -40,8 +43,12 @@ const QRCodesPage = () => {
 
     const fetchIncident = async () => {
       setLoading(true);
-      const { data } = await supabase.from('incidents').select('sartopo_id').eq('incident_id', incidentId).maybeSingle();
-      if (data) setSartopoId(data.sartopo_id);
+      const { data } = await supabase.from('incidents').select('sartopo_id, sarstream, sarstream_data').eq('incident_id', incidentId).maybeSingle();
+      if (data) {
+        setSartopoId(data.sartopo_id);
+        setSarstreamEnabled(data.sarstream);
+        setSarstreamData(data.sarstream_data);
+      }
       setLoading(false);
     };
 
@@ -54,6 +61,8 @@ const QRCodesPage = () => {
         event: 'UPDATE', schema: 'public', table: 'incidents', filter: `incident_id=eq.${incidentId}` 
       }, payload => {
         setSartopoId(payload.new.sartopo_id);
+        setSarstreamEnabled(payload.new.sarstream);
+        setSarstreamData(payload.new.sarstream_data);
       })
       .subscribe();
 
@@ -140,6 +149,24 @@ const QRCodesPage = () => {
             </div>
           )}
         </div>
+
+        {sarstreamEnabled && sarstreamUrl && (
+          <div className="qr-card" style={{ padding: 'var(--space-lg)' }}>
+            <h2 style={{ marginBottom: '20px' }}>SARStream View</h2>
+            <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+              <img 
+                src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(sarstreamUrl)}`} 
+                alt="SARStream QR" 
+                style={{ display: 'block', width: '250px', height: '250px' }}
+              />
+            </div>
+            <p style={{ marginTop: '16px', fontSize: '14px', fontWeight: 600, color: '#1e293b' }}>Scan for Real-Time Dashboard</p>
+            <p style={{ fontSize: '11px', color: '#94a3b8', wordBreak: 'break-all', maxWidth: '250px' }}>{sarstreamUrl}</p>
+            <button className="action-btn action-btn-primary no-print" style={{ marginTop: '12px' }} onClick={() => downloadQR(sarstreamUrl, 'SAROps-SARStream-QR')}>
+              Download PNG
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="no-print" style={{ marginTop: 'var(--space-lg)', padding: 'var(--space-md)', background: '#fefce8', border: '1px solid #fef08a', borderRadius: '8px', color: '#854d0e', fontSize: '14px' }}>

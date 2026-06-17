@@ -585,8 +585,39 @@ const AdminPage = () => {
 
     try {
       const teamId = formData.team_id;
+
+      // Requirement: Ensure the leader is always included in the membership set.
+      const responderIds = formData.responder_ids || [];
+      const finalIds = (formData.leader_responder_id && !responderIds.includes(formData.leader_responder_id))
+        ? [...responderIds, formData.leader_responder_id]
+        : responderIds;
+
+      // VALIDATION: A responder cannot be attached to more than one active team at a time.
+      // We check all 'finalIds' for people being newly added to this team (or added to a new team).
+      const originalIds = editingTeam?.current_responders?.map(r => r.responder_id) || [];
+      const newToTeamIds = finalIds.filter(id => !originalIds.includes(id));
+      
+      const busyResponders = newToTeamIds.filter(id => {
+        const r = allResponders.find(res => res.responder_id === id);
+        // Status definitions: Staged responders are available. Attached, Assigned, Deployed are busy.
+        return r && r.status !== 'Staged';
+      });
+
+      if (busyResponders.length > 0) {
+        const names = busyResponders.map(id => allResponders.find(r => r.responder_id === id)?.name || 'Unknown').join(', ');
+        throw new Error(`The following responders are already attached to another team: ${names}. A responder can only be on one team at a time.`);
+      }
+
+      // Consistent name generation: [Type] [Next Number]
+      let finalTeamName = formData.team_name_number?.trim();
+      if (!finalTeamName) {
+        const type = formData.type || 'Other';
+        const existingOfSameType = allTeams.filter(t => t.type === type && t.status !== 'Disbanded');
+        finalTeamName = `${type} ${existingOfSameType.length + 1}`;
+      }
+
       const payload = {
-        team_name_number: formData.team_name_number || `Team ${Date.now()}`,
+        team_name_number: finalTeamName,
         sartopo_color_hex: formData.sartopo_color_hex || '#FF0000',
         type: formData.type || 'Other',
         status: formData.status || 'Staged',
@@ -604,20 +635,12 @@ const AdminPage = () => {
 
         // 2. Reconcile responder attachments (Add/Remove/Update roles)
         // Requirement: Ensure the leader is always included in the membership set to prevent accidental removal.
-        const currentResponders = formData.responder_ids || [];
-        const finalIds = (formData.leader_responder_id && !currentResponders.includes(formData.leader_responder_id))
-          ? [...currentResponders, formData.leader_responder_id]
-          : currentResponders;
-
         const roles = formData.responder_roles || {};
-        const originalIds = editingTeam?.current_responders?.map(r => r.responder_id) || [];
-        
-        const toAdd = finalIds.filter(id => !originalIds.includes(id));
         const toRemove = originalIds.filter(id => !finalIds.includes(id));
         const existing = finalIds.filter(id => originalIds.includes(id));
 
         await Promise.all([
-          ...toAdd.map(id => supabase.from('team_responders').insert({ team_id: teamId, responder_id: id, role: roles[id] || '' })),
+          ...newToTeamIds.map(id => supabase.from('team_responders').insert({ team_id: teamId, responder_id: id, role: roles[id] || '' })),
           ...existing.map(id => supabase.from('team_responders').update({ role: roles[id] || '' }).eq('team_id', teamId).eq('responder_id', id)),
           ...toRemove.map(id => supabase.from('team_responders').delete().eq('team_id', teamId).eq('responder_id', id))
         ]);
@@ -656,8 +679,6 @@ const AdminPage = () => {
 
         if (insertError) throw insertError;
 
-        // Process initial membership assignments
-        const finalIds = formData.responder_ids || [];
         const roles = formData.responder_roles || {};
         if (finalIds.length > 0) {
            await Promise.all(finalIds.map(id => 
@@ -728,7 +749,7 @@ const AdminPage = () => {
   const handleDisbandTeam = async (id, name, type) => { // Added type
     const team = allTeams.find(t => t.team_id === id);
     if (team?.status === 'Deployed') {
-      alert(`Cannot disband team "${name}" while it is Deployed.`);
+      addToast(`Cannot disband team "${name}" while it is Deployed.`, 'warning');
       return;
     }
 
@@ -1310,6 +1331,7 @@ const AdminPage = () => {
 
       <VehicleFormModal
         isOpen={showVehicleModal}
+        key={`veh-${editingVehicle?.vehicle_id || 'new'}`}
         onClose={() => setShowVehicleModal(false)}
         onSave={handleSaveVehicle}
         initialData={editingVehicle}

@@ -39,11 +39,11 @@ const AssignmentFormModal = ({
       actions={
         <>
           {!formData.assignment_id && (
-            <button className="btn btn-secondary" onClick={() => onSave(formData, true)} disabled={loading}>
+            <button className="action-btn action-btn-secondary" onClick={() => onSave(formData, true)} disabled={loading}>
               {loading ? 'Saving...' : 'Save & Add Another'}
             </button>
           )}
-          <button className="btn btn-primary" onClick={() => onSave(formData, false)} disabled={loading}>
+          <button className="action-btn action-btn-primary" onClick={() => onSave(formData, false)} disabled={loading}>
             {loading ? 'Saving...' : (formData.assignment_id ? 'Save Changes' : 'Save & Exit')}
           </button>
         </>

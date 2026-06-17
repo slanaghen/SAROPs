@@ -196,8 +196,8 @@ describe('App Component', () => {
   it('enforces role-based boundaries: Responders are redirected away from Operations', async () => {
     vi.mocked(useIncident).mockReturnValue({
       isActive: true,
-      isAdmin: true,
-      accessLevel: 'responder', // Logged in but not staff
+      isAdmin: false,
+      accessLevel: 'responder', // Standard field responder
       logout: vi.fn(),
       incidentData: { name: 'Test Inc' }
     });

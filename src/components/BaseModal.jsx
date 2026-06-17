@@ -14,7 +14,7 @@ const BaseModal = ({ isOpen, onClose, title, children, actions, loading }) => {
         </div>
         <div className="modal-actions" style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
           {actions}
-          <button className="btn btn-secondary" onClick={onClose} disabled={loading}>Cancel</button>
+          <button className="action-btn action-btn-secondary" onClick={onClose} disabled={loading}>Cancel</button>
         </div>
       </div>
     </div>

@@ -5,6 +5,8 @@ CREATE TABLE incidents (
   name TEXT NOT NULL,
   number TEXT NOT NULL,
   sartopo_id TEXT,
+  sarstream BOOLEAN DEFAULT FALSE,
+  sarstream_data JSONB,
   sartopo_sync_enabled BOOLEAN DEFAULT FALSE,
   sartopo_last_fetch_at BIGINT DEFAULT 0,
   sartopo_last_upload_at BIGINT DEFAULT 0,

@@ -10,6 +10,16 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/sartopo-api/, ''),
       },
+      '/sarstream': {
+        target: 'https://sarstream.boulderrescue.app',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/sarstream/, ''),
+      },
+      '/google-forms': {
+        target: 'https://docs.google.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/google-forms/, ''),
+      },
       '/api': {
         target: 'http://localhost:3001',
         changeOrigin: true,

@@ -38,6 +38,8 @@ const defaultIncident = {
   name: 'Missing Person Search',
   number: getDefaultIncidentNumber(),
   sartopo_id: 'CVJP9L4',
+  sarstream: false,
+  sarstream_data: null,
   start_datetime: getCurrentLocalDatetime(),
   end_datetime: '',
   notes: '',
@@ -158,6 +160,8 @@ const IncidentEditPage = () => {
             name: incRes.data.name,
             number: incRes.data.number,
             sartopo_id: incRes.data.sartopo_id || '',
+            sarstream: incRes.data.sarstream || false,
+            sarstream_data: incRes.data.sarstream_data || null,
             start_datetime: incRes.data.start_datetime ? incRes.data.start_datetime.substring(0, 16) : getCurrentLocalDatetime(),
             end_datetime: incRes.data.end_datetime ? incRes.data.end_datetime.substring(0, 16) : '',
             notes: incRes.data.notes || '',
@@ -262,7 +266,7 @@ const IncidentEditPage = () => {
     }
 
     if (!incident.number) {
-      alert("Please enter an Incident Number before creating a map.");
+      addToast("Please enter an Incident Number before creating a map.", 'warning');
       return;
     }
 
@@ -346,7 +350,85 @@ const IncidentEditPage = () => {
     ({ nextLocation }) => isDirty && !isSubmitting && nextLocation.pathname !== "/checkin"
   );
 
-  const handleIncidentChange = (field, value) => {
+  const handleIncidentChange = async (field, value) => {
+    if (field === 'sarstream') {
+      if (value === true) {
+        const apiKey = import.meta.env.VITE_SARSTREAM_API_KEY;
+        if (apiKey) {
+          try {
+            const payload = {
+              requester: "SAROPs",
+              ttl_minutes: 480,
+              label: incident.name
+            };
+
+            /**
+             * To bypass CORS, we must use a proxy. 
+             * 1. Local Dev: Vite's server catches '/sarstream' and forwards it (see vite.config.js).
+             * 2. Custom Proxy: VITE_PROXY_URL can point to a backend middleware.
+             * Using the absolute URL directly in the browser will fail CORS preflight checks.
+             */
+            const PROXY_BASE = import.meta.env.VITE_PROXY_URL || '';
+            const targetUrl = PROXY_BASE 
+              ? `${PROXY_BASE}/sarstream/api/links/view` 
+              : '/sarstream/api/links/view';
+
+            // Log the POST request details as requested
+            console.log(`[SARStream] POST ${targetUrl}`, payload);
+
+            const response = await fetch(targetUrl, {
+              method: 'POST',
+              headers: {
+                'X-API-Key': apiKey,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) throw new Error(`SARStream API returned HTTP ${response.status}`);
+
+            const data = await response.json();
+            
+            // Log the JSON response as requested
+            console.log('[SARStream] JSON Response:', data);
+
+            setIncident(prev => ({ ...prev, sarstream: true, sarstream_data: data }));
+
+            // Action: Persist the session metadata immediately to the database for existing incidents.
+            // This fulfills the requirement in SAROPs-SARStream.md section 2.3.
+            if (existingId) {
+              const { error: dbError } = await supabase
+                .from('incidents')
+                .update({ sarstream: true, sarstream_data: data })
+                .eq('incident_id', existingId);
+              
+              if (dbError) throw dbError;
+            }
+
+            addToast('SARStream session initialized successfully.', 'success');
+          } catch (err) {
+            console.error('[SARStream] Activation error:', err);
+            addToast('Failed to initialize SARStream session: ' + err.message, 'error');
+            // Revert local state on failure
+            setIncident(prev => ({ ...prev, sarstream: false, sarstream_data: null }));
+          }
+          return;
+        }
+      } else {
+        // If toggled off, clear the metadata associated with the session
+        setIncident(prev => ({ ...prev, sarstream: false, sarstream_data: null }));
+
+        // Action: Immediately clear database metadata if toggled off.
+        if (existingId) {
+          await supabase
+            .from('incidents')
+            .update({ sarstream: false, sarstream_data: null })
+            .eq('incident_id', existingId);
+        }
+        return;
+      }
+    }
+
     setIncident(prev => ({ ...prev, [field]: value }));
   };
 
@@ -360,6 +442,13 @@ const IncidentEditPage = () => {
 
     if (!newIncidentId) {
       addToast("Incident Number is required to start tracking.", 'error');
+      setIsSaving(false);
+      return false;
+    }
+
+    // Validate: Incident End Date cannot be before its Start Date
+    if (incident.end_datetime && new Date(incident.end_datetime) < new Date(incident.start_datetime)) {
+      addToast("Incident End Date cannot be before its Start Date.", 'error');
       setIsSaving(false);
       return false;
     }
@@ -379,7 +468,10 @@ const IncidentEditPage = () => {
             name: incident.name,
             number: incident.number,
             sartopo_id: incident.sartopo_id || null,
+            sarstream: incident.sarstream,
+            sarstream_data: incident.sarstream_data,
             start_datetime: incident.start_datetime,
+            end_datetime: incident.end_datetime || null,
             notes: incident.notes
           })
           .eq('incident_id', existingId);
@@ -393,6 +485,7 @@ const IncidentEditPage = () => {
           .update({
             op_number: operationalPeriod.op_number,
             start_datetime: operationalPeriod.start_datetime,
+            end_datetime: operationalPeriod.end_datetime || null,
             situation_narrative: operationalPeriod.situation_narrative,
             situational_awareness_narrative: operationalPeriod.situational_awareness_narrative,
             par_check_interval: finalParInterval
@@ -411,7 +504,9 @@ const IncidentEditPage = () => {
             operationalPeriod.op_number, 
             incidentData?.opPeriodId,
             incident.sartopo_id,
-            finalParInterval
+            finalParInterval,
+            incident.sarstream,
+            incident.sarstream_data
           );
         }
       } else {
@@ -423,7 +518,10 @@ const IncidentEditPage = () => {
             name: incident.name,
             number: incident.number,
             sartopo_id: incident.sartopo_id || null,
+            sarstream: incident.sarstream,
+            sarstream_data: incident.sarstream_data,
             start_datetime: incident.start_datetime,
+            end_datetime: incident.end_datetime || null,
             notes: incident.notes
           });
         console.debug('[IncidentEdit] Insert incident response:', { error: incError });
@@ -438,6 +536,7 @@ const IncidentEditPage = () => {
             incident_id: newIncidentId,
             op_number: operationalPeriod.op_number,
             start_datetime: operationalPeriod.start_datetime,
+            end_datetime: operationalPeriod.end_datetime || null,
             situation_narrative: operationalPeriod.situation_narrative,
             situational_awareness_narrative: operationalPeriod.situational_awareness_narrative,
             par_check_interval: finalParInterval
@@ -461,7 +560,9 @@ const IncidentEditPage = () => {
           operationalPeriod.op_number, 
           opPeriodId,
           incident.sartopo_id,
-          finalParInterval
+          finalParInterval,
+          incident.sarstream,
+          incident.sarstream_data
         );
       }
 
@@ -777,18 +878,16 @@ const IncidentEditPage = () => {
                 />
               </div>
 
-              {existingId && (
-                <div className="form-field">
-                  <label className="form-label" htmlFor="inc_end">End Date / Time</label>
-                  <input
-                    id="inc_end"
-                    type="datetime-local"
-                    className="form-input"
-                    value={incident.end_datetime}
-                    onChange={(e) => handleIncidentChange('end_datetime', e.target.value)}
-                  />
-                </div>
-              )}
+              <div className="form-field">
+                <label className="form-label" htmlFor="inc_end">End Date / Time</label>
+                <input
+                  id="inc_end"
+                  type="datetime-local"
+                  className="form-input"
+                  value={incident.end_datetime}
+                  onChange={(e) => handleIncidentChange('end_datetime', e.target.value)}
+                />
+              </div>
             </div>
 
             <div className="form-field">
@@ -858,16 +957,44 @@ const IncidentEditPage = () => {
                 />
               </div>
 
-              {existingId && (
-                <div className="form-field">
-                  <label className="form-label" htmlFor="op_end">OP End Date / Time</label>
-                  <input
-                    id="op_end"
-                    type="datetime-local"
-                    className="form-input"
-                    value={operationalPeriod.end_datetime}
-                    onChange={(e) => handleOperationalPeriodChange('end_datetime', e.target.value)}
-                  />
+              <div className="form-field">
+                <label className="form-label" htmlFor="op_end">OP End Date / Time</label>
+                <input
+                  id="op_end"
+                  type="datetime-local"
+                  className="form-input"
+                  value={operationalPeriod.end_datetime}
+                  onChange={(e) => handleOperationalPeriodChange('end_datetime', e.target.value)}
+                />
+              </div>
+
+              {import.meta.env.VITE_SARSTREAM_API_KEY  && (
+                <div className="form-field" style={{ flex: '0 0 auto', alignSelf: 'flex-end', marginBottom: 'var(--space-md)' }}>
+                  <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', height: '36px' }}>
+                    SARStream
+                    <input
+                      type="checkbox"
+                      checked={incident.sarstream}
+                      onChange={(e) => handleIncidentChange('sarstream', e.target.checked)}
+                      style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                    />
+                  </label>
+                  {incident.sarstream && (
+                    <div style={{ 
+                      fontSize: '11px', 
+                      fontWeight: 600, 
+                      marginTop: '4px', 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: '4px',
+                      color: incident.sarstream_data?.url || incident.sarstream_data?.view_url ? '#16a34a' : '#dc2626'
+                    }}>
+                      <span style={{ fontSize: '14px' }}>
+                        {incident.sarstream_data?.url || incident.sarstream_data?.view_url ? '🟢' : '🔴'}
+                      </span>
+                      {incident.sarstream_data?.url || incident.sarstream_data?.view_url ? 'Link Active' : 'Link Inactive'}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

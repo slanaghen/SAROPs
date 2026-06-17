@@ -16,6 +16,9 @@ const AdminTeamFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
   const isEditing = !!initialData?.team_id;
   const { addToast } = useToast();
 
+  // Filter responders to only show those not currently attached to an active team
+  const availableLeaders = responders.filter(r => r.status === 'Staged' || r.status === 'CheckedOut' || r.responder_id === initialData?.leader_responder_id);
+
   useEffect(() => {
     if (isEditing && initialData) {
       setFormData({
@@ -101,7 +104,7 @@ const AdminTeamFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
           Team Leader
           <select name="leader_responder_id" value={formData.leader_responder_id} onChange={handleChange}>
             <option value="">— Select Leader —</option>
-            {responders.map(r => (
+            {availableLeaders.map(r => (
               <option key={r.responder_id} value={r.responder_id}>{r.name} ({r.agency} {r.identifier})</option>
             ))}
           </select>

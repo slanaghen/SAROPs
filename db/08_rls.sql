@@ -20,16 +20,21 @@ $func$ LANGUAGE sql STABLE;
 
 CREATE OR REPLACE FUNCTION check_is_operational_staff()
 RETURNS BOOLEAN AS $func$
-  SELECT EXISTS (
-    -- Allow if the user has an explicit staff/admin session via Auth metadata or custom claims
-    SELECT 1 WHERE (auth.jwt() ->> 'access_level') IN ('staff', 'admin')
-    UNION ALL
-    -- Use auth.uid to join against auth.users for a reliable system user check
-    SELECT 1 FROM users WHERE email = (SELECT email FROM auth.users WHERE id = auth.uid()) AND access_level IN ('staff', 'admin')
-    UNION ALL
-    -- Check against the specific responder record for this incident
-    SELECT 1 FROM responders WHERE auth_uid = auth.uid() AND access_level IN ('staff', 'admin')
-  );
+  SELECT COALESCE(
+    (auth.jwt() ->> 'access_level') IN ('staff', 'admin'), -- Fastest: Direct JWT claim check
+    EXISTS (
+      -- Fallback: Check against the system 'users' table for staff/admin email
+      SELECT 1
+      FROM users u
+      WHERE u.email = (auth.jwt() ->> 'email') AND u.access_level IN ('staff', 'admin')
+    ),
+    EXISTS (
+      -- Fallback: Check against the 'responders' table for active staff/admin responder records
+      SELECT 1
+      FROM responders r
+      WHERE r.auth_uid = auth.uid() AND r.access_level IN ('staff', 'admin') AND r.checkout_datetime IS NULL
+    )
+  ); -- COALESCE ensures we return TRUE if any of the conditions are met
 $func$ LANGUAGE sql STABLE SECURITY DEFINER;
 
 CREATE OR REPLACE FUNCTION is_admin_or_command_staff()
@@ -40,6 +45,17 @@ $func$ LANGUAGE sql STABLE;
 CREATE OR REPLACE FUNCTION get_my_responder_id() 
 RETURNS UUID AS $func$
   SELECT responder_id FROM responders WHERE auth_uid = auth.uid() ORDER BY checkin_datetime DESC LIMIT 1;
+$func$ LANGUAGE sql STABLE SECURITY DEFINER;
+
+-- Optimized version to ensure we get the *active* responder
+CREATE OR REPLACE FUNCTION get_my_responder_id() 
+RETURNS UUID AS $func$
+  SELECT responder_id
+  FROM responders
+  WHERE auth_uid = auth.uid()
+    AND checkout_datetime IS NULL -- Only consider currently checked-in responders
+  ORDER BY checkin_datetime DESC -- If multiple active (shouldn't happen, but as a fallback)
+  LIMIT 1;
 $func$ LANGUAGE sql STABLE SECURITY DEFINER;
 
 CREATE OR REPLACE FUNCTION is_leader_of_team(_team_id UUID)
@@ -108,12 +124,12 @@ $func$ LANGUAGE sql STABLE SECURITY DEFINER;
 -- POLICIES: Incidents
 CREATE POLICY "Visible to everyone" ON incidents FOR SELECT TO anon, authenticated USING (TRUE);
 CREATE POLICY "Admins manage incidents" ON incidents FOR ALL TO authenticated USING (check_is_operational_staff());
-CREATE POLICY "Allow all authenticated to start an incident" ON incidents FOR INSERT TO authenticated WITH CHECK (TRUE);
+CREATE POLICY "Allow all authenticated to start an incident" ON incidents FOR INSERT TO authenticated WITH CHECK (check_is_operational_staff());
 
 -- POLICIES: Operational Periods
 CREATE POLICY "Visible to everyone" ON operational_periods FOR SELECT TO anon, authenticated USING (TRUE);
 CREATE POLICY "Admins manage OPs" ON operational_periods FOR ALL TO authenticated USING (check_is_operational_staff());
-CREATE POLICY "Allow all authenticated to create OPs" ON operational_periods FOR INSERT TO authenticated WITH CHECK (TRUE);
+CREATE POLICY "Allow all authenticated to create OPs" ON operational_periods FOR INSERT TO authenticated WITH CHECK (check_is_operational_staff());
 
 -- POLICIES: Vehicles
 CREATE POLICY "Visible to all authenticated" ON vehicles FOR SELECT TO authenticated USING (TRUE);
@@ -133,8 +149,9 @@ CREATE POLICY "Allow team leaders to update their members" ON responders
 -- POLICIES: Teams
 CREATE POLICY "View active teams" ON teams FOR SELECT TO authenticated
   USING (op_period_id IN (SELECT op_period_id FROM operational_periods op JOIN incidents i ON op.incident_id = i.incident_id WHERE i.end_datetime IS NULL));
+CREATE POLICY "Admins/Staff manage teams" ON teams FOR ALL TO authenticated USING (check_is_operational_staff());
 CREATE POLICY "Leaders update teams" ON teams FOR UPDATE TO authenticated USING (is_leader_of_team(team_id) OR check_is_operational_staff());
-CREATE POLICY "Allow authenticated to create teams" ON teams FOR INSERT TO authenticated WITH CHECK (is_active_op_period(op_period_id));
+CREATE POLICY "Allow authenticated to create teams" ON teams FOR INSERT TO authenticated WITH CHECK (is_active_op_period(op_period_id) AND check_is_operational_staff());
 
 -- Allow team members to view their own team, regardless of operational period activity status
 CREATE POLICY "Allow team members to view their own team" ON teams
@@ -158,7 +175,8 @@ CREATE POLICY "Allow anonymous to update Staff team leader" ON teams
 -- POLICIES: Assignments
 CREATE POLICY "View active assignments" ON assignments FOR SELECT TO authenticated
   USING (op_period_id IN (SELECT op_period_id FROM operational_periods op JOIN incidents i ON op.incident_id = i.incident_id WHERE i.end_datetime IS NULL));
-CREATE POLICY "Allow authenticated to create assignments" ON assignments FOR INSERT TO authenticated WITH CHECK (is_active_op_period(op_period_id));
+CREATE POLICY "Admins/Staff manage assignments" ON assignments FOR ALL TO authenticated USING (check_is_operational_staff());
+CREATE POLICY "Allow authenticated to create assignments" ON assignments FOR INSERT TO authenticated WITH CHECK (is_active_op_period(op_period_id) AND check_is_operational_staff());
 
 -- Allow Team Members to update their assigned assignment status
 CREATE POLICY "Allow team members to update their assignment" ON assignments
@@ -219,3 +237,81 @@ CREATE POLICY "Allow authenticated to leave teams" ON team_responders
   FOR DELETE TO authenticated USING (responder_id = get_my_responder_id() OR check_is_operational_staff());
 CREATE POLICY "Admins/Staff can manage all team memberships" ON team_responders
   FOR ALL TO authenticated USING (check_is_operational_staff()) WITH CHECK (check_is_operational_staff());
+
+-- RPC: Secure Responder Check-in
+-- Hardened to prevent access level escalation and enforce incident activation rules.
+CREATE OR REPLACE FUNCTION checkin_responder_securely(
+  p_incident_id TEXT,
+  p_auth_uid UUID,
+  p_name TEXT,
+  p_agency TEXT,
+  p_identifier TEXT,
+  p_cell_phone TEXT,
+  p_responder_type TEXT,
+  p_special_skills TEXT[],
+  p_vehicles JSONB DEFAULT '[]'::jsonb,
+  p_status TEXT DEFAULT 'Staged',
+  p_device_id TEXT DEFAULT NULL,
+  p_access_level TEXT DEFAULT 'responder'
+) RETURNS SETOF responders
+LANGUAGE plpgsql
+SECURITY DEFINER 
+AS $$
+DECLARE
+  v_caller_is_staff BOOLEAN;
+  v_final_access_level TEXT;
+  v_new_responder_id UUID;
+  v_veh RECORD;
+BEGIN
+  -- 1. Determine if the caller has authority to set elevated access levels
+  v_caller_is_staff := check_is_operational_staff();
+  
+  -- 2. Prevent Access Level Escalation
+  -- Only existing staff can grant staff/admin levels. Standard check-ins default to 'responder'.
+  IF v_caller_is_staff THEN
+    v_final_access_level := COALESCE(p_access_level, 'responder');
+  ELSE
+    v_final_access_level := 'responder';
+  END IF;
+
+  -- 3. Verify the incident is active
+  IF NOT EXISTS (SELECT 1 FROM incidents WHERE incident_id = p_incident_id AND end_datetime IS NULL) THEN
+    RAISE EXCEPTION 'Check-in blocked: Incident is closed or does not exist.';
+  END IF;
+
+  -- 4. Upsert Responder Record
+  INSERT INTO responders (
+    incident_id, auth_uid, name, agency, identifier, 
+    cell_phone, responder_type, special_skills, 
+    status, device_id, access_level, checkin_datetime
+  )
+  VALUES (
+    p_incident_id, p_auth_uid, p_name, p_agency, p_identifier,
+    p_cell_phone, p_responder_type, p_special_skills,
+    p_status, p_device_id, v_final_access_level, NOW()
+  )
+  ON CONFLICT (incident_id, auth_uid) 
+  DO UPDATE SET
+    name = EXCLUDED.name,
+    agency = EXCLUDED.agency,
+    identifier = EXCLUDED.identifier,
+    cell_phone = EXCLUDED.cell_phone,
+    responder_type = EXCLUDED.responder_type,
+    special_skills = EXCLUDED.special_skills,
+    access_level = CASE WHEN v_caller_is_staff THEN EXCLUDED.access_level ELSE responders.access_level END,
+    checkout_datetime = NULL
+  RETURNING responder_id INTO v_new_responder_id;
+
+  -- 5. Process Vehicles
+  IF p_vehicles IS NOT NULL AND jsonb_array_length(p_vehicles) > 0 THEN
+    FOR v_veh IN SELECT * FROM jsonb_to_recordset(p_vehicles) AS x(designation TEXT, type TEXT) LOOP
+      INSERT INTO vehicles (incident_id, responder_id, designation, type, status, checkin_datetime)
+      VALUES (p_incident_id, v_new_responder_id, v_veh.designation, v_veh.type, 'Staged', NOW())
+      ON CONFLICT (incident_id, designation) DO UPDATE SET
+        checkout_datetime = NULL;
+    END LOOP;
+  END IF;
+
+  RETURN QUERY SELECT * FROM responders WHERE responder_id = v_new_responder_id;
+END;
+$$;

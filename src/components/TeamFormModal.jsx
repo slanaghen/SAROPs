@@ -249,7 +249,7 @@ const TeamFormModal = ({
         <>
           {!teamForm.team_id && (
             <button 
-              className="btn btn-secondary" 
+              className="action-btn action-btn-secondary" 
               onClick={() => handleSave(true)} 
               disabled={loading || !teamForm.leader_responder_id}
             >
@@ -257,7 +257,7 @@ const TeamFormModal = ({
             </button>
           )}
           <button 
-            className="btn btn-primary" 
+            className="action-btn action-btn-primary" 
             onClick={() => handleSave(false)} 
             disabled={loading || !teamForm.leader_responder_id}
           >

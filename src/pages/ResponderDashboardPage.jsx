@@ -45,8 +45,6 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     opObjective: '',
     saNarrative: ''
   });
-  const [parInterval, setParInterval] = useState(incidentData?.parInterval || 0);
-  const [sartopoId, setSartopoId] = useState(null);
   const [podValue, setPodValue] = useState('');
   const [debriefValue, setDebriefValue] = useState('');
   const [isUpdatingAsnData, setIsUpdatingAsnData] = useState(false);
@@ -104,10 +102,10 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
 
   // Memoized PAR status and time formatting to ensure visual parity with Operations page
   const { parRequired, timeSinceLastPar } = useMemo(() => {
-    const required = checkIsParOverdue(team, parInterval, currentTime);
+    const required = checkIsParOverdue(team, incidentData?.parInterval || 0, currentTime);
     const displayTime = formatTimeSince(team?.last_par_check || team?.created_at, currentTime);
     return { parRequired: required, timeSinceLastPar: displayTime }; 
-  }, [team, parInterval, currentTime]);
+  }, [team, incidentData?.parInterval, currentTime]);
 
   
   const lastMessageCountRef = useRef(0);
@@ -212,8 +210,6 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
             opObjective: opRes.data?.situation_narrative || '',
             saNarrative: opRes.data?.situational_awareness_narrative || ''
           });
-          if (incRes.data?.sartopo_id) setSartopoId(incRes.data.sartopo_id);
-          if (opRes.data?.par_check_interval !== undefined) setParInterval(opRes.data.par_check_interval);
 
           // Sync with global context to ensure other pages (Map/PDFs) have current incident metadata
           startIncident(
@@ -337,7 +333,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
 
     if (error) {
       console.error('Failed to send message:', error);
-      alert('Failed to send message: ' + (error.message || 'Permission denied'));
+      addToast('Failed to send message: ' + (error.message || 'Permission denied'), 'error');
       return;
     }
 
@@ -394,7 +390,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     
     // Safety guard: Team Leaders cannot leave while the team is deployed
     if (isLeader && (team.status === 'Deployed' || assignment?.status === 'Deployed')) {
-      alert("As the Team Leader, you cannot leave your team while it is deployed to the field. Please complete your assignment or return to base first.");
+      addToast("As the Team Leader, you cannot leave your team while it is deployed to the field. Please complete your assignment or return to base first.", 'warning');
       return;
     }
 
@@ -410,7 +406,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       refreshAllData(); // Hook handles its own error
     } catch (err) {
       console.error('Error leaving team:', err);
-      alert('Failed to leave team: ' + (err.message || 'Unknown error'));
+      addToast('Failed to leave team: ' + (err.message || 'Unknown error'), 'error');
     } finally {
       setIsLeavingTeam(false);
     }
@@ -457,7 +453,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       refreshAllData();
     } catch (err) {
       console.error('Error updating mission data:', err); // Error is handled by the hook's setError
-      alert('Failed to update mission data: ' + err.message);
+      addToast('Failed to update mission data: ' + err.message, 'error');
     } finally {
       setIsUpdatingAsnData(false);
     }
@@ -491,7 +487,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       refreshAllData();
     } catch (err) { // Error is handled by the hook's setError
       console.error('Error completing assignment:', err);
-      alert('Failed to complete assignment: ' + err.message);
+      addToast('Failed to complete assignment: ' + err.message, 'error');
     } finally {
       setIsUpdatingAsnData(false);
     }
@@ -526,7 +522,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       refreshAllData(); // Error is handled by the hook's setError
     } catch (err) {
       console.error('Error cancelling assignment:', err);
-      alert('Failed to cancel assignment: ' + err.message);
+      addToast('Failed to cancel assignment: ' + err.message, 'error');
     } finally {
       setIsUpdatingAsnData(false);
     }
@@ -555,7 +551,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       refreshAllData();
     } catch (err) { // Error is handled by the hook's setError
       console.error('Error deploying assignment:', err);
-      alert('Deployment failed: ' + (err.message || 'Permission denied'));
+      addToast('Deployment failed: ' + (err.message || 'Permission denied'), 'error');
     }
   };
 
@@ -706,7 +702,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
                   
                   {team.equipment && team.equipment.length > 0 && <p><strong>Equipment:</strong> {team.equipment.join(', ')}</p>}
 
-                  {team.status !== 'Staged' && team.type !== 'Staff' && parInterval > 0 && (
+                  {team.status !== 'Staged' && team.type !== 'Staff' && (incidentData?.parInterval || 0) > 0 && (
                     <div className={`par-integration ${parRequired ? 'par-required' : ''}`} style={{ marginTop: '16px', padding: '16px', backgroundColor: parRequired ? '#fff7ed' : '#f8fafc', borderRadius: '8px', border: parRequired ? '2px solid #f59e0b' : '1px solid #e2e8f0' }}>
                       <h3 style={{ fontSize: '15px', marginBottom: '8px', marginTop: 0 }}>Status Check (PAR)</h3>
                       {parRequired && <div className="alert alert-warning" style={{ marginBottom: '12px', fontSize: '12px', padding: '8px' }}><strong>Check-in Required!</strong> Please confirm your team's status.</div>}
@@ -863,10 +859,10 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
 
                   <div style={{ display: 'flex', gap: '8px' }}>
                     <button 
-                      className="action-btn action-btn-primary" 
+                      className="action-btn action-btn-success" 
                       onClick={handleCompleteAssignment}
-                      disabled={isUpdatingAsnData || podValue === '' || !debriefValue.trim()}
-                      style={{ flex: 1, backgroundColor: '#059669', borderColor: '#059669' }}
+                      disabled={isUpdatingAsnData}
+                      style={{ flex: 1 }}
                     >
                       {isUpdatingAsnData ? 'Completing...' : 'Complete'}
                     </button>
@@ -874,7 +870,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
                     <button 
                       className="action-btn action-btn-warning" 
                       onClick={handleCancelAssignment}
-                      disabled={isUpdatingAsnData || podValue === '' || !debriefValue.trim()}
+                      disabled={isUpdatingAsnData}
                       style={{ flex: 1 }}
                     >
                       {isUpdatingAsnData ? 'Cancelling...' : 'Cancel'}

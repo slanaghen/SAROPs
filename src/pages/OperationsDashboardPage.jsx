@@ -10,6 +10,7 @@ import BaseModal from '../components/BaseModal';
 import OperationsTable from '../components/OperationsTable';
 import OperationsMap from '../components/OperationsMap';
 import VehicleFormModal from '../components/admin/VehicleFormModal';
+import { useToast } from '../context/ToastContext';
 import { checkIsParOverdue, formatTimeSince } from '../utils/operationalUtils';
 
 const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
@@ -19,6 +20,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   
   const [showGlobalMap, setShowGlobalMap] = useState(false); // Local state for layout toggle
   const operationalPeriodId = propOpId || incidentData?.opPeriodId;
+  const { addToast } = useToast();
 
   const {
     teams, assignments, responders, vehicles, opPeriod, loading, error, setError, setLoading, stats,
@@ -50,6 +52,18 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   const [showBroadcastModal, setShowBroadcastModal] = useState(false);
   const [broadcastMessage, setBroadcastMessage] = useState('');
   const [currentTime, setCurrentTime] = useState(Date.now());
+
+  const [displayDensity, setDisplayDensity] = useState('comfortable');
+
+  useEffect(() => {
+    const fetchDensity = async () => {
+      const userEmail = user?.email || localStorage.getItem('sarops_user_email');
+      if (!userEmail) return;
+      const { data } = await supabase.from('users').select('display_density').eq('email', userEmail).maybeSingle();
+      if (data?.display_density) setDisplayDensity(data.display_density);
+    };
+    fetchDensity();
+  }, [user?.email]);
 
   const contentWrapperRef = useRef(null);
 
@@ -276,7 +290,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   const handleDisbandTeam = async (teamId, teamName, teamType) => {
     const team = teams.find(t => t.team_id === teamId);
     if (team?.status === 'Deployed') {
-      alert(`Cannot disband team "${teamName}" while it is Deployed.`);
+      addToast(`Cannot disband team "${teamName}" while it is Deployed.`, 'warning');
       return;
     }
     if (!window.confirm(`Disband "${teamName}"? Members will be released back to staging, but the team record will remain for logs.`)) return;
@@ -538,12 +552,11 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
           ...vehToRemove.map(id => supabase.from('vehicles').update({ team_id: null }).eq('vehicle_id', id))
         ]);
       } else {
-        const newTeam = await createTeam({ 
-          ...payload, 
-          op_period_id: operationalPeriodId, 
-          responder_ids: formData.responder_ids, 
-          responder_roles: formData.responder_roles 
-        });
+        const newTeam = await createTeam(
+          { ...payload, op_period_id: operationalPeriodId }, 
+          formData.responder_roles, 
+          formData.vehicle_ids
+        );
         
         // Process initial vehicle assignments for new team
         if (formData.vehicle_ids?.length > 0) {
@@ -662,11 +675,11 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   }
 
   return (
-    <div className="operations-dashboard">
+    <div className={`operations-dashboard density-${displayDensity}`}>
       <header className="operations-header">
         <div>
           <h1>Operations Dashboard</h1>
-          <p>Drag and drop teams onto assignments (or vice versa) to link resources.</p>
+          <p className="subtitle">Drag and drop teams onto assignments (or vice versa) to link resources.</p>
         </div>
         <div className="view-filter-container" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <label htmlFor="view-mode-select" style={{ fontSize: '13px', fontWeight: 600, color: '#475569' }}>View:</label>
@@ -691,6 +704,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
               gap: '6px',
               padding: '0 12px'
             }}
+            className="action-btn action-btn-secondary" 
             onClick={() => setShowBroadcastModal(true)}
             title="Send message to all teams"
           >
@@ -752,13 +766,13 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
 
       {!loading && !error && (
         <div className="operations-stats-footer" style={{ 
-          marginTop: '24px',
+          marginTop: 'var(--space-lg)',
           display: 'flex',
-          gap: '32px',
+          gap: 'var(--space-lg)',
           flexWrap: 'wrap',
-          padding: '8px 20px',
+          padding: 'var(--space-sm) var(--space-md)',
           background: '#ffffff',
-          borderRadius: '12px',
+          borderRadius: '8px',
           border: '1px solid #e2e8f0',
           boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)',
           alignItems: 'center'
@@ -849,7 +863,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
             />
             <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
               <button 
-                className="btn btn-secondary" 
+                className="action-btn action-btn-secondary" 
                 onClick={() => {
                   setShowBroadcastModal(false);
                   setBroadcastMessage('');
@@ -858,7 +872,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
                 Cancel
               </button>
               <button 
-                className="btn btn-primary" 
+                className="action-btn action-btn-primary" 
                 onClick={handleSendBroadcast}
                 disabled={!broadcastMessage.trim() || loading}
               >
@@ -877,7 +891,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
           loading={loading}
           actions={
             <button 
-              className="btn btn-primary" 
+              className="action-btn action-btn-primary" 
               disabled={!selectedAssignTarget || loading}
               onClick={() => {
                 const asnId = assigningRow.assignmentId ? assigningRow.assignmentId : selectedAssignTarget;

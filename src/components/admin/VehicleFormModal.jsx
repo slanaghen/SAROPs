@@ -41,12 +41,12 @@ const VehicleFormModal = ({ isOpen, onClose, onSave, initialData, loading, error
       title={initialData ? 'Edit Vehicle' : 'Add New Vehicle'}
       actions={
         <>
-          {!initialData && (
-            <button className="btn btn-secondary" onClick={() => onSave(formData, true)} disabled={loading}>
+          {!formData.vehicle_id && (
+            <button className="action-btn action-btn-secondary" onClick={() => onSave(formData, true)} disabled={loading}>
               Save & Add Another
             </button>
           )}
-          <button className="btn btn-primary" onClick={() => onSave(formData, false)} disabled={loading}>
+          <button className="action-btn action-btn-primary" onClick={() => onSave(formData, false)} disabled={loading}>
             {initialData ? 'Save Changes' : 'Save & Exit'}
           </button>
         </>

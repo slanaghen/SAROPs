@@ -27,7 +27,7 @@ const ActionLogPage = () => {
       if (data?.display_density) setDisplayDensity(data.display_density);
     };
     fetchDensity();
-  }, [user]);
+  }, [user?.email]);
 
   const fetchLogs = async () => {
     if (!incidentId) return;

@@ -22,7 +22,7 @@ const ICSAssignmentPage = () => {
       if (data?.display_density) setDisplayDensity(data.display_density);
     };
     fetchDensity();
-  }, [user]);
+  }, [user?.email]);
 
   const { teams, responders, loading, error: hookError, fetchDashboardData } = usePlanningDashboard(supabase, operationalPeriodId);
 

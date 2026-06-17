@@ -10,13 +10,14 @@ SAROps is a web application for public safety emergency services management to s
 - Navigation: Guarded routing based on Session State and Access Levels (Anonymous, Responder, Staff, Admin)
 - State Management: React Context API for session/incident metadata; Custom Hooks for operational data synchronization
 - Data Model: Relational schema in PostgreSQL (Incidents, Operational Periods, Responders, Teams, Assignments)
-- Data Sync: Supabase Realtime (Postgres Changes) for live updates across all dashboards
+- Data Sync: Supabase Realtime (Postgres Changes) for live updates; IndexedDB for local GIS feature caching
 - Backend Logic: Thick-database approach using PostgreSQL Functions and Triggers for operational integrity and status synchronization
+- Third-party Integrations: SARTopo (GIS Sync), SARStream (Live Video Session Management)
 
 ## Key Goals
 - MVP focused on initial tasking and deployment during OP1
 - Work across laptops and mobile devices
-- Enable offline input capture and later synchronization
+- Enable local caching of map data and offline-ready status tracking
 - Support real-time updates for status, mapping, image, and message flows
 - Cloud-hosted database for production; local laptop development for initial work
 
@@ -54,15 +55,14 @@ The system uses server-side triggers to maintain "operational parity," automatin
 ## Core Operational Entities
 1. **Incident**: The root object containing all operational data.
 2. **Operational Period (OP)**: Time-bounded slices of an incident.
-3. **Responder**: Personnel checked into the incident with a specific `status` and `access_level`.
-4. **Team**: A grouping of responders (Hasty, Ground, UAS, Staff, etc.) assigned to an OP.
-5. **Assignment**: Tasks defined by Planning and assigned to specific Teams.
+3. **Responder**: Personnel checked into the incident. Statuses: `Staged`, `Attached`, `Assigned`, `Deployed`, `CheckedOut`.
+4. **Team**: A grouping of responders assigned to an OP. Statuses: `Staged`, `Assigned`, `Deployed`, `Disbanded`.
+5. **Assignment**: Tasks defined by Planning. Statuses: `Planned`, `Assigned`, `Deployed`, `Completed`, `Incomplete`.
 
 ## Next Steps
 1. Implement PWA service worker for full offline asset caching.
 2. Integrate PowerSync / SQLite local mirror for offline-first data persistence.
-3. Expand SARTopo real-time synchronization for geospatial assets.
-4. Develop automated PDF reporting for ICS forms (e.g., ICS 204).
+3. Develop automated PDF reporting for ICS forms (e.g., ICS 204).
 
 ---
 

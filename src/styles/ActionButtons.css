@@ -68,24 +68,32 @@
 
 /* Warning: Amber action (Checkout, Disband) */
 .action-btn-warning {
-  background-color: #fffbeb;
-  border-color: #fde68a;
-  color: #b45309;
+  background-color: #fef3c7 !important; /* Light yellow/amber */
+  color: #92400e !important;            /* Dark yellow/amber */
+  border: 1px solid #fde68a !important;
 }
 .action-btn-warning:hover {
-  background-color: #fef3c7;
-  border-color: #fcd34d;
+  background-color: #fde68a !important;
 }
 
 /* Danger: Red action (Delete, Cancel) */
 .action-btn-danger {
-  background-color: #fef2f2;
-  border-color: #fee2e2;
-  color: #dc2626;
+  background-color: #fee2e2 !important; /* Light red */
+  color: #991b1b !important;            /* Dark red */
+  border: 1px solid #fecaca !important;
 }
 .action-btn-danger:hover {
-  background-color: #fee2e2;
-  border-color: #fecaca;
+  background-color: #fecaca !important;
+}
+
+/* Success: Green action (Complete, Finish) */
+.action-btn-success {
+  background-color: #dcfce7 !important; /* Light green */
+  color: #166534 !important;            /* Dark green */
+  border: 1px solid #bbf7d0 !important;
+}
+.action-btn-success:hover {
+  background-color: #bbf7d0 !important;
 }
 
 /* Density: Comfortable (Default) */

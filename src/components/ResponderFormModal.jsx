@@ -60,16 +60,16 @@ const ResponderFormModal = ({
       actions={
         <>
           {onCheckOut && (
-            <button className="btn btn-secondary" onClick={() => onCheckOut(formData)} disabled={loading} style={{ color: '#dc2626', marginRight: 'auto' }}>
+            <button className="action-btn action-btn-warning" onClick={() => onCheckOut(formData)} disabled={loading} style={{ marginRight: 'auto' }}>
               Check Out
             </button>
           )}
           {!formData?.responder_id && (
-            <button className="btn btn-secondary" onClick={() => handleSave(true)} disabled={loading}>
+            <button className="action-btn action-btn-secondary" onClick={() => handleSave(true)} disabled={loading}>
               {loading ? 'Saving...' : 'Save & Add Another'}
             </button>
           )}
-          <button className="btn btn-primary" onClick={() => handleSave(false)} disabled={loading}>
+          <button className="action-btn action-btn-primary" onClick={() => handleSave(false)} disabled={loading}>
             {loading ? 'Saving...' : (formData?.responder_id ? 'Save Changes' : 'Save & Exit')}
           </button>
         </>

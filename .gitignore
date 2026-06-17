@@ -9,6 +9,9 @@ dist-ssr/
 # assets
 src/assets/*.json
 
+# temp files
+supabase/.temp/
+
 # Environment variables
 .env
 .env.local

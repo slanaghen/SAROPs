@@ -47,7 +47,7 @@ const OperationsTable = ({
                   style={{ height: '24px', padding: '0 8px', fontSize: '11px', borderRadius: '4px', border: '1px solid #cbd5e1', width: '100px', textTransform: 'none' }}
                   onClick={(e) => e.stopPropagation()}
                 />
-                <button className="btn btn-primary btn-sm" onClick={openNewAssignmentForm} style={{ height: '24px', fontSize: '10px', padding: '0 8px', minWidth: '0', width: 'auto', flex: 'none' }}>
+                <button className="action-btn action-btn-primary action-btn-header" onClick={openNewAssignmentForm}>
                   New
                 </button>
               </div>
@@ -64,7 +64,7 @@ const OperationsTable = ({
                   style={{ height: '24px', padding: '0 8px', fontSize: '11px', borderRadius: '4px', border: '1px solid #cbd5e1', width: '100px', textTransform: 'none' }}
                   onClick={(e) => e.stopPropagation()}
                 />
-                <button className="btn btn-primary btn-sm" onClick={openNewTeamForm} style={{ height: '24px', fontSize: '10px', padding: '0 8px', minWidth: '0', width: 'auto', flex: 'none' }}>
+                <button className="action-btn action-btn-primary action-btn-header" onClick={openNewTeamForm}>
                   New
                 </button>
               </div>

@@ -229,14 +229,23 @@ const SARTopoDataPage = () => {
         .filter(Boolean);
 
       setSartopoAssignmentDisplayList(displayList);
-      if (!isInitialFetch && syncCount > 0) alert(`Sync complete: ${syncCount} assignments updated.`);
+      if (!isInitialFetch && syncCount > 0) addToast(`Sync complete: ${syncCount} assignments updated.`, 'success');
     } catch (err) {
       addToast(err.message || 'Error fetching SARTopo data.', 'error');
       setError(err.message || 'Error fetching SARTopo data.');
     } finally {
       setLoading(false);
     }
-  }, [sartopoConfig, lastFetchTime, incidentData?.opPeriodId, incidentId, responderName]);
+  }, [
+    sartopoConfig,
+    lastFetchTime,
+    incidentData?.opPeriodId,
+    incidentId,
+    responderName,
+    features,
+    sartopoId,
+    addToast
+  ]);
 
   const generateUploadGeoJSON = useCallback(async () => { // Renamed function
     if (!incidentData?.opPeriodId) return;
@@ -350,7 +359,17 @@ const SARTopoDataPage = () => {
     } finally {
       setIsGeneratingUpload(false);
     }
-  }, [incidentData?.opPeriodId, lastUploadTime, setSyncedAssignmentNames, incidentId, sartopoConfig.id, buildSecureUrl]);
+  }, [
+    incidentData?.opPeriodId,
+    lastUploadTime,
+    setSyncedAssignmentNames,
+    incidentId,
+    sartopoConfig.id,
+    buildSecureUrl,
+    features,
+    sartopoId,
+    addToast
+  ]);
   
   // Ref to hold the latest fetcher to avoid dependency loops with the refresh function
   const fetcherRef = useRef(handleFetchFeatures);
@@ -470,7 +489,7 @@ const SARTopoDataPage = () => {
       if (fetchError) throw fetchError;
 
       if (!assignmentsToSync || assignmentsToSync.length === 0) {
-        alert('No new or updated assignments found for upload.');
+        addToast('No new or updated assignments found for upload.', 'info');
         return;
       }
 
@@ -577,7 +596,17 @@ const SARTopoDataPage = () => {
     } finally {
       setIsUploading(false);
     }
-  }, [sartopoId, sartopoConfig, incidentData?.opPeriodId, buildSecureUrl, incidentId]);
+  }, [
+    sartopoId,
+    sartopoConfig,
+    incidentData?.opPeriodId,
+    buildSecureUrl,
+    incidentId,
+    features,
+    lastFetchTime,
+    lastUploadTime,
+    addToast
+  ]);
 
   if (!isActive) {
     return (
