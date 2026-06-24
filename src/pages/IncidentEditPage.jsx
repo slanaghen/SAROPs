@@ -83,6 +83,7 @@ const IncidentEditPage = () => {
 
   const [operationalPeriod, setOperationalPeriod] = useState(defaultOperationalPeriod);
   const [initialOpPeriod, setInitialOpPeriod] = useState(defaultOperationalPeriod);
+  const [incidentMenuOpen, setIncidentMenuOpen] = useState(false);
 
   // Anonymous session initialization (required for RLS)
   const [isAuthenticating, setIsAuthenticating] = useState(true);
@@ -795,7 +796,7 @@ const IncidentEditPage = () => {
 
   return (
     <div className={`incident-edit-page density-${displayDensity}`}>
-      <div className="page-header">
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h1>Incident</h1>
           <p className="subtitle">

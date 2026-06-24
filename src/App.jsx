@@ -22,17 +22,17 @@ function App() {
   // Reactive Profile & Display Density Synchronization
   useEffect(() => {
     let channel = null;
-    
+
     const syncProfile = async (email) => {
       const normalizedEmail = email.toLowerCase().trim();
       if (!normalizedEmail) return;
-      
+
       // Fetch initial user settings
       const { data } = await supabase.from('users')
         .select('display_density, access_level, name, agency, identifier, cell_phone, responder_type, special_skills, vehicles')
         .eq('email', normalizedEmail)
         .maybeSingle();
-      
+
       if (data?.display_density) {
         setDisplayDensity(data.display_density);
       }
@@ -41,11 +41,11 @@ function App() {
       if (channel) supabase.removeChannel(channel);
       channel = supabase
         .channel(`user-profile-sync-${normalizedEmail}`)
-        .on('postgres_changes', { 
-          event: 'UPDATE', 
-          schema: 'public', 
-          table: 'users', 
-          filter: `email=eq.${normalizedEmail}` 
+        .on('postgres_changes', {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'users',
+          filter: `email=eq.${normalizedEmail}`
         }, payload => {
           if (payload.new.display_density) setDisplayDensity(payload.new.display_density);
         })
@@ -85,16 +85,16 @@ function App() {
     };
   }, []);
 
-  const { 
-    isActive, 
-    isAdmin, 
+  const {
+    isActive,
+    isAdmin,
     incidentId,
-    incidentData, 
-    responderName, 
+    incidentData,
+    responderName,
     responderId,
-    responderStatus, 
+    responderStatus,
     setResponderStatus,
-    accessLevel, 
+    accessLevel,
     setAccessLevel,
     currentTeamStatus,
     setCurrentTeamStatus,
@@ -124,11 +124,11 @@ function App() {
 
     const channel = supabase
       .channel(`incident-metadata-sync-${incidentId}`)
-      .on('postgres_changes', { 
-        event: 'UPDATE', 
-        schema: 'public', 
-        table: 'incidents', 
-        filter: `incident_id=eq.${incidentId}` 
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'incidents',
+        filter: `incident_id=eq.${incidentId}`
       }, payload => {
         // Update local metadata state with new DB values
         setIncidentMetadata(payload.new);
@@ -210,13 +210,13 @@ function App() {
     // 2. Real-time listener for incoming messages
     const channel = supabase
       .channel('global-message-monitor')
-      .on('postgres_changes', { 
-        event: 'INSERT', 
-        schema: 'public', 
-        table: 'team_messages' 
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'team_messages'
       }, async (payload) => {
         if (location.pathname === '/responder') return;
-        
+
         const msg = payload.new;
         if (isMessageRelevant(msg)) {
           setHasUnreadMessages(true);
@@ -281,7 +281,7 @@ function App() {
   const handleToggleDb = async () => {
     const currentDb = SAROPS_DB_INSTANCE;
     const nextDb = currentDb === 'LOCAL' ? 'REMOTE' : 'LOCAL';
-    
+
     // Clear operational context and sign out of Supabase Auth before reload.
     // This prevents JWT collisions where a token from one instance (e.g. Remote)
     // is incorrectly sent to another (e.g. Local), resulting in 401 Unauthorized errors.
@@ -298,7 +298,7 @@ function App() {
     try {
       const { error } = await supabase.rpc('clear_data');
       if (error) throw error;
-      
+
       if (logout) logout();
       setMenuOpen(false);
       window.location.reload();
@@ -355,7 +355,7 @@ function App() {
   useEffect(() => {
     // Requirement: Management pages (/admin, /incident) are restricted to authorized Staff/Admins.
     const publicPaths = ['/', '/checkin', '/qrcodes', '/login'];
-    
+
     const isStaffOrAdmin = accessLevel === 'staff' || accessLevel === 'admin';
     const responderAllowedPaths = ['/', '/checkin', '/login', '/responder', '/settings', '/qrcodes', '/ics', '/checkout'];
 
@@ -378,8 +378,8 @@ function App() {
   }, [isActive, isAdmin, accessLevel, location.pathname, navigate]);
 
   // Simplified status determination logic: prioritizing active field status over staging
-  const effectiveStatus = (responderStatus && responderStatus !== 'Staged') 
-    ? responderStatus 
+  const effectiveStatus = (responderStatus && responderStatus !== 'Staged')
+    ? responderStatus
     : (currentTeamStatus || responderStatus || 'Staged');
 
   // Derived state for SARStream link visibility and target URL.
@@ -395,23 +395,23 @@ function App() {
           <div className="banner-logo-container">
             <img src={logo} alt="SAROps Logo" className="banner-logo" />
             <span className="banner-brand">SAROps</span>
-              {SAROPS_DB_INSTANCE === 'LOCAL' && (
-                <span style={{ 
-                  fontSize: '9px', fontWeight: 800, padding: '2px 5px', borderRadius: '4px', marginLeft: '6px',
-                  background: '#f1f5f9', // Consistent light background for LOCAL
-                  color: '#475569',      // Consistent dark text for LOCAL
-                  border: `1px solid #cbd5e1` // Consistent border for LOCAL
-                }}>{SAROPS_DB_INSTANCE}</span>
-              )}
-            </div>
+            {SAROPS_DB_INSTANCE === 'LOCAL' && (
+              <span style={{
+                fontSize: '9px', fontWeight: 800, padding: '2px 5px', borderRadius: '4px', marginLeft: '6px',
+                background: '#f1f5f9', // Consistent light background for LOCAL
+                color: '#475569',      // Consistent dark text for LOCAL
+                border: `1px solid #cbd5e1` // Consistent border for LOCAL
+              }}>{SAROPS_DB_INSTANCE}</span>
+            )}
           </div>
-          {isActive && (
-            <>
-              <div className="banner-item">{incidentData?.name || '—'}</div>
-              <div className="banner-item">{incidentData?.opNumber || '—'}</div>
-            </>
-          )}
-          <div className="banner-right">
+        </div>
+        {isActive && (
+          <>
+            <div className="banner-item">{incidentData?.name || '—'}</div>
+            <div className="banner-item">{incidentData?.opNumber || '—'}</div>
+          </>
+        )}
+        <div className="banner-right">
           <div className="banner-item">
             {responderName ? (
               <>
@@ -430,19 +430,19 @@ function App() {
             </span>
           )}
           {isActive && notificationPermission === 'denied' && (
-            <div 
-              className="connection-dot offline" 
-              title="System notifications are blocked. Visual alerts disabled; audio only. Check browser settings." 
-              style={{ 
-                display: 'flex', alignItems: 'center', justifyContent: 'center', 
-                fontSize: '9px', color: 'white', cursor: 'help', width: '12px', height: '12px', fontWeight: 900 
+            <div
+              className="connection-dot offline"
+              title="System notifications are blocked. Visual alerts disabled; audio only. Check browser settings."
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: '9px', color: 'white', cursor: 'help', width: '12px', height: '12px', fontWeight: 900
               }}
             >!</div>
           )}
           <div className={`connection-dot ${offline ? 'offline' : 'online'}`} title={offline ? 'Offline' : 'Online'}></div>
           {hasUnreadMessages && (
-            <div 
-              className="unread-indicator" 
+            <div
+              className="unread-indicator"
               title="New unread message received"
               onClick={() => navigate('/responder')}
               style={{
@@ -467,13 +467,14 @@ function App() {
                   {isActive && <Link to="/checkout" onClick={() => setMenuOpen(false)}>Check Out</Link>}
 
                   {/* Requirement: If SARStream is disabled, remove the Live Feed option. */}
+
                   {isActive && currentSarstream && liveFeedUrl && (
-                    <a 
-                      href={liveFeedUrl} 
-                      target="_blank" 
-                      rel="noopener noreferrer" 
+                    <a
+                      href={liveFeedUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
                       onClick={() => setMenuOpen(false)}
-                    >Live Feed</a>
+                    >SAR Stream Live Feed</a>
                   )}
                   {(isAdmin || accessLevel === 'staff' || accessLevel === 'admin') && (
                     <>
@@ -489,7 +490,7 @@ function App() {
                   {accessLevel === 'admin' && <Link to="/admin" onClick={() => setMenuOpen(false)}>Administration</Link>}
                   <div className="dropdown-divider"></div>
                   <a href="#" onClick={(e) => { e.preventDefault(); handleToggleDb(); }}>
-                    {SAROPS_DB_INSTANCE}: Switch to { SAROPS_DB_INSTANCE === 'LOCAL' ? 'Remote' : 'Local' } DB
+                    {SAROPS_DB_INSTANCE}: Switch to {SAROPS_DB_INSTANCE === 'LOCAL' ? 'Remote' : 'Local'} DB
                   </a>
                   <a href="#" onClick={(e) => { e.preventDefault(); handleSignOut(); }}>Sign Out</a>
                 </div>
