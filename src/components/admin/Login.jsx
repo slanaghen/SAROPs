@@ -14,7 +14,7 @@ const Login = ({ onLoginSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [view, setView] = useState('login'); // 'login', 'register', 'verify'
-  const [otpToken, setOtpToken] = useState(''); 
+  const [otpToken, setOtpToken] = useState('');
   const [vehicles, setVehicles] = useState('');
   const [displayDensity, setDisplayDensity] = useState('comfortable');
 
@@ -76,6 +76,7 @@ const Login = ({ onLoginSuccess }) => {
       // Ensure an active Auth session exists to provide a valid auth_uid for RLS.
       const { data: sessionRes } = await supabase.auth.getSession();
       let currentAuthUid = sessionRes?.session?.user?.id;
+      console.debug('[Login] currentAuthUid:', currentAuthUid, sessionRes?.session?.user?.email); // SGL
 
       if (!currentAuthUid) {
         const { data: signInRes } = await supabase.auth.signInAnonymously();
@@ -83,14 +84,46 @@ const Login = ({ onLoginSuccess }) => {
       }
 
       const { data, error: queryError } = await supabase
-        .rpc('verify_user_login', { 
-          p_email: email.trim().toLowerCase(), 
-          p_password: password 
+        .rpc('verify_user_login', {
+          p_email: email.trim().toLowerCase(),
+          p_password: password
         })
         .maybeSingle();
 
       if (queryError) throw new Error(`Authentication Service Error: ${queryError.message}`);
       if (!data) throw new Error('Invalid email or password');
+
+      // Create/sign-in a Supabase Auth session for the verified user
+      const loginEmail = email.trim().toLowerCase();
+      let authUser = null;
+
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email: loginEmail,
+        password: password
+      });
+
+      if (authError) {
+        // If user doesn't exist, sign them up
+        if (authError.message?.includes('Invalid login credentials') || authError.status === 400 || authError.message?.includes('Email not confirmed')) {
+          const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+            email: loginEmail,
+            password: password
+          });
+          if (signUpError) {
+            console.error('Failed to auto-signup user in Supabase Auth:', signUpError);
+          } else {
+            authUser = signUpData?.user;
+          }
+        } else {
+          console.error('Supabase auth sign-in error:', authError);
+        }
+      } else {
+        authUser = authData?.user;
+      }
+
+      if (authUser?.id) {
+        currentAuthUid = authUser.id;
+      }
 
       if (!selectedIncidentId && data.access_level !== 'admin') {
         throw new Error("You must select an incident to proceed.");
@@ -131,6 +164,7 @@ const Login = ({ onLoginSuccess }) => {
           });
         }
       }
+      console.debug('[Login] onLoginSuccess:', selectedIncidentId, data, responderRecord || ''); // SGL
 
       // Pass the form-entered vehicles separately. The user profile and responder records no longer contain vehicle associations.
       onLoginSuccess(selectedIncidentId, data, responderRecord, vehicles || '');
@@ -145,7 +179,7 @@ const Login = ({ onLoginSuccess }) => {
     e.preventDefault();
     const emailVal = email.trim().toLowerCase();
     if (!emailVal) return;
-    
+
     setLoading(true);
     setError(null);
     try {
@@ -154,12 +188,12 @@ const Login = ({ onLoginSuccess }) => {
         .select('email')
         .eq('email', emailVal)
         .maybeSingle();
-        
+
       if (existingUser) throw new Error("This email is already registered.");
 
-      const { error: otpError } = await supabase.auth.signInWithOtp({ 
+      const { error: otpError } = await supabase.auth.signInWithOtp({
         email: emailVal,
-        options: { 
+        options: {
           shouldCreateUser: true,
           emailRedirectTo: `${window.location.origin}/login`
         }
@@ -258,13 +292,13 @@ const Login = ({ onLoginSuccess }) => {
               <label className="form-label">
                 Email Address
               </label>
-              <input 
-                type="email" 
+              <input
+                type="email"
                 className="form-input"
-                value={email} 
-                onChange={(e) => setEmail(e.target.value)} 
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
-                required 
+                required
               />
             </div>
             <button type="submit" className="action-btn action-btn-primary action-btn-full" disabled={loading} style={{ marginTop: 'var(--space-lg)' }}>
@@ -278,13 +312,13 @@ const Login = ({ onLoginSuccess }) => {
           <form onSubmit={handleVerifyOtp}>
             <div className="form-field">
               <label className="form-label">Verification Code</label>
-              <input 
-                type="text" 
+              <input
+                type="text"
                 className="form-input"
-                value={otpToken} 
-                onChange={(e) => setOtpToken(e.target.value)} 
+                value={otpToken}
+                onChange={(e) => setOtpToken(e.target.value)}
                 placeholder="123456"
-                required 
+                required
               />
             </div>
             <button type="submit" className="action-btn action-btn-primary action-btn-full" disabled={loading} style={{ marginTop: 'var(--space-lg)' }}>

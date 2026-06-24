@@ -3,10 +3,10 @@ import { useNavigate, useBlocker, useLocation } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { supabase } from '../lib/supabase';
 import { useIncident } from '../context/IncidentContext';
-import { 
-  getSartopoConfig, 
-  buildSecureSartopoUrl, 
-  downloadAndSyncSartopoData 
+import {
+  getSartopoConfig,
+  buildSecureSartopoUrl,
+  downloadAndSyncSartopoData
 } from '../services/sartopoService';
 import { useToast } from '../context/ToastContext';
 import '../styles/IncidentEditPage.css';
@@ -57,13 +57,13 @@ const defaultOperationalPeriod = {
 const IncidentEditPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { 
-    isActive, 
-    incidentId: contextIncidentId, 
-    incidentData, 
+  const {
+    isActive,
+    incidentId: contextIncidentId,
+    incidentData,
     responderName,
     user,
-    startIncident, 
+    startIncident,
     endIncident,
     setResponderId,
     setResponderName,
@@ -101,7 +101,7 @@ const IncidentEditPage = () => {
           if (authError) throw authError;
           console.info('[IncidentEdit] Anonymous session established.');
         } else {
-          console.debug('[IncidentEdit] Active session found:', session.user.id);
+          console.debug('[IncidentEdit] Active session found:', session.user.id, session.user?.email);
         }
       } catch (err) {
         console.error('[IncidentEdit] Auth initialization failed:', err);
@@ -216,7 +216,7 @@ const IncidentEditPage = () => {
     if (!config.id || !opId || !incId) return;
     setIsSyncingSartopo(true);
     setSartopoSyncErrorMessage(null); // Clear previous sync error
-    
+
     try {
       await downloadAndSyncSartopoData({
         supabase,
@@ -241,12 +241,12 @@ const IncidentEditPage = () => {
    */
   const handleCreateMap = async () => {
     // Robust environment detection for Vitest, Jest, and browser runtime
-    const isTest = (function() {
+    const isTest = (function () {
       if (typeof globalThis !== 'undefined' && (globalThis.vitest || globalThis.__vitest_worker__ || globalThis.VITEST)) return true;
       if (typeof process !== 'undefined' && (process.env?.VITEST || process.env?.NODE_ENV === 'test')) return true;
       try {
         if (import.meta.env?.MODE === 'test' || import.meta.env?.VITEST) return true;
-      } catch (e) {}
+      } catch (e) { }
       return (typeof vi !== 'undefined' && vi !== null) || (typeof jest !== 'undefined' && jest !== null);
     })();
 
@@ -259,7 +259,7 @@ const IncidentEditPage = () => {
       typeof process !== 'undefined' ? process.env?.VITE_SARTOPO_API_CREDENTIAL_SECRET : undefined,
       import.meta.env?.VITE_SARTOPO_API_CREDENTIAL_SECRET
     ].find(val => val && val !== 'YOUR_SARTOPO_API_SECRET') || (isTest ? 'test-secret' : undefined);
-    
+
     if (!secret || !credId) {
       addToast("SARTopo API credentials not configured. Map creation requires VITE_SARTOPO_API_CREDENTIAL_ID and VITE_SARTOPO_API_CREDENTIAL_SECRET for signed requests.", 'error');
       return;
@@ -292,7 +292,7 @@ const IncidentEditPage = () => {
 
       const path = `/api/v1/acct/${credId}/CollaborativeMap`;
       const { url: signedUrl, authParams } = await buildSecureUrl('POST', path, jsonPayload);
-      
+
       url = signedUrl;
       const form = new URLSearchParams(authParams);
       form.set('json', jsonPayload);
@@ -331,7 +331,7 @@ const IncidentEditPage = () => {
   // Trigger SARTopo sync immediately when a map ID is entered or updated in Edit mode
   useEffect(() => {
     const opId = incidentData?.opPeriodId;
-    
+
     // Only attempt sync if Map ID is reasonably valid (at least 4 chars) and no validation message
     if (isActive && sartopoConfig.id && sartopoConfig.id.length >= 4 && !sartopoIdValidationMessage && opId && incident.sartopo_id !== initialIncident.sartopo_id && existingId) {
       const timer = setTimeout(() => syncSartopoData(sartopoConfig, opId, existingId), 1200);
@@ -342,7 +342,7 @@ const IncidentEditPage = () => {
   // Detect if any changes have been made to the form
   const isDirty = useMemo(() => {
     return JSON.stringify(incident) !== JSON.stringify(initialIncident) ||
-           JSON.stringify(operationalPeriod) !== JSON.stringify(initialOpPeriod);
+      JSON.stringify(operationalPeriod) !== JSON.stringify(initialOpPeriod);
   }, [incident, initialIncident, operationalPeriod, initialOpPeriod]);
 
   // Navigation guard for unsaved changes
@@ -369,8 +369,8 @@ const IncidentEditPage = () => {
              * Using the absolute URL directly in the browser will fail CORS preflight checks.
              */
             const PROXY_BASE = import.meta.env.VITE_PROXY_URL || '';
-            const targetUrl = PROXY_BASE 
-              ? `${PROXY_BASE}/sarstream/api/links/view` 
+            const targetUrl = PROXY_BASE
+              ? `${PROXY_BASE}/sarstream/api/links/view`
               : '/sarstream/api/links/view';
 
             // Log the POST request details as requested
@@ -388,7 +388,7 @@ const IncidentEditPage = () => {
             if (!response.ok) throw new Error(`SARStream API returned HTTP ${response.status}`);
 
             const data = await response.json();
-            
+
             // Log the JSON response as requested
             console.log('[SARStream] JSON Response:', data);
 
@@ -401,7 +401,7 @@ const IncidentEditPage = () => {
                 .from('incidents')
                 .update({ sarstream: true, sarstream_data: data })
                 .eq('incident_id', existingId);
-              
+
               if (dbError) throw dbError;
             }
 
@@ -499,9 +499,9 @@ const IncidentEditPage = () => {
         // Only update global context if we are editing the currently active incident
         if (isActive && existingId === contextIncidentId) {
           startIncident(
-            newIncidentId, 
-            incident.name, 
-            operationalPeriod.op_number, 
+            newIncidentId,
+            incident.name,
+            operationalPeriod.op_number,
             incidentData?.opPeriodId,
             incident.sartopo_id,
             finalParInterval,
@@ -555,9 +555,9 @@ const IncidentEditPage = () => {
         });
 
         startIncident(
-          newIncidentId, 
-          incident.name, 
-          operationalPeriod.op_number, 
+          newIncidentId,
+          incident.name,
+          operationalPeriod.op_number,
           opPeriodId,
           incident.sartopo_id,
           finalParInterval,
@@ -602,7 +602,7 @@ const IncidentEditPage = () => {
       if (!wasActive && responderData) {
         const incidentId = incident.number.trim();
         console.log('[IncidentEdit] Performing auto check-in for creator...');
-        
+
         try {
           const { data: { session } } = await supabase.auth.getSession();
 
@@ -616,7 +616,7 @@ const IncidentEditPage = () => {
               .maybeSingle();
             if (userProfile) userAccessLevel = userProfile.access_level;
           }
-          
+
           // Use the secure check-in RPC to establish operational identity and correctly populate the vehicles table
           const { data: responderRecord, error: checkinError } = await supabase
             .rpc('checkin_responder_securely', {
@@ -643,18 +643,18 @@ const IncidentEditPage = () => {
             action: `Responder checked in (Creator): ${responderData.name} (${responderData.agency})`,
             user_name: responderData.name
           });
-          
+
           // NOTE: Linking the responder to the Staff team and assigning the 
           // 'Incident Commander' role is now handled atomically by the 
           // 'trigger_first_responder_ic_check' database trigger.
           // This ensures compliance with sarops-status-progression.md rules.
 
           // Update global context
-            if (finalResponder) {
-              if (setResponderId) setResponderId(finalResponder.responder_id);
-              setResponderName(finalResponder.name);
-              setResponderStatus(finalResponder.status);
-            }
+          if (finalResponder) {
+            if (setResponderId) setResponderId(finalResponder.responder_id);
+            setResponderName(finalResponder.name);
+            setResponderStatus(finalResponder.status);
+          }
           if (setAccessLevel) setAccessLevel(userAccessLevel);
 
           // Refresh Supabase session to apply new JWT claims (IC role and incident context)
@@ -724,7 +724,7 @@ const IncidentEditPage = () => {
 
     try {
       setIsSaving(true);
-      
+
       // 1. Fetch counts of active assignments and responders to determine if cleanup is needed
       const [asnRes, resRes] = await Promise.all([
         supabase.from('assignments')
@@ -752,7 +752,7 @@ const IncidentEditPage = () => {
           `- Disband all teams in this operational period\n` +
           `- Check out all remaining responders\n` +
           `- Close the operational period and end incident tracking`;
-        
+
         if (!window.confirm(confirmMsg)) {
           setIsSubmitting(false);
           setIsSaving(false);
@@ -838,13 +838,13 @@ const IncidentEditPage = () => {
               <div className="form-field" style={{ flex: 1 }}>
                 <label className="form-label" htmlFor="inc_map">
                   SARTopo Map ID
-                {(isSyncingSartopo || sartopoIdValidationMessage || sartopoSyncErrorMessage) && (
-                  <span style={{ marginLeft: '8px', fontSize: '11px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                    {isSyncingSartopo && <span style={{ color: '#0369a1' }}>🔄 Syncing...</span>}
-                    {sartopoIdValidationMessage && <span style={{ color: '#dc2626' }}>⚠️ {sartopoIdValidationMessage}</span>}
-                    {sartopoSyncErrorMessage && <span style={{ color: '#dc2626' }}>❌ Sync Failed: {sartopoSyncErrorMessage}</span>}
-                  </span>
-                )}
+                  {(isSyncingSartopo || sartopoIdValidationMessage || sartopoSyncErrorMessage) && (
+                    <span style={{ marginLeft: '8px', fontSize: '11px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                      {isSyncingSartopo && <span style={{ color: '#0369a1' }}>🔄 Syncing...</span>}
+                      {sartopoIdValidationMessage && <span style={{ color: '#dc2626' }}>⚠️ {sartopoIdValidationMessage}</span>}
+                      {sartopoSyncErrorMessage && <span style={{ color: '#dc2626' }}>❌ Sync Failed: {sartopoSyncErrorMessage}</span>}
+                    </span>
+                  )}
                 </label>
                 <input
                   id="inc_map"
@@ -856,9 +856,9 @@ const IncidentEditPage = () => {
                   style={{ borderColor: (sartopoIdValidationMessage || sartopoSyncErrorMessage) ? '#dc2626' : undefined }}
                 />
               </div>
-              <button 
-                type="button" 
-                className="action-btn action-btn-secondary" 
+              <button
+                type="button"
+                className="action-btn action-btn-secondary"
                 onClick={handleCreateMap}
                 disabled={isCreatingMap || isSaving || !!incident.sartopo_id?.trim()}
               >
@@ -932,8 +932,8 @@ const IncidentEditPage = () => {
                     min="0"
                   />
                 </div>
-                <button 
-                  type="button" 
+                <button
+                  type="button"
                   className={`action-btn ${operationalPeriod.par_check_interval === 0 ? 'action-btn-primary' : 'action-btn-secondary'}`}
                   style={{ whiteSpace: 'nowrap' }}
                   onClick={() => {
@@ -968,7 +968,7 @@ const IncidentEditPage = () => {
                 />
               </div>
 
-              {import.meta.env.VITE_SARSTREAM_API_KEY  && (
+              {import.meta.env.VITE_SARSTREAM_API_KEY && (
                 <div className="form-field" style={{ flex: '0 0 auto', alignSelf: 'flex-end', marginBottom: 'var(--space-md)' }}>
                   <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', height: '36px' }}>
                     SARStream
@@ -980,12 +980,12 @@ const IncidentEditPage = () => {
                     />
                   </label>
                   {incident.sarstream && (
-                    <div style={{ 
-                      fontSize: '11px', 
-                      fontWeight: 600, 
-                      marginTop: '4px', 
-                      display: 'flex', 
-                      alignItems: 'center', 
+                    <div style={{
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      marginTop: '4px',
+                      display: 'flex',
+                      alignItems: 'center',
                       gap: '4px',
                       color: incident.sarstream_data?.url || incident.sarstream_data?.view_url ? '#16a34a' : '#dc2626'
                     }}>
@@ -998,7 +998,7 @@ const IncidentEditPage = () => {
                 </div>
               )}
             </div>
-            
+
             <div className="form-field">
               <label className="form-label" htmlFor="op_obj">Operational Period Objective</label>
               <textarea
@@ -1025,9 +1025,9 @@ const IncidentEditPage = () => {
 
         <div className="form-actions action-btn-group">
           {isActive && existingId === contextIncidentId && (
-            <button 
-              type="button" 
-              className="action-btn action-btn-primary" 
+            <button
+              type="button"
+              className="action-btn action-btn-primary"
               onClick={handleStartNextOP}
               disabled={isSaving || isTransitioning}
               style={{ backgroundColor: '#0369a1', borderColor: '#0369a1' }}

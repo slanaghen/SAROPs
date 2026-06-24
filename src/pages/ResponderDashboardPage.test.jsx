@@ -63,7 +63,6 @@ beforeEach(() => {
   vi.mocked(supabase.on).mockReturnThis();
   vi.mocked(supabase.subscribe).mockReturnThis();
 
-  // Provide a default mock for useIncident to prevent destructuring errors
   vi.mocked(useIncident).mockReturnValue({
     responderId: 'r1',
     responderName: 'Steve',
@@ -73,6 +72,7 @@ beforeEach(() => {
     setResponderStatus: vi.fn(),
     setCurrentTeamStatus: vi.fn(),
     setCurrentAssignmentStatus: vi.fn(),
+    startIncident: vi.fn(),
   });
 
   // Provide a safe default for the sync hook to prevent crashes on initial render
@@ -232,22 +232,20 @@ describe('ResponderDashboardPage', () => {
   });
 
   it('should update the PAR status and timestamp when "PAR OK" is clicked', async () => {
-    let mockTeam = { team_id: 't1', team_name_number: 'Team 1', status: 'Assigned', last_par_check: null, created_at: new Date().toISOString() };
-    
-    const mockRefetch = vi.fn(async () => {
-      // Simulate the async update and then update the mock data
-      await Promise.resolve(); // Simulate async operation
+    let mockTeam = { team_id: 't1', team_name_number: 'Team 1', type: 'Ground', status: 'Assigned', last_par_check: null, created_at: new Date().toISOString() };
+    const mockRefetch = vi.fn().mockImplementation(() => {
       mockTeam = { ...mockTeam, last_par_check: new Date().toISOString() };
     });
 
     vi.mocked(useIncident).mockReturnValue({
       responderId: 'r1',
       incidentId: 'inc-123', // Needed for fetchIncidentDetails
-      incidentData: { opPeriodId: 'op-123' }, // Needed for fetchIncidentDetails
+      incidentData: { opPeriodId: 'op-123', parInterval: 60 }, // Needed for fetchIncidentDetails
       accessLevel: 'responder',
       setResponderStatus: vi.fn(),
       setCurrentTeamStatus: vi.fn(),
       setCurrentAssignmentStatus: vi.fn(),
+      startIncident: vi.fn(),
     });
 
     // Mock supabase calls for fetchIncidentDetails and handleParResponse
@@ -405,11 +403,12 @@ describe('ResponderDashboardPage', () => {
       responderId: 'r1', 
       responderName: 'Steve',
       incidentId: 'inc-123',
-      incidentData: { opPeriodId: 'op-1' },
+      incidentData: { opPeriodId: 'op-1', parInterval: parInterval },
       accessLevel: 'responder',
       setResponderStatus: vi.fn(),
       setCurrentTeamStatus: vi.fn(),
       setCurrentAssignmentStatus: vi.fn(),
+      startIncident: vi.fn(),
     });
 
     vi.mocked(useResponderTeamAndAssignment).mockReturnValue({

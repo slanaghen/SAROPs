@@ -180,21 +180,27 @@ function App() {
 
     // 1. Initial check for existing "pending" messages sent since last visit
     const fetchPending = async () => {
-      // Fetch messages since last read that are either for the user's team 
-      // OR for the Staff team (acting as a broadcast) in the current operational period.
-      let queryOrConditions = [];
-      if (team?.team_id) {
-        queryOrConditions.push(`team_id.eq.${team.team_id}`);
-      }
-      queryOrConditions.push(`and(teams.type.eq.Staff,teams.op_period_id.eq.${incidentData.opPeriodId})`);
+      if (!incidentData?.opPeriodId) return;
 
-      const { data: recentMsgs } = await supabase
+      const { data: recentMsgs, error } = await supabase
         .from('team_messages')
         .select('*, teams!inner(type, op_period_id)')
-        .gt('created_at', lastRead)
-        .or(queryOrConditions.join(','));
+        .gt('created_at', lastRead);
 
-      if (recentMsgs?.some(m => !m.sender_name?.startsWith(responderName))) {
+      if (error) {
+        console.error('Failed to fetch pending messages:', error);
+        return;
+      }
+
+      // Filter client-side to find messages for current op period and matching team or Staff broadcast
+      const filteredMsgs = (recentMsgs || []).filter(msg => {
+        const t = msg.teams;
+        if (!t) return false;
+        if (t.op_period_id !== incidentData.opPeriodId) return false;
+        return t.type === 'Staff' || msg.team_id === team?.team_id;
+      });
+
+      if (filteredMsgs.some(m => !m.sender_name?.startsWith(responderName))) {
         setHasUnreadMessages(true);
       }
     };
@@ -314,14 +320,20 @@ function App() {
           handleSignOut();
         } else {
           // Staff/Admin keep their system session but lose operational context
-          if (isActive && logout) logout();
+          if (isActive && logout) {
+            logout();
+            navigate('/checkin');
+          }
         }
       }
     } else if (!hookLoading && isActive && responderId) {
       // If we are active but the record is missing (e.g. database was reinitialized), clear context
       console.warn('[App] Active responder record not found in database. Clearing session.');
       localStorage.removeItem('sarops_user_email');
-      if (logout) logout();
+      if (logout) {
+        logout();
+        navigate('/checkin');
+      }
     }
 
     if (team && team.status !== 'Disbanded') {
@@ -341,7 +353,8 @@ function App() {
 
   // Navigation Guard: Redirect to check-in if trying to access operational pages without a session
   useEffect(() => {
-    const publicPaths = ['/', '/checkin', '/admin', '/incident', '/qrcodes', '/login'];
+    // Requirement: Management pages (/admin, /incident) are restricted to authorized Staff/Admins.
+    const publicPaths = ['/', '/checkin', '/qrcodes', '/login'];
     
     const isStaffOrAdmin = accessLevel === 'staff' || accessLevel === 'admin';
     const responderAllowedPaths = ['/', '/checkin', '/login', '/responder', '/settings', '/qrcodes', '/ics', '/checkout'];
@@ -368,6 +381,12 @@ function App() {
   const effectiveStatus = (responderStatus && responderStatus !== 'Staged') 
     ? responderStatus 
     : (currentTeamStatus || responderStatus || 'Staged');
+
+  // Derived state for SARStream link visibility and target URL.
+  // Prioritizes real-time incidentMetadata over the initial incidentData context.
+  const currentSarstream = incidentMetadata !== null ? incidentMetadata.sarstream : incidentData?.sarstream;
+  const currentSarstreamData = incidentMetadata !== null ? incidentMetadata.sarstream_data : incidentData?.sarstream_data;
+  const liveFeedUrl = currentSarstreamData?.url || currentSarstreamData?.view_url;
 
   return (
     <div className={`app-shell density-${displayDensity} ${displayDensity === 'compact' ? 'compact-mode' : ''}`}>
@@ -446,14 +465,11 @@ function App() {
                   {isActive && <Link to="/ics" onClick={() => setMenuOpen(false)}>ICS Chart</Link>}
                   {isActive && <Link to="/qrcodes" onClick={() => setMenuOpen(false)}>QR Codes</Link>}
                   {isActive && <Link to="/checkout" onClick={() => setMenuOpen(false)}>Check Out</Link>}
-                  
-                  {/* Use incidentMetadata for real-time sarstream reactivity */}
-                  {isActive && (incidentMetadata?.sarstream || incidentData?.sarstream) && 
-                    (incidentMetadata?.sarstream_data?.url || incidentMetadata?.sarstream_data?.view_url || 
-                     incidentData?.sarstream_data?.url || incidentData?.sarstream_data?.view_url) && (
+
+                  {/* Requirement: If SARStream is disabled, remove the Live Feed option. */}
+                  {isActive && currentSarstream && liveFeedUrl && (
                     <a 
-                      href={incidentMetadata?.sarstream_data?.url || incidentMetadata?.sarstream_data?.view_url || 
-                            incidentData?.sarstream_data?.url || incidentData?.sarstream_data?.view_url} 
+                      href={liveFeedUrl} 
                       target="_blank" 
                       rel="noopener noreferrer" 
                       onClick={() => setMenuOpen(false)}

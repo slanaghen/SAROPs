@@ -3,6 +3,7 @@ SET client_min_messages TO warning;
 
 -- Ensure a clean slate for checkin_responder_securely to avoid "function name not unique" errors
 DROP FUNCTION IF EXISTS checkin_responder_securely(TEXT, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT); -- Old 12-parameter version (with p_vehicles)
+DROP FUNCTION IF EXISTS checkin_responder_securely(TEXT, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT[], JSONB, TEXT, TEXT, TEXT);
 DROP FUNCTION IF EXISTS checkin_responder_securely(TEXT, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT); -- Current 11-parameter version
 
 -- RPC: Secure Check-in

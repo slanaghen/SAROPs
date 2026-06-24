@@ -33,3 +33,6 @@ $$;
 
 -- Grant access to authenticated users to execute this function
 GRANT EXECUTE ON FUNCTION public.clear_data() TO authenticated;
+
+-- Automatically clear operational data when the script is run as part of re-initialization
+SELECT public.clear_data();

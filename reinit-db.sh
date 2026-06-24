@@ -23,7 +23,6 @@ REQUIRED_FILES=(
   "$DB_DIR/09_rpcs.sql"
   "$DB_DIR/10_seed.sql"
   "$DB_DIR/11_admin_rpcs.sql"
-  "$DB_DIR/seed-data-specific.sql"
   "$DB_DIR/99_clear_data.sql"
 )
 

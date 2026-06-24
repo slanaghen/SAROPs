@@ -29,10 +29,10 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
 }) => {
   const navigate = useNavigate();
   const location = useLocation(); // Use useLocation to access state
-  const { 
-    incidentId: contextIncidentId, 
-    incidentData, 
-    startIncident, 
+  const {
+    incidentId: contextIncidentId,
+    incidentData,
+    startIncident,
     responderName,
     responderStatus,
     accessLevel,
@@ -41,7 +41,7 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
     setAccessLevel,
     setResponderStatus,
     isAdmin, // Get isAdmin from context
-    isActive 
+    isActive
   } = useIncident();
   const {
     checkedInResponder,
@@ -75,6 +75,7 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
           const { error: authError } = await supabase.auth.signInAnonymously();
           if (authError) throw authError;
         }
+        console.debug('[ResponderCheckinPage] session:', session?.user?.id, session?.user?.email); // SGL
       } catch (err) {
         console.error('Initial authentication failed:', err);
         setSessionError('Failed to establish a secure session. Please check your connection and refresh.');
@@ -84,9 +85,9 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
     };
 
     initSession();
-    
+
     // Listen for auth state changes
-    const authRes = supabase.auth.onAuthStateChange(() => {});
+    const authRes = supabase.auth.onAuthStateChange(() => { });
     return () => authRes?.data?.subscription?.unsubscribe();
   }, []);
 
@@ -98,8 +99,8 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
   const [icsRole, setIcsRole] = useState<string | null>(null);
 
   // Centralized definition of staff-level access
-  const isStaff = useMemo(() => 
-    isAdmin && (accessLevel === 'staff' || accessLevel === 'admin'), 
+  const isStaff = useMemo(() =>
+    isAdmin && (accessLevel === 'staff' || accessLevel === 'admin'),
     [accessLevel]
   );
 
@@ -109,11 +110,11 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
 
     if (shouldRedirect && !checkInInProgress && !showTeamSelection && !loading) {
       const target = isStaff ? '/operations' : '/responder';
-      
+
       console.info(`Active session detected, redirecting to ${target}`);
       navigate(target);
     }
-   }, [isActive, responderName, responderStatus, checkInInProgress, showTeamSelection, loading, navigate, incidentData, isStaff, location.pathname]);
+  }, [isActive, responderName, responderStatus, checkInInProgress, showTeamSelection, loading, navigate, incidentData, isStaff, location.pathname]);
 
   // Incident selection state (moved from LoginPage)
   const [incidents, setIncidents] = useState<Incident[]>([]);
@@ -123,8 +124,8 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
 
   // op_period_id is a UUID. Incident IDs are now TEXT (incident numbers).
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-  const effectiveOpId = (operationalPeriodId && uuidRegex.test(operationalPeriodId)) 
-    ? operationalPeriodId 
+  const effectiveOpId = (operationalPeriodId && uuidRegex.test(operationalPeriodId))
+    ? operationalPeriodId
     : incidentData?.opPeriodId;
 
   // Fetch active incidents for the dropdown and synchronize with real-time updates
@@ -150,7 +151,7 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
       if (fetchError) throw fetchError;
       const freshIncidents = data || [];
       setIncidents(freshIncidents);
-      
+
       if (freshIncidents.length > 0) {
         const incidentFromState = location.state?.newIncidentId;
         if (incidentFromState && freshIncidents.some(inc => inc.incident_id === incidentFromState)) {
@@ -197,7 +198,7 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
    */
   const completeCheckInFlow = async (responder: Responder) => {
     console.group('🏁 Completing Check-In Flow');
-    
+
     // Determine role based on the responder object's access_level
     const role = (responder.access_level || 'responder').toLowerCase();
 
@@ -247,7 +248,7 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
           .eq('incident_id', targetIncidentId)
           .is('end_datetime', null)
           .maybeSingle();
-        
+
         if (freshInc) {
           activeIncident = freshInc as any;
         }
@@ -258,7 +259,7 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
       }
 
       const targetIncidentName = activeIncident.name;
-      const latestOp = activeIncident.operational_periods?.sort((a: any, b: any) => 
+      const latestOp = activeIncident.operational_periods?.sort((a: any, b: any) =>
         new Date(b.start_datetime).getTime() - new Date(a.start_datetime).getTime()
       )[0];
 
@@ -295,8 +296,7 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
       }
 
       // If operational period provided, show team assignment or staff confirmation
-      // Only allow staff/admin confirmation flows if the user is logged in
-      const isStaffCheck = isAdmin && (finalResponder.access_level === 'staff' || finalResponder.access_level === 'admin');
+      const isStaffCheck = finalResponder.access_level === 'staff' || finalResponder.access_level === 'admin';
 
       if (isStaffCheck && targetIncidentId) {
         const { data: roleData } = await supabase

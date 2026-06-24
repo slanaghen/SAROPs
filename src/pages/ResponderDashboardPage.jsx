@@ -551,6 +551,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       refreshAllData();
     } catch (err) { // Error is handled by the hook's setError
       console.error('Error deploying assignment:', err);
+      alert(err.message);
       addToast('Deployment failed: ' + (err.message || 'Permission denied'), 'error');
     }
   };

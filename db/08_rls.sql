@@ -20,32 +20,27 @@ $func$ LANGUAGE sql STABLE;
 
 CREATE OR REPLACE FUNCTION check_is_operational_staff()
 RETURNS BOOLEAN AS $func$
-  SELECT COALESCE(
-    (auth.jwt() ->> 'access_level') IN ('staff', 'admin'), -- Fastest: Direct JWT claim check
-    EXISTS (
-      -- Fallback: Check against the system 'users' table for staff/admin email
-      SELECT 1
-      FROM users u
-      WHERE u.email = (auth.jwt() ->> 'email') AND u.access_level IN ('staff', 'admin')
-    ),
-    EXISTS (
-      -- Fallback: Check against the 'responders' table for active staff/admin responder records
-      SELECT 1
-      FROM responders r
-      WHERE r.auth_uid = auth.uid() AND r.access_level IN ('staff', 'admin') AND r.checkout_datetime IS NULL
+  -- Requirement: Only staff and admin users can manage operational entities.
+  -- We use OR logic to ensure that if the user qualifies via any mechanism, they are granted access.
+  SELECT (
+    COALESCE((auth.jwt() ->> 'access_level') IN ('staff', 'admin'), FALSE) -- Fastest: Direct JWT claim check
+    OR EXISTS (
+      -- Fallback: Check against the system 'users' table for staff/admin email using auth.email()
+      SELECT 1 FROM users u
+      WHERE u.email = auth.email() AND u.access_level IN ('staff', 'admin')
     )
-  ); -- COALESCE ensures we return TRUE if any of the conditions are met
+    OR EXISTS (
+      -- Fallback: Check against the 'responders' table for any staff/admin responder record (active or not)
+      SELECT 1 FROM responders r
+      WHERE r.auth_uid = auth.uid() AND r.access_level IN ('staff', 'admin')
+    )
+  );
 $func$ LANGUAGE sql STABLE SECURITY DEFINER;
 
 CREATE OR REPLACE FUNCTION is_admin_or_command_staff()
 RETURNS BOOLEAN AS $func$
   SELECT check_is_operational_staff();
 $func$ LANGUAGE sql STABLE;
-
-CREATE OR REPLACE FUNCTION get_my_responder_id() 
-RETURNS UUID AS $func$
-  SELECT responder_id FROM responders WHERE auth_uid = auth.uid() ORDER BY checkin_datetime DESC LIMIT 1;
-$func$ LANGUAGE sql STABLE SECURITY DEFINER;
 
 -- Optimized version to ensure we get the *active* responder
 CREATE OR REPLACE FUNCTION get_my_responder_id() 
