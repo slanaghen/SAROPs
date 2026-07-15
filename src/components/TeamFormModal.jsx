@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import BaseModal from './BaseModal';
 import { useIncident } from '../context/IncidentContext';
+import { supabase } from '../lib/supabase';
 import { TEAM_TYPES, STAFF_PREDEFINED_ROLES } from '../constants/operationalConstants';
 import { normalizeResourceTypeName } from '../utils/dataNormalization';
 import { useToast } from '../context/ToastContext';
@@ -52,8 +53,15 @@ const TeamFormModal = ({
   const isStaffTeam = teamForm.type === 'Staff';
 
   useEffect(() => {
-    setTeamForm(getInitialState(initialData));
-  }, [initialData]);
+    // This effect synchronizes the form's state with the initialData prop.
+    // The key is to only reset the form when the modal is being opened for a
+    // new or different team. This is checked by comparing the incoming team_id
+    // with the one currently in the form's state. This prevents in-progress
+    // edits (like adding a new member) from being wiped out by parent re-renders.
+    if (isOpen && initialData?.team_id !== teamForm.team_id) {
+      setTeamForm(getInitialState(initialData));
+    }
+  }, [isOpen, initialData]);
 
   // Only staged responders (unassigned) or responders already on this team should be available.
   // This prevents assigning a responder to multiple teams simultaneously.
@@ -86,7 +94,7 @@ const TeamFormModal = ({
   const handleDropIntoRole = (e, role) => {
     e.preventDefault();
     e.stopPropagation();
-    const responderId = e.dataTransfer.getData('responderId');
+    const responderId = e.dataTransfer.getData('text/plain');
     if (!responderId) return;
 
     const currentIds = teamForm.responder_ids || [];
@@ -120,8 +128,8 @@ const TeamFormModal = ({
 
   const handleDropOnPool = (e) => {
     e.preventDefault();
-    const responderId = e.dataTransfer.getData('responderId');
-    const vehicleId = e.dataTransfer.getData('vehicleId');
+    const responderId = e.dataTransfer.getData('text/plain');
+    const vehicleId = e.dataTransfer.getData('vehicleId'); // Assuming this might be used elsewhere
 
     if (responderId) {
       const currentIds = teamForm.responder_ids || [];
@@ -145,7 +153,7 @@ const TeamFormModal = ({
   };
   const handleDropMember = (e) => {
     e.preventDefault();
-    const responderId = e.dataTransfer.getData('responderId');
+    const responderId = e.dataTransfer.getData('text/plain');
     if (!responderId) return;
 
     // Don't add if already the leader or already a member
@@ -188,32 +196,35 @@ const TeamFormModal = ({
     });
   };
 
-  const handleSave = (stayOpen = false) => {
+  const handleSave = async (stayOpen = false) => {
     // Enforce business rule: A responder cannot be active on multiple teams simultaneously.
     // Active status is defined as 'Attached', 'Assigned', or 'Deployed'.
+    // Get the set of members who were on this team when the modal opened.
     const initialMemberIds = new Set([
       ...(initialData.responder_ids || []),
       ...(initialData.current_responders?.map(r => r.responder_id) || []),
       initialData.leader_responder_id
     ].filter(Boolean));
 
+    // This function checks if a responder is active on ANOTHER team.
     const checkResponderConflict = (id) => {
+      // If the responder was already on THIS team, they can't be in conflict with themselves.
       if (!id || initialMemberIds.has(id)) return null;
       const r = responders.find(res => res.responder_id === id);
       // Status logic: if not 'staged' or 'checkedout', the responder is currently active on another team.
-      if (r && !['staged', 'checkedout'].includes(String(r.status || '').toLowerCase())) {
+      if (r && !['staged', 'checkedout', ''].includes(String(r.status || '').toLowerCase())) {
         return r.name;
       }
       return null;
     };
 
-    const conflicts = [
+    const newMemberConflicts = [
       checkResponderConflict(teamForm.leader_responder_id),
       ...(teamForm.responder_ids || []).map(checkResponderConflict)
     ].filter(Boolean);
 
-    if (conflicts.length > 0) {
-      const uniqueConflicts = [...new Set(conflicts)];
+    if (newMemberConflicts.length > 0) {
+      const uniqueConflicts = [...new Set(newMemberConflicts)];
       addToast(`Assignment Conflict: Responders ${uniqueConflicts.join(', ')} are already active on other teams. Responders can only belong to one team at a time.`, 'error');
       return;
     }
@@ -223,11 +234,54 @@ const TeamFormModal = ({
       ? teamForm.equipment.split(',').map(s => s.trim()).filter(Boolean)
       : (Array.isArray(teamForm.equipment) ? teamForm.equipment : []);
 
-    onSave({
-      ...teamForm,
-      equipment: equipmentArray,
-      vehicle_ids: teamForm.vehicle_ids
-    }, stayOpen);
+    // Combine all members: existing, newly added, and the leader.
+    const allMemberIds = new Set(teamForm.responder_ids || []);
+    if (teamForm.leader_responder_id) {
+      allMemberIds.add(teamForm.leader_responder_id);
+    }
+
+    const finalPayload = {
+      ...initialData, // Start with original data to avoid passing invalid fields
+      ...teamForm, // Overlay form changes
+      equipment: equipmentArray, // Use the processed equipment array
+      responder_ids: Array.from(allMemberIds), // Use the final, complete set of member IDs
+    };
+
+    // The onSave prop now becomes the primary persistence function.
+    try {
+      const teamId = finalPayload.team_id;
+      const finalIds = finalPayload.responder_ids;
+      const roles = finalPayload.responder_roles || {};
+
+      // Auto-generate team name if blank
+      let finalTeamName = finalPayload.team_name_number?.trim();
+      if (!finalTeamName) {
+        const type = finalPayload.type || 'Other';
+        // Note: This name generation is simpler than AdminPage's as it doesn't have access to allTeams.
+        // This can be enhanced if needed by passing allTeams as a prop.
+        finalTeamName = `${type} Team`;
+      }
+
+      const dbPayload = {
+        team_name_number: finalTeamName,
+        type: finalPayload.type,
+        status: finalPayload.status,
+        leader_responder_id: finalPayload.leader_responder_id,
+        equipment: finalPayload.equipment,
+      };
+
+      // The onSave prop is now responsible for all persistence, for both create and edit.
+      // The parent component will handle database logic and success/error toasts.
+      if (onSave) await onSave(finalPayload, stayOpen);
+
+      // The parent's onSave should handle closing the modal if stayOpen is false.
+      // We only handle the close here if it's a new team, to maintain original behavior.
+      if (!stayOpen && !teamId) { // Only close if creating and not staying open
+        onClose();
+      }
+    } catch (err) {
+      addToast(err.message || 'Failed to save team.', 'error');
+    }
   };
 
   const leaderRole = isStaffTeam ? 'Incident Commander' : 'Team Leader';
@@ -349,7 +403,7 @@ const TeamFormModal = ({
                             <div 
                               className="chip team-chip"
                               draggable="true"
-                              onDragStart={(e) => e.dataTransfer.setData('responderId', r.responder_id)}
+                            onDragStart={(e) => e.dataTransfer.setData('text/plain', r.responder_id)}
                               style={{ display: 'inline-block', padding: '3px 8px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '6px', fontSize: '12px', cursor: 'grab' }}
                             >
                               <div style={{ fontWeight: 600 }}>{r.name}</div>
@@ -379,7 +433,7 @@ const TeamFormModal = ({
                           <div 
                             className="chip team-chip"
                             draggable="true"
-                            onDragStart={(e) => e.dataTransfer.setData('responderId', teamForm.leader_responder_id)}
+                            onDragStart={(e) => e.dataTransfer.setData('text/plain', teamForm.leader_responder_id)}
                             style={{ display: 'inline-block', padding: '3px 8px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', fontSize: '12px', cursor: 'grab' }}
                           >
                             <div style={{ fontWeight: 600 }}>
@@ -409,7 +463,7 @@ const TeamFormModal = ({
                           <div 
                             className="chip team-chip"
                             draggable="true"
-                            onDragStart={(e) => e.dataTransfer.setData('responderId', id)}
+                            onDragStart={(e) => e.dataTransfer.setData('text/plain', id)}
                             style={{ display: 'inline-block', padding: '3px 8px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '6px', fontSize: '12px', cursor: 'grab' }}
                           >
                             <div style={{ fontWeight: 600 }}>{r.name}</div>
@@ -453,8 +507,8 @@ const TeamFormModal = ({
                   {availableResponders.filter(r => !(teamForm.responder_ids || []).includes(r.responder_id)).map(r => (
                     <div 
                       key={r.responder_id}
-                      draggable
-                      onDragStart={(e) => e.dataTransfer.setData('responderId', r.responder_id)}
+                      draggable="true"
+                      onDragStart={(e) => e.dataTransfer.setData('text/plain', r.responder_id)}
                       className="chip team-chip"
                       style={{ cursor: 'grab', padding: '4px 8px', background: '#fff', border: '1px solid #d9d9d9', borderRadius: '6px', fontSize: '12px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}
                     >

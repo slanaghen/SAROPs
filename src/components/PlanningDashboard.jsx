@@ -142,7 +142,7 @@ const PlanningDashboard = ({
 
       if (responder && team) {
         handleDragEnd();
-        setLoading(true);
+        setActionLoading(true);
         try {
           if (attachResponderToTeam) { // Hook handles its own error
             await attachResponderToTeam(responderId, teamId); 
@@ -152,7 +152,7 @@ const PlanningDashboard = ({
         } catch (err) {
           addToast(err.message || 'Failed to attach responder to team', 'error');
         } finally {
-          setLoading(false);
+          setActionLoading(false);
         }
       }
     }
@@ -165,7 +165,7 @@ const PlanningDashboard = ({
 
       if (vehicle && team) {
         handleDragEnd();
-        setLoading(true);
+        setActionLoading(true);
         try {
           if (attachVehicleToTeam) { // Hook handles its own error
             await attachVehicleToTeam(vehicleId, teamId); 
@@ -175,7 +175,7 @@ const PlanningDashboard = ({
         } catch (err) {
           addToast(err.message || 'Failed to attach vehicle to team', 'error');
         } finally {
-          setLoading(false);
+          setActionLoading(false);
         }
       }
     }
@@ -495,12 +495,6 @@ const PlanningDashboard = ({
         }
       }
 
-      // Ensure leader is included in responder_ids for consistency
-      const currentResponders = formData.responder_ids || [];
-      const finalResponderIds = (formData.leader_responder_id && !currentResponders.includes(formData.leader_responder_id))
-        ? [...currentResponders, formData.leader_responder_id]
-        : currentResponders;
-
       if (formData.team_id && updateTeam) {
         const payload = {
           team_name_number: finalTeamName,
@@ -511,25 +505,21 @@ const PlanningDashboard = ({
           leader_responder_id: formData.leader_responder_id,
           equipment: formData.equipment
         };
-        await updateTeam(formData.team_id, payload, formData.responder_roles, formData.vehicle_ids);
+        await updateTeam(formData.team_id, payload, formData.responder_ids, formData.responder_roles, formData.vehicle_ids);
         addToast('Team updated.', 'success');
       } else if (createTeam) {
         const payload = {
           team_name_number: finalTeamName,
           type: formData.type || 'Other',
-          sartopo_color_hex: formData.sartopo_color_hex || '#ff0000',
           status: formData.status || 'Staged',
           leader_responder_id: formData.leader_responder_id,
-          equipment: formData.equipment
+          equipment: formData.equipment,
+          op_period_id: operationalPeriodId // Pass the current OP ID
         };
-        await createTeam(payload, formData.responder_roles, formData.vehicle_ids);
+        await createTeam(payload, formData.responder_ids, formData.responder_roles, formData.vehicle_ids);
         addToast('Team created.', 'success');
       }
-      if (stayOpen) {
-        openNewTeamForm();
-      } else {
-        setShowTeamForm(false);
-      }
+      if (stayOpen) openNewTeamForm();
     } catch (err) {
       addToast(err.message || 'Failed to save team.', 'error');
     } finally {

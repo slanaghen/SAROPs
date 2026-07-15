@@ -272,7 +272,7 @@ export const usePlanningDashboard = (supabase, opPeriodId) => {
       // 3. Reconcile Vehicles
       const { data: currentVehicles } = await supabase.from('vehicles').select('vehicle_id').eq('team_id', teamId);
       const originalVehIds = currentVehicles?.map(v => v.vehicle_id) || [];
-      const finalVehIds = vehicleIds;
+      const finalVehIds = vehicleIds || [];
 
       const vehToAdd = finalVehIds.filter(id => !originalVehIds.includes(id));
       const vehToRemove = originalVehIds.filter(id => !finalVehIds.includes(id));

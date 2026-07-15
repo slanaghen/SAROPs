@@ -583,31 +583,9 @@ const AdminPage = () => {
   const handleSaveTeam = async (formData, stayOpen = false) => {
     setLoading(true);
 
+    // NOTE: The TeamFormModal now handles its own update logic.
+    // This function is now only responsible for CREATING new teams from the Admin page.
     try {
-      const teamId = formData.team_id;
-
-      // Requirement: Ensure the leader is always included in the membership set.
-      const responderIds = formData.responder_ids || [];
-      const finalIds = (formData.leader_responder_id && !responderIds.includes(formData.leader_responder_id))
-        ? [...responderIds, formData.leader_responder_id]
-        : responderIds;
-
-      // VALIDATION: A responder cannot be attached to more than one active team at a time.
-      // We check all 'finalIds' for people being newly added to this team (or added to a new team).
-      const originalIds = editingTeam?.current_responders?.map(r => r.responder_id) || [];
-      const newToTeamIds = finalIds.filter(id => !originalIds.includes(id));
-      
-      const busyResponders = newToTeamIds.filter(id => {
-        const r = allResponders.find(res => res.responder_id === id);
-        // Status definitions: Staged responders are available. Attached, Assigned, Deployed are busy.
-        return r && r.status !== 'Staged';
-      });
-
-      if (busyResponders.length > 0) {
-        const names = busyResponders.map(id => allResponders.find(r => r.responder_id === id)?.name || 'Unknown').join(', ');
-        throw new Error(`The following responders are already attached to another team: ${names}. A responder can only be on one team at a time.`);
-      }
-
       // Consistent name generation: [Type] [Next Number]
       let finalTeamName = formData.team_name_number?.trim();
       if (!finalTeamName) {
@@ -616,49 +594,7 @@ const AdminPage = () => {
         finalTeamName = `${type} ${existingOfSameType.length + 1}`;
       }
 
-      const payload = {
-        team_name_number: finalTeamName,
-        sartopo_color_hex: formData.sartopo_color_hex || '#FF0000',
-        type: formData.type || 'Other',
-        status: formData.status || 'Staged',
-        leader_responder_id: formData.leader_responder_id || null,
-        equipment: formData.equipment || [],
-      };
-
-      if (teamId) {
-        // 1. Update core team metadata
-        const { error: updateError } = await supabase
-          .from('teams')
-          .update(payload)
-          .eq('team_id', teamId);
-        if (updateError) throw updateError;
-
-        // 2. Reconcile responder attachments (Add/Remove/Update roles)
-        // Requirement: Ensure the leader is always included in the membership set to prevent accidental removal.
-        const roles = formData.responder_roles || {};
-        const toRemove = originalIds.filter(id => !finalIds.includes(id));
-        const existing = finalIds.filter(id => originalIds.includes(id));
-
-        await Promise.all([
-          ...newToTeamIds.map(id => supabase.from('team_responders').insert({ team_id: teamId, responder_id: id, role: roles[id] || '' })),
-          ...existing.map(id => supabase.from('team_responders').update({ role: roles[id] || '' }).eq('team_id', teamId).eq('responder_id', id)),
-          ...toRemove.map(id => supabase.from('team_responders').delete().eq('team_id', teamId).eq('responder_id', id))
-        ]);
-
-        // 3. Reconcile vehicles
-        const finalVehIds = formData.vehicle_ids || [];
-        const originalVehIds = editingTeam?.current_vehicles?.map(v => v.vehicle_id) || [];
-        
-        const vehToAdd = finalVehIds.filter(id => !originalVehIds.includes(id));
-        const vehToRemove = originalVehIds.filter(id => !finalVehIds.includes(id));
-
-        await Promise.all([
-          ...vehToAdd.map(id => supabase.from('vehicles').update({ team_id: teamId }).eq('vehicle_id', id)),
-          ...vehToRemove.map(id => supabase.from('vehicles').update({ team_id: null }).eq('vehicle_id', id))
-        ]);
-
-        addToast(`Team ${formData.team_name_number} updated.`, 'success');
-      } else {
+      if (!formData.team_id) { // Only handle creation
         // Adding new team to the current active incident context
         if (!incidentId) throw new Error("Please join an incident context before creating a team.");
 
@@ -671,27 +607,28 @@ const AdminPage = () => {
         if (!opData?.op_period_id) throw new Error("No active operational period found for the selected incident.");
           
         const newTeamId = uuidv4();
-        const { error: insertError } = await supabase.from('teams').insert({ 
-          ...payload, 
+        const { error: insertError } = await supabase.from('teams').insert({
+          team_name_number: finalTeamName,
+          type: formData.type || 'Other',
+          status: formData.status || 'Staged',
+          leader_responder_id: formData.leader_responder_id || null,
+          equipment: formData.equipment || [],
           team_id: newTeamId, 
           op_period_id: opData.op_period_id 
         });
 
         if (insertError) throw insertError;
 
+        const finalIds = formData.responder_ids || [];
         const roles = formData.responder_roles || {};
         if (finalIds.length > 0) {
-           await Promise.all(finalIds.map(id => 
-             supabase.from('team_responders').insert({ 
-               team_id: newTeamId, 
-               responder_id: id, 
-               role: roles[id] || '' 
-             })
-           ));
+          await Promise.all(finalIds.map(id =>
+            supabase.from('team_responders').insert({ team_id: newTeamId, responder_id: id, role: roles[id] || '' })
+          ));
         }
 
         // Process initial vehicle assignments
-        const finalVehIds = formData.vehicle_ids || [];
+        const finalVehIds = formData.vehicle_ids || []; // This is now passed from the modal
         if (finalVehIds.length > 0) {
           await supabase.from('vehicles').update({ team_id: newTeamId }).in('vehicle_id', finalVehIds);
         }
@@ -700,13 +637,12 @@ const AdminPage = () => {
       }
       await refreshDashboardData();
 
-      if (stayOpen) {
-        setEditingTeam(null);
-        setShowTeamModal(true);
-      } else {
-        setShowTeamModal(false);
-        setEditingTeam(null);
-      }
+      // This part is now handled by the modal's internal logic for updates.
+      // For creation, we still need to manage the parent component's state.
+      if (formData.team_id) addToast(`Team ${formData.team_name_number} updated.`, 'success');
+
+      if (stayOpen) setEditingTeam(null);
+      else setEditingTeam(null);
     } catch (err) {
       addToast(err.message || 'Failed to save team.', 'error');
     } finally {

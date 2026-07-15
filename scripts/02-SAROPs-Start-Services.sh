@@ -1,5 +1,7 @@
 #!/bin/bash
 
+source ../.env
+
 # SAROps Services Startup Script
 # Ensures Docker is running and Supabase local stack is started.
 
@@ -9,8 +11,10 @@ pushd `git rev-parse --show-toplevel` || exit
 echo "--- Checking System Dependencies ---"
 
 # 1. Check if Docker is running
-#if ! docker info > /dev/null 2>&1; then
-#  echo "🐳 Docker daemon is not detected."
+if docker info > /dev/null 2>&1; then
+  echo "✅ Docker is already running."
+else
+  echo "🐳 Docker daemon is not detected."
 
   # Attempt to start Docker on macOS
   if [[ "$OSTYPE" == "darwin"* ]]; then
@@ -30,19 +34,20 @@ echo "--- Checking System Dependencies ---"
       sleep 5
       COUNT=$((COUNT+1))
     done
+    echo "✅ Docker has started."
   else
     echo "❌ Please start the Docker daemon manually on your system."
     popd
     exit 1
   fi
-#fi
+fi
 
-echo "✅ Docker is running."
 
 # 2. Check Supabase Status
 if ! supabase status > /dev/null 2>&1; then
   echo "⚡ Supabase local services are stopped. Starting now..."
   supabase start
+  echo "✅ Supabase local services started."
 else
   echo "✅ Supabase local services are already active."
 fi
@@ -50,6 +55,6 @@ fi
 echo ""
 echo "--- Startup Complete ---"
 # Display the local service URLs and credentials
-supabase status
+#supabase status
 
 popd

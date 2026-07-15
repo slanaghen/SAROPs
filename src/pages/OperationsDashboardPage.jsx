@@ -535,43 +535,15 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       };
 
       if (formData.team_id) {
-        const finalIds = formData.responder_ids || [];
-        const roles = formData.responder_roles || {};
-        const originalIds = teamById[formData.team_id]?.current_responders?.map(r => r.responder_id) || [];
-        // Reconciliation is now handled within updateTeam
-        await updateTeam(formData.team_id, payload, originalIds, finalIds, roles);
-
-        // Reconcile vehicles
-        const finalVehIds = formData.vehicle_ids || [];
-        const originalVehIds = teamById[formData.team_id]?.current_vehicles?.map(v => v.vehicle_id) || [];
-        const vehToAdd = finalVehIds.filter(id => !originalVehIds.includes(id));
-        const vehToRemove = originalVehIds.filter(id => !finalVehIds.includes(id));
-
-        await Promise.all([
-          ...vehToAdd.map(id => supabase.from('vehicles').update({ team_id: formData.team_id }).eq('vehicle_id', id)),
-          ...vehToRemove.map(id => supabase.from('vehicles').update({ team_id: null }).eq('vehicle_id', id))
-        ]);
-      } else {
-        const newTeam = await createTeam(
-          { ...payload, op_period_id: operationalPeriodId }, 
-          formData.responder_roles, 
-          formData.vehicle_ids
-        );
-        
-        // Process initial vehicle assignments for new team
-        if (formData.vehicle_ids?.length > 0) {
-          await supabase.from('vehicles').update({ team_id: newTeam.team_id }).in('vehicle_id', formData.vehicle_ids);
-        }
-
+        // The modal now handles its own updates. We just need to refresh the data.
+        await updateTeam(formData.team_id, payload, formData.responder_ids, formData.responder_roles, formData.vehicle_ids || []);
+      } else { // Creating a new team
+        const newTeam = await createTeam({ ...payload, op_period_id: operationalPeriodId }, formData.responder_ids, formData.responder_roles, formData.vehicle_ids || []);
         if (pendingAssignmentId) await assignTeamToAssignment(newTeam.team_id, pendingAssignmentId);
       }
 
       setPendingAssignmentId(null);
-      if (stayOpen) {
-        openNewTeamForm();
-      } else {
-        setShowTeamForm(false);
-      }
+      if (stayOpen) openNewTeamForm();
     } catch (err) {
       setPendingAssignmentId(null);
     }

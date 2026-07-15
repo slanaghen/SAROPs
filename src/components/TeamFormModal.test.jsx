@@ -117,7 +117,7 @@ describe('TeamFormModal', () => {
     };
     render(<TeamFormModal {...propsNoLeader} />);
     
-    expect(screen.getByRole('button', { name: /Save Changes/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Save/i })).toBeDisabled();
   });
 
   it('calls onClose when Cancel is clicked', () => {

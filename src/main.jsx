@@ -18,6 +18,7 @@ import GoogleICSFormsPage from './pages/GoogleICSFormsPage';
 import SettingsPage from './pages/SettingsPage';
 import { IncidentProvider, useIncident } from './context/IncidentContext';
 import { ToastProvider } from './context/ToastContext';
+import ProtectedRoute from './components/ProtectedRoute';
 import ToastContainer from './components/ToastContainer';
 
 const OperationsDashboardPage = lazy(() => import('./pages/OperationsDashboardPage'));
@@ -41,32 +42,29 @@ const router = createBrowserRouter([
     element: <App />,
     errorElement: <ErrorPage />,
     children: [
-      { index: true, element: <ResponderCheckinPage /> },
+      // Public routes accessible without an active incident session
       { path: "checkin", element: <ResponderCheckinPage /> },
       { path: "login", element: <LoginPage /> },
-      { path: "checkout", element: <CheckOutPage /> },
-      { path: "planning", element: <StaffProtectedRoute><PlanningDashboardPage /></StaffProtectedRoute> },
-      { 
-        path: "operations", 
-        element: (
-          <StaffProtectedRoute><Suspense fallback={
-            <div style={{ padding: '40px', textAlign: 'center', color: '#64748b' }}>
-              Loading Operations Dashboard...
-            </div>
-          }>
-            <OperationsDashboardPage />
-          </Suspense></StaffProtectedRoute>
-        ) 
-      },
-      { path: "responder", element: <ResponderDashboardPage /> },
-      { path: "incident", element: <StaffProtectedRoute><IncidentEditPage /></StaffProtectedRoute> },
-      { path: "admin", element: <AdminProtectedRoute><AdminPage /></AdminProtectedRoute> },
-      { path: "settings", element: <SettingsPage /> },
-      { path: "action-log", element: <StaffProtectedRoute><ActionLogPage /></StaffProtectedRoute> },
-      { path: "qrcodes", element: <QRCodesPage /> },
-      { path: "sartopo", element: <StaffProtectedRoute><SARTopoDataPage /></StaffProtectedRoute> },
-      { path: "ics", element: <ICSAssignmentPage /> },
-      { path: "google-ics", element: <StaffProtectedRoute><GoogleICSFormsPage /></StaffProtectedRoute> },
+      { index: true, element: <Navigate to="/checkin" replace /> },
+
+      // Protected routes that require an active incident session
+      {
+        element: <ProtectedRoute />,
+        children: [
+          { path: "checkout", element: <CheckOutPage /> },
+          { path: "planning", element: <StaffProtectedRoute><PlanningDashboardPage /></StaffProtectedRoute> },
+          { path: "operations", element: <StaffProtectedRoute><Suspense fallback={ <div style={{ padding: '40px', textAlign: 'center', color: '#64748b' }}> Loading Operations Dashboard... </div> }> <OperationsDashboardPage /> </Suspense></StaffProtectedRoute> },
+          { path: "responder", element: <ResponderDashboardPage /> },
+          { path: "incident", element: <StaffProtectedRoute><IncidentEditPage /></StaffProtectedRoute> },
+          { path: "admin", element: <AdminProtectedRoute><AdminPage /></AdminProtectedRoute> },
+          { path: "settings", element: <SettingsPage /> },
+          { path: "action-log", element: <StaffProtectedRoute><ActionLogPage /></StaffProtectedRoute> },
+          { path: "qrcodes", element: <QRCodesPage /> },
+          { path: "sartopo", element: <StaffProtectedRoute><SARTopoDataPage /></StaffProtectedRoute> },
+          { path: "ics", element: <ICSAssignmentPage /> },
+          { path: "google-ics", element: <StaffProtectedRoute><GoogleICSFormsPage /></StaffProtectedRoute> },
+        ]
+      }
     ],
   },
 ]);
