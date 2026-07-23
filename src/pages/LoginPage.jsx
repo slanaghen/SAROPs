@@ -20,7 +20,7 @@ const LoginPage = () => {
     }
 
     if (selectedId === 'NEW_INCIDENT') {
-      setIsAdmin(true);
+      setIsAdmin(userRecord.access_level === 'staff' || userRecord.access_level === 'admin');
       setResponderName(userRecord.name || userRecord.username);
       setAccessLevel(userRecord.access_level);
       navigate('/incident', { 
@@ -75,18 +75,16 @@ const LoginPage = () => {
     }
 
     if (selectedId) {
-      setIsAdmin(true);
+      setIsAdmin(userRecord.access_level === 'staff' || userRecord.access_level === 'admin');
       if (userRecord?.access_level === 'staff' || userRecord?.access_level === 'admin') {
         navigate('/operations');
       } else {
         navigate('/responder');
       }
     } else {
-      // Set basic context info even if not checked into a specific incident
+      setIsAdmin(userRecord.access_level === 'staff' || userRecord.access_level === 'admin');
       setResponderName(userRecord.name || userRecord.username);
       setAccessLevel(userRecord.access_level);
-      setIsAdmin(true);
-      // If admin, go to admin dashboard. If responder (likely a new registration), go to settings.
       if (userRecord?.access_level === 'admin') {
         navigate('/admin');
       } else {

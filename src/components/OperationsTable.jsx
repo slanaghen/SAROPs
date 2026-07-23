@@ -141,7 +141,7 @@ const OperationsTable = ({
                     draggable={!row.hasBoth}
                     onDragStart={!row.hasBoth ? (e) => onDragStart(e, row.id, 'assignment') : undefined}
                     onDragEnd={onDragEnd}
-                    onClick={() => onEditAssignment(row.assignmentId)}
+                    onClick={() => row.assignmentId && onEditAssignment(row.assignmentId)}
                   >
                     {row.assignmentName}
                   </div>
@@ -170,7 +170,7 @@ const OperationsTable = ({
               <td 
                 style={{ textAlign: 'center' }}
                 onDragOver={(e) => onDragOver(e, row.id, 'team')}
-                onDragEnter={(e) => { e.preventDefault(); onDragEnter(e, row.id, 'team'); }}
+                onDragEnter={(e) => onDragEnter(e, row.id, 'team')}
                 onDragLeave={onDragLeave}
                 onDrop={(e) => onDrop(e, row.id, 'team')}
               >
@@ -180,7 +180,7 @@ const OperationsTable = ({
                     draggable={!row.hasBoth}
                     onDragStart={!row.hasBoth ? (e) => onDragStart(e, row.id, 'team') : undefined}
                     onDragEnd={onDragEnd}
-                    onClick={() => onEditTeam(row.teamId)}
+                    onClick={() => row.teamId && onEditTeam(row.teamId)}
                   >
                     {row.teamName}
                   </div>
@@ -222,8 +222,11 @@ const OperationsTable = ({
               <td style={{ textAlign: 'center' }}>
                 <select className="status-update-select" value="" onChange={(e) => {
                   const act = e.target.value;
-                  if (act === 'edit-team') onEditTeam(row.teamId);
-                  else if (act === 'edit-assignment') onEditAssignment(row.assignmentId);
+                  if (act === 'edit-team' && row.teamId) {
+                    console.log(`[OperationsTable] Edit action triggered for teamId: ${row.teamId}`);
+                    onEditTeam(row.teamId);
+                  }
+                  else if (act === 'edit-assignment' && row.assignmentId) onEditAssignment(row.assignmentId);
                   else if (act === 'reset-par') onResetPar(row.teamId, row.teamName);
                   else if (act === 'unassign') onUnassignTeam(row.assignmentId, row.teamId, row.assignmentName, row.teamName);
                   else if (act === 'assign-resource') onAssignResource(row);

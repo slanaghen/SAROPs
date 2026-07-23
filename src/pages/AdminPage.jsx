@@ -21,6 +21,7 @@ import AdminTeamsTable from '../components/admin/AdminTeamsTable';
 import AdminAssignmentsTable from '../components/admin/AdminAssignmentsTable';
 import AdminIncidentsTable from '../components/admin/AdminIncidentsTable';
 import AdminVehiclesTable from '../components/admin/AdminVehiclesTable';
+import { prepareTeamForEditing } from '../services/teamService';
 import VehicleFormModal from '../components/admin/VehicleFormModal';
 import { useToast } from '../context/ToastContext';
 import '../styles/ActionButtons.css';
@@ -544,146 +545,73 @@ const AdminPage = () => {
     }
   };
 
-  const openEditTeamForm = async (team) => {
-    if (!team) return;
+  const handleSaveTeam = async (formData, stayOpen = false) => {
+    console.log('[AdminPage] handleSaveTeam: Received form data from modal:', formData);
     setLoading(true);
     try {
-      // Requirement: Fetch current membership, roles, and vehicle attachments for reconciliation
-      const [membersRes, vehiclesRes] = await Promise.all([
-        supabase
-          .from('team_responders')
-          .select('responder_id, role')
-          .eq('team_id', team.team_id),
-        supabase
-          .from('vehicles')
-          .select('vehicle_id')
-          .eq('team_id', team.team_id)
-      ]);
+      const { team_id } = formData;
+      if (!team_id) {
+        addToast('Team creation is not supported from the Admin page. Please use the Planning dashboard.', 'error');
+        return;
+      }
 
-      const members = membersRes.data || [];
-      const currentVehicles = vehiclesRes.data || [];
-      
-      setEditingTeam({
-        ...team,
-        current_responders: members,
-        responder_ids: members.map(m => m.responder_id),
-        current_vehicles: currentVehicles,
-        vehicle_ids: currentVehicles.map(v => v.vehicle_id)
-      });
-      setShowTeamModal(true);
+      // Find the original team data to calculate differences in membership
+      const originalTeam = allTeams.find(t => t.team_id === team_id);
+      const originalMemberIds = originalTeam?.current_responders?.map(r => r.responder_id) || [];
+      const originalVehicleIds = originalTeam?.current_vehicles?.map(v => v.vehicle_id) || [];
+
+      const finalMemberIds = formData.responder_ids || []; // This is just members, leader is separate
+      const finalVehicleIds = formData.vehicle_ids || [];
+
+      const teamUpdates = {
+        team_name_number: formData.team_name_number,
+        type: formData.type,
+        status: formData.status,
+        leader_responder_id: formData.leader_responder_id,
+        equipment: formData.equipment,
+      };
+      console.log(`[AdminPage] handleSaveTeam: Updating team ${team_id} with payload:`, teamUpdates);
+      const { error: teamUpdateError } = await supabase.from('teams').update(teamUpdates).eq('team_id', team_id);
+      if (teamUpdateError) throw teamUpdateError;
+
+      // Reconcile members. The `ensure_leader_is_member` trigger handles the leader.
+      const allFinalIds = [...finalMemberIds, formData.leader_responder_id].filter(Boolean);
+      const membersToAdd = allFinalIds.filter(id => !originalMemberIds.includes(id));
+      const membersToRemove = originalMemberIds.filter(id => !allFinalIds.includes(id));
+
+      console.log(`[AdminPage] handleSaveTeam: Reconciling members for team ${team_id}. Adding:`, membersToAdd, 'Removing:', membersToRemove);
+      if (membersToRemove.length > 0) await supabase.from('team_responders').delete().eq('team_id', team_id).in('responder_id', membersToRemove);
+      if (membersToAdd.length > 0) await supabase.from('team_responders').insert(membersToAdd.map(id => ({ team_id, responder_id: id })));
+      await Promise.all(allFinalIds.map(id => supabase.from('team_responders').update({ role: formData.responder_roles?.[id] || null }).match({ team_id, responder_id: id })));
+
+      // Reconcile vehicles
+      const vehiclesToAdd = finalVehicleIds.filter(id => !originalVehicleIds.includes(id));
+      const vehiclesToRemove = originalVehicleIds.filter(id => !finalVehicleIds.includes(id));
+      console.log(`[AdminPage] handleSaveTeam: Reconciling vehicles for team ${team_id}. Adding:`, vehiclesToAdd, 'Removing:', vehiclesToRemove);
+      if (vehiclesToRemove.length > 0) await supabase.from('vehicles').update({ team_id: null, status: 'Staged' }).in('vehicle_id', vehiclesToRemove);
+      if (vehiclesToAdd.length > 0) await supabase.from('vehicles').update({ team_id, status: 'Attached' }).in('vehicle_id', vehiclesToAdd);
+
+      addToast('Team updated successfully.', 'success');
+      if (!stayOpen) setShowTeamModal(false);
+      await refreshDashboardData();
+    } catch (err) {
+      addToast(err.message || 'Failed to save team.', 'error');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSaveTeam = async (formData, stayOpen = false) => {
+  const openEditTeamForm = async (team) => {
+    if (!team) return;
     setLoading(true);
-
     try {
-      const teamId = formData.team_id;
-      const payload = {
-        team_name_number: formData.team_name_number || `Team ${Date.now()}`,
-        sartopo_color_hex: formData.sartopo_color_hex || '#FF0000',
-        type: formData.type || 'Other',
-        status: formData.status || 'Staged',
-        leader_responder_id: formData.leader_responder_id || null,
-        equipment: formData.equipment || [],
-      };
-
-      if (teamId) {
-        // 1. Update core team metadata
-        const { error: updateError } = await supabase
-          .from('teams')
-          .update(payload)
-          .eq('team_id', teamId);
-        if (updateError) throw updateError;
-
-        // 2. Reconcile responder attachments (Add/Remove/Update roles)
-        // Requirement: Ensure the leader is always included in the membership set to prevent accidental removal.
-        const currentResponders = formData.responder_ids || [];
-        const finalIds = (formData.leader_responder_id && !currentResponders.includes(formData.leader_responder_id))
-          ? [...currentResponders, formData.leader_responder_id]
-          : currentResponders;
-
-        const roles = formData.responder_roles || {};
-        const originalIds = editingTeam?.current_responders?.map(r => r.responder_id) || [];
-        
-        const toAdd = finalIds.filter(id => !originalIds.includes(id));
-        const toRemove = originalIds.filter(id => !finalIds.includes(id));
-        const existing = finalIds.filter(id => originalIds.includes(id));
-
-        await Promise.all([
-          ...toAdd.map(id => supabase.from('team_responders').insert({ team_id: teamId, responder_id: id, role: roles[id] || '' })),
-          ...existing.map(id => supabase.from('team_responders').update({ role: roles[id] || '' }).eq('team_id', teamId).eq('responder_id', id)),
-          ...toRemove.map(id => supabase.from('team_responders').delete().eq('team_id', teamId).eq('responder_id', id))
-        ]);
-
-        // 3. Reconcile vehicles
-        const finalVehIds = formData.vehicle_ids || [];
-        const originalVehIds = editingTeam?.current_vehicles?.map(v => v.vehicle_id) || [];
-        
-        const vehToAdd = finalVehIds.filter(id => !originalVehIds.includes(id));
-        const vehToRemove = originalVehIds.filter(id => !finalVehIds.includes(id));
-
-        await Promise.all([
-          ...vehToAdd.map(id => supabase.from('vehicles').update({ team_id: teamId }).eq('vehicle_id', id)),
-          ...vehToRemove.map(id => supabase.from('vehicles').update({ team_id: null }).eq('vehicle_id', id))
-        ]);
-
-        addToast(`Team ${formData.team_name_number} updated.`, 'success');
-      } else {
-        // Adding new team to the current active incident context
-        if (!incidentId) throw new Error("Please join an incident context before creating a team.");
-
-        const { data: opData } = await supabase
-          .from('operational_periods')
-          .select('op_period_id')
-          .eq('incident_id', incidentId)
-          .order('created_at', { ascending: false }).limit(1).maybeSingle();
-
-        if (!opData?.op_period_id) throw new Error("No active operational period found for the selected incident.");
-          
-        const newTeamId = uuidv4();
-        const { error: insertError } = await supabase.from('teams').insert({ 
-          ...payload, 
-          team_id: newTeamId, 
-          op_period_id: opData.op_period_id 
-        });
-
-        if (insertError) throw insertError;
-
-        // Process initial membership assignments
-        const finalIds = formData.responder_ids || [];
-        const roles = formData.responder_roles || {};
-        if (finalIds.length > 0) {
-           await Promise.all(finalIds.map(id => 
-             supabase.from('team_responders').insert({ 
-               team_id: newTeamId, 
-               responder_id: id, 
-               role: roles[id] || '' 
-             })
-           ));
-        }
-
-        // Process initial vehicle assignments
-        const finalVehIds = formData.vehicle_ids || [];
-        if (finalVehIds.length > 0) {
-          await supabase.from('vehicles').update({ team_id: newTeamId }).in('vehicle_id', finalVehIds);
-        }
-
-        addToast(`Team ${formData.team_name_number} created.`, 'success');
-      }
-      await refreshDashboardData();
-
-      if (stayOpen) {
-        setEditingTeam(null);
-        setShowTeamModal(true);
-      } else {
-        setShowTeamModal(false);
-        setEditingTeam(null);
-      }
+      const teamForEditing = await prepareTeamForEditing(supabase, team);
+      console.log('[AdminPage] openEditTeamForm: Preparing to open modal for team:', team.team_name_number);
+      console.log('[AdminPage] openEditTeamForm: Setting initialData for modal:', teamForEditing);
+      setEditingTeam(teamForEditing);
+      setShowTeamModal(true);
     } catch (err) {
-      addToast(err.message || 'Failed to save team.', 'error');
+      addToast(err.message || 'Failed to prepare team for editing.', 'error');
     } finally {
       setLoading(false);
     }
@@ -1316,12 +1244,10 @@ const AdminPage = () => {
         isOpen={showTeamModal}
         onClose={() => setShowTeamModal(false)}
         onSave={handleSaveTeam}
-        initialData={editingTeam || {}}
-        loading={loading}
+        initialData={editingTeam}
         responders={allResponders}
         vehicles={allVehicles}
         commandStaffExists={commandStaffExists}
-        onEditVehicle={(v) => { setEditingVehicle(v); setShowVehicleModal(true); }}
       />
 
       <AssignmentFormModal

@@ -21,27 +21,25 @@ const TeamFormModal = ({
   commandStaffExists = false
 }) => {
   const getInitialState = (data) => {
-    // Requirement: Ensure data is a valid object to prevent spread/property access crashes.
-    if (!data) data = {};
-    const roles = { ...(data.responder_roles || {}) };
+    const initial = data || {};
+    const allResponderIds = initial.current_responders?.map(r => r.responder_id) || initial.responder_ids || [];
+    const leaderId = initial.leader_responder_id;
 
-    // Requirement: Robustly extract member IDs from nested view data or flat arrays.
-    // Views use 'current_responders' (objects), mutations use 'responder_ids' (UUIDs).
-    const currentResponders = data.current_responders || [];
-    const derivedIds = currentResponders.map(r => r.responder_id);
-    
-    currentResponders.forEach(r => {
-      roles[r.responder_id] = r.role || '';
-    });
+    const rolesFromView = (initial.current_responders || []).reduce((acc, r) => {
+      acc[r.responder_id] = r.role || '';
+      return acc;
+    }, {});
 
     return {
-      ...data,
-      status: data.team_id ? (data.status || 'Staged') : 'Staged',
-      type: normalizeResourceTypeName(data.type),
-      equipment: Array.isArray(data.equipment) ? data.equipment.join(', ') : (data.equipment || ''),
-      responder_roles: roles,
-      responder_ids: data.responder_ids || derivedIds || [],
-      vehicle_ids: data.current_vehicles?.map(v => v.vehicle_id) || data.vehicle_ids || []
+      ...initial,
+      team_name_number: initial.team_name_number || '',
+      status: initial.team_id ? (initial.status || 'Staged') : 'Staged',
+      type: normalizeResourceTypeName(initial.type),
+      equipment: Array.isArray(initial.equipment) ? initial.equipment.join(', ') : (initial.equipment || ''),
+      leader_responder_id: leaderId,
+      responder_ids: allResponderIds.filter(id => id !== leaderId),
+      vehicle_ids: initial.current_vehicles?.map(v => v.vehicle_id) || initial.vehicle_ids || [],
+      responder_roles: { ...rolesFromView, ...(initial.responder_roles || {}) },
     };
   };
 
@@ -52,18 +50,21 @@ const TeamFormModal = ({
   const isStaffTeam = teamForm.type === 'Staff';
 
   useEffect(() => {
-    setTeamForm(getInitialState(initialData));
-  }, [initialData]);
+    if (isOpen) {
+      setTeamForm(getInitialState(initialData));
+    }
+  }, [initialData?.team_id, isOpen]);
 
   // Only staged responders (unassigned) or responders already on this team should be available.
   // This prevents assigning a responder to multiple teams simultaneously.
   const isStagedResponder = (responder) => String(responder?.status || '').toLowerCase() === 'staged';
 
   const availableResponders = useMemo(() => {
+    const data = initialData || {};
     const initialMemberIds = new Set([
-      ...(initialData.responder_ids || []),
-      ...(initialData.current_responders?.map(r => r.responder_id) || []),
-      initialData.leader_responder_id
+      ...(data.responder_ids || []),
+      ...(data.current_responders?.map(r => r.responder_id) || []),
+      data.leader_responder_id
     ].filter(Boolean));
 
     return responders.filter(r => 
@@ -72,9 +73,10 @@ const TeamFormModal = ({
   }, [responders, initialData]);
 
   const availableVehicles = useMemo(() => {
+    const data = initialData || {};
     const initialVehicleIds = new Set([
-      ...(initialData.vehicle_ids || []),
-      ...(initialData.current_vehicles?.map(v => v.vehicle_id) || [])
+      ...(data.vehicle_ids || []),
+      ...(data.current_vehicles?.map(v => v.vehicle_id) || [])
     ].filter(Boolean));
 
     return (vehicles || []).filter(v => 
@@ -87,35 +89,48 @@ const TeamFormModal = ({
     e.preventDefault();
     e.stopPropagation();
     const responderId = e.dataTransfer.getData('responderId');
+    console.log(`[TeamFormModal] handleDropIntoRole: Drag event started for responderId: ${responderId} into role: ${role}`);
     if (!responderId) return;
 
-    const currentIds = teamForm.responder_ids || [];
-    const newRoles = { ...(teamForm.responder_roles || {}) };
-    
     let newLeaderId = teamForm.leader_responder_id;
+    let newMemberIds = [...(teamForm.responder_ids || [])];
+    const newRoles = { ...(teamForm.responder_roles || {}) };
     const isICRole = role === 'Incident Commander' || role === 'Team Leader';
 
-    // Clear this specific role from anyone else (Staff roles are unique positions, non-staff teams can have multiple of same role)
+    // For Staff teams, ensure roles are unique by clearing the role from its previous holder.
     if (teamForm.type === 'Staff') {
       Object.keys(newRoles).forEach(id => {
         if (newRoles[id] === role) newRoles[id] = '';
       });
     }
 
+    // Handle leader assignment
     if (isICRole) {
-      if (newLeaderId && newLeaderId !== responderId) {
-        newRoles[newLeaderId] = ''; // Former leader becomes general member
+      const oldLeaderId = newLeaderId;
+      newLeaderId = responderId; // Assign new leader
+
+      // The new leader cannot also be in the members list.
+      newMemberIds = newMemberIds.filter(id => id !== newLeaderId);
+
+      // If there was an old leader, they are now a regular member.
+      if (oldLeaderId && oldLeaderId !== newLeaderId && !newMemberIds.includes(oldLeaderId)) {
+        newMemberIds.push(oldLeaderId);
+        newRoles[oldLeaderId] = ''; // Demote to general member
       }
-      newLeaderId = responderId;
-    } else {
+    } else { // Handle assignment to a non-leader role
+      // Add the responder to the members list if they aren't already.
+      if (!newMemberIds.includes(responderId)) {
+        newMemberIds.push(responderId);
+      }
+      // If the person being assigned was the leader, they are no longer.
       if (newLeaderId === responderId) {
-        newLeaderId = null; // Former leader moved to a section head role
+        newLeaderId = null;
       }
     }
-
     newRoles[responderId] = role;
 
-    setTeamForm({ ...teamForm, leader_responder_id: newLeaderId, responder_ids: currentIds.includes(responderId) ? currentIds : [...currentIds, responderId], responder_roles: newRoles });
+    console.log(`[TeamFormModal] handleDropIntoRole: State updated. New Leader: ${newLeaderId}, New Members:`, newMemberIds);
+    setTeamForm({ ...teamForm, leader_responder_id: newLeaderId, responder_ids: newMemberIds, responder_roles: newRoles });
   };
 
   const handleDropOnPool = (e) => {
@@ -124,19 +139,18 @@ const TeamFormModal = ({
     const vehicleId = e.dataTransfer.getData('vehicleId');
 
     if (responderId) {
-      const currentIds = teamForm.responder_ids || [];
+      console.log(`[TeamFormModal] handleDropOnPool: Removing responder ${responderId} from team.`);
       const newRoles = { ...(teamForm.responder_roles || {}) };
       delete newRoles[responderId];
 
-      const isLeader = responderId === teamForm.leader_responder_id;
-
       setTeamForm({
         ...teamForm,
-        leader_responder_id: isLeader ? null : teamForm.leader_responder_id,
-        responder_ids: currentIds.filter(id => id !== responderId),
+        leader_responder_id: responderId === teamForm.leader_responder_id ? null : teamForm.leader_responder_id,
+        responder_ids: (teamForm.responder_ids || []).filter(id => id !== responderId),
         responder_roles: newRoles
       });
     } else if (vehicleId) {
+      console.log(`[TeamFormModal] handleDropOnPool: Removing vehicle ${vehicleId} from team.`);
       setTeamForm({
         ...teamForm,
         vehicle_ids: (teamForm.vehicle_ids || []).filter(id => id !== vehicleId)
@@ -146,20 +160,21 @@ const TeamFormModal = ({
   const handleDropMember = (e) => {
     e.preventDefault();
     const responderId = e.dataTransfer.getData('responderId');
+    console.log(`[TeamFormModal] handleDropMember: Attempting to add responder ${responderId} as a general member.`);
     if (!responderId) return;
 
-    // Don't add if already the leader or already a member
-    if (responderId === teamForm.leader_responder_id) return;
-    
     const currentIds = teamForm.responder_ids || [];
+    if (responderId === teamForm.leader_responder_id || currentIds.includes(responderId)) return;
+
     const newRoles = { ...(teamForm.responder_roles || {}) };
 
     // Clear role to make them a general member if dropped into the custom area
     newRoles[responderId] = '';
 
+    console.log(`[TeamFormModal] handleDropMember: Adding responder ${responderId} to members list.`);
     setTeamForm({
       ...teamForm,
-      responder_ids: currentIds.includes(responderId) ? currentIds : [...currentIds, responderId],
+      responder_ids: [...currentIds, responderId],
       responder_roles: newRoles
     });
   };
@@ -167,6 +182,7 @@ const TeamFormModal = ({
   const handleDropVehicle = (e) => {
     e.preventDefault();
     const vehicleId = e.dataTransfer.getData('vehicleId');
+    console.log(`[TeamFormModal] handleDropVehicle: Attempting to add vehicle ${vehicleId}.`);
     if (!vehicleId) return;
 
     const currentIds = teamForm.vehicle_ids || [];
@@ -222,22 +238,24 @@ const TeamFormModal = ({
     const equipmentArray = typeof teamForm.equipment === 'string'
       ? teamForm.equipment.split(',').map(s => s.trim()).filter(Boolean)
       : (Array.isArray(teamForm.equipment) ? teamForm.equipment : []);
-
-    onSave({
+    const finalResponderIds = (teamForm.responder_ids || []).filter(id => id !== teamForm.leader_responder_id);
+    const payload = {
       ...teamForm,
       equipment: equipmentArray,
       vehicle_ids: teamForm.vehicle_ids
-    }, stayOpen);
+    };
+    console.log('[TeamFormModal] handleSave: Final payload being sent to parent component:', payload);
+    onSave(payload, stayOpen);
   };
 
   const leaderRole = isStaffTeam ? 'Incident Commander' : 'Team Leader';
 
-  const customMembers = (teamForm.responder_ids || []).filter(id => {
-    if (id === teamForm.leader_responder_id) return false;
-    const role = teamForm.responder_roles?.[id]; // Get the role assigned to this responder
-    if (isStaffTeam && STAFF_PREDEFINED_ROLES.includes(role)) return false; // Exclude if it's a predefined staff role
+  const customMembers = useMemo(() => (teamForm.responder_ids || []).filter(id => {
+    const role = teamForm.responder_roles?.[id];
+    // For staff teams, only show members who are not assigned to a predefined role.
+    if (isStaffTeam && STAFF_PREDEFINED_ROLES.includes(role)) return false;
     return true;
-  });
+  }), [teamForm.responder_ids, teamForm.responder_roles, isStaffTeam]);
 
   return (
     <BaseModal
@@ -334,7 +352,13 @@ const TeamFormModal = ({
                 <tbody>
                   {isStaffTeam ? (
                     STAFF_PREDEFINED_ROLES.map(role => {
-                    const rId = (teamForm.responder_ids || []).find(id => teamForm.responder_roles?.[id] === role);
+                    let rId;
+                    // Requirement: The IC is the team leader, who is stored separately from other members.
+                    if (role === 'Incident Commander') {
+                      rId = teamForm.leader_responder_id;
+                    } else {
+                      rId = (teamForm.responder_ids || []).find(id => teamForm.responder_roles?.[id] === role);
+                    }
                     const r = rId ? responders.find(res => res.responder_id === rId) : null;
                     
                     return (
@@ -444,13 +468,13 @@ const TeamFormModal = ({
               {/* Bottom: Personnel Pool (Staged) */}
               <div 
                 className="responder-pool" 
-                onDrop={handleDropOnPool} 
+                onDrop={handleDropOnPool}
                 onDragOver={(e) => e.preventDefault()} 
                 style={{ flex: 0.6, maxHeight: '20vh', background: '#f8fafc', padding: '12px', borderRadius: '12px', border: '1px dashed #cbd5e1', overflowY: 'auto' }}
               >
                 <label style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '12px' }}>Staged Responders</label>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                  {availableResponders.filter(r => !(teamForm.responder_ids || []).includes(r.responder_id)).map(r => (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>                  
+                  {availableResponders.filter(r => isStagedResponder(r) && r.responder_id !== teamForm.leader_responder_id && !(teamForm.responder_ids || []).includes(r.responder_id)).map(r => (
                     <div 
                       key={r.responder_id}
                       draggable
@@ -464,7 +488,7 @@ const TeamFormModal = ({
                       </div> 
                     </div>
                   ))}
-                  {availableResponders.filter(r => !(teamForm.responder_ids || []).includes(r.responder_id)).length === 0 && (
+                  {availableResponders.filter(r => isStagedResponder(r) && r.responder_id !== teamForm.leader_responder_id && !(teamForm.responder_ids || []).includes(r.responder_id)).length === 0 && (
                     <p style={{ fontSize: '12px', color: '#94a3b8' }}>No staged personnel available.</p>
                   )}
                 </div>

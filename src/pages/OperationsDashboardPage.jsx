@@ -10,25 +10,23 @@ import BaseModal from '../components/BaseModal';
 import OperationsTable from '../components/OperationsTable';
 import OperationsMap from '../components/OperationsMap';
 import VehicleFormModal from '../components/admin/VehicleFormModal';
-import { useToast } from '../context/ToastContext';
 import { checkIsParOverdue, formatTimeSince } from '../utils/operationalUtils';
-import '../styles/ActionButtons.css';
-import '../styles/StatusChips.css';
 
 const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   const { 
     incidentData, incidentId, responderName, user, operationsRefreshInterval
   } = useIncident(); 
   
+  const [showGlobalMap, setShowGlobalMap] = useState(false); // Local state for layout toggle
   const operationalPeriodId = propOpId || incidentData?.opPeriodId;
 
   const {
     teams, assignments, responders, vehicles, opPeriod, loading, error, setError, setLoading, stats,
     fetchDashboardData, updateResourceStatus, assignTeamToAssignment, unassignTeam,
-    createTeam, createAssignment, deleteAssignment, deleteTeam, attachVehicleToTeam,
-    deleteTeam: disbandTeam, updateTeam, updateAssignment,
+    createTeam, createAssignment, deleteAssignment, deleteTeam,
+    detachTeam: disbandTeam, updateTeam, updateAssignment,
     attachResponderToTeam, detachResponderFromTeam
-  } = usePlanningDashboard(supabase, operationalPeriodId); // Hook manages its own error state
+  } = usePlanningDashboard(supabase, operationalPeriodId);
 
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
   const [assignmentFilter, setAssignmentFilter] = useState('');
@@ -52,18 +50,6 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   const [showBroadcastModal, setShowBroadcastModal] = useState(false);
   const [broadcastMessage, setBroadcastMessage] = useState('');
   const [currentTime, setCurrentTime] = useState(Date.now());
-  const { addToast } = useToast();
-  const [displayDensity, setDisplayDensity] = useState('comfortable');
-
-  useEffect(() => {
-    const fetchDensity = async () => {
-      const userEmail = user?.email || localStorage.getItem('sarops_user_email');
-      if (!userEmail) return;
-      const { data } = await supabase.from('users').select('display_density').eq('email', userEmail).maybeSingle();
-      if (data?.display_density) setDisplayDensity(data.display_density);
-    };
-    fetchDensity();
-  }, [user]);
 
   const contentWrapperRef = useRef(null);
 
@@ -131,12 +117,11 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
         teamType: matchingTeam?.type || asnItem.team_type || '',
         teamLeader: matchingTeam?.leader_name || asnItem.leader_name || leaderById[matchingTeam?.leader_responder_id || asnItem.leader_responder_id] || '',
         leaderIdentifier: matchingTeam?.leader_identifier || asnItem.leader_identifier || leaderIdentifierById[matchingTeam?.leader_responder_id || asnItem.leader_responder_id] || '—',
-        teamSize: asnItem.team_id ? (matchingTeam?.member_count ?? asnItem.member_count ?? matchingTeam?.current_responders?.length ?? 0) : null,
+        teamSize: matchingTeam?.member_count || asnItem.member_count || matchingTeam?.current_responders?.length || 0,
         leaderId: matchingTeam?.leader_responder_id || asnItem.leader_responder_id || null,
         teamStatus: matchingTeam?.status || asnItem.team_status || '',
         hasBoth: !!(asnItem.team_id || matchingTeam),
         teamId: asnItem.team_id,
-        vehicleSearch: (matchingTeam?.current_vehicles || asnItem.current_vehicles || []).map(v => `${v.designation} ${v.type}`).join(' ').toLowerCase()
       };
     });
 
@@ -152,10 +137,9 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       teamName: tItem.team_name_number, teamType: tItem.type, teamStatus: tItem.status,
       teamLeader: tItem.leader_name || leaderById[tItem.leader_responder_id] || 'Unknown',
       leaderIdentifier: tItem.leader_identifier || leaderIdentifierById[tItem.leader_responder_id] || '—',
-      teamSize: tItem.member_count ?? tItem.current_responders?.length ?? 0,
+      teamSize: tItem.member_count || tItem.current_responders?.length || 0,
       leaderId: tItem.leader_responder_id || null,
       hasBoth: false, teamId: tItem.team_id,
-      vehicleSearch: (tItem.current_vehicles || []).map(v => `${v.designation} ${v.type}`).join(' ').toLowerCase()
     }));
 
     let result = [...assignmentRows, ...teamOnlyRows];
@@ -215,6 +199,13 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     return () => clearInterval(timer);
   }, []);
 
+  // Log when responder data is loaded to help debug modal issues
+  useEffect(() => {
+    if (responders && responders.length > 0) {
+      console.log(`[OperationsDashboardPage] Data loaded: ${responders.length} responders, ${vehicles.length} vehicles.`);
+    }
+  }, [responders, vehicles]);
+
   useEffect(() => {
     fetchDashboardData();
   }, [operationalPeriodId, fetchDashboardData]);
@@ -240,31 +231,16 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   };
 
   const handleStatusUpdate = async (assignmentId, teamId, newStatus) => {
-    // Validation: If reactivating a disbanded team via assignment status change, verify member availability.
-    // This prevents responders from being automatically pulled into multiple active teams.
-    if (teamId && ['Assigned', 'Deployed'].includes(newStatus)) {
-      const targetTeam = teamById[teamId];
-      if (targetTeam && targetTeam.status === 'Disbanded') {
-        const members = targetTeam.current_responders || [];
-        const conflicts = members.filter(m => {
-          const r = responders.find(res => res.responder_id === m.responder_id);
-          // Only staged (unassigned) responders can join an active team composition.
-          return r && !['staged', 'checkedout'].includes(String(r.status || '').toLowerCase());
-        });
-
-        if (conflicts.length > 0) {
-          const names = conflicts.map(c => c.name || 'Unknown').join(', ');
-          addToast(`Activation Conflict: Responders ${names} are already active on other teams. They must be released from their current assignments before this team can be reactivated.`, 'error');
-          return;
-        }
-      }
-    }
-
     try {
       await updateResourceStatus(assignmentId, teamId, newStatus);
-    } catch (err) { // Error is handled by the hook's setError
-      console.error('Failed to update status:', err); 
-      addToast(err.message || 'Permission denied or update failed. Please verify your access level.', 'error');
+      
+      // Force immediate recalculation of PAR timers and overdue counts across the table
+      // specifically if the status moved to 'Deployed', which triggers a PAR reset in the DB.
+      setCurrentTime(Date.now());
+    } catch (err) {
+      console.error('Failed to update status:', err);
+      // Use the local setError state from the planning hook
+      setError(err.message || 'Permission denied or update failed. Please verify your access level.');
     }
   };
 
@@ -277,6 +253,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
 
     try {
       setLoading(true);
+      setError(null);
       const now = new Date().toISOString();
 
       const { error: resetErr } = await supabase
@@ -290,10 +267,11 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       if (resetErr) throw resetErr;
 
       await recordAction(`Manual PAR reset for team "${teamName}" (ID: ${teamId}). Fields modified: last_par_check="${now}", par_status="OK".`);
+      
+      setCurrentTime(Date.now()); // Force immediate UI refresh for all rows
       await fetchDashboardData();
-      addToast('PAR reset successfully.', 'success');
     } catch (err) {
-      addToast(err.message || 'Failed to reset PAR', 'error');
+      setError(err.message || 'Failed to reset PAR');
     } finally {
       setLoading(false);
     }
@@ -317,10 +295,9 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       // handles releasing responders to "Staged" and closing history logs.
       await supabase.from('teams').update({ status: 'Disbanded', last_par_check: null }).eq('team_id', teamId);
       await recordAction(`Disbanded team "${teamName}" (ID: ${teamId}, Type: ${teamType}). Fields modified: status="Disbanded", last_par_check=null. All members released back to "Staged" status.`);
-      addToast('Team disbanded successfully.', 'success');
       await fetchDashboardData();
     } catch (err) {
-      addToast(err.message || 'Failed to disband team', 'error');
+      setError(err.message || 'Failed to disband team');
     } finally {
       setLoading(false);
     }
@@ -333,6 +310,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     if (!broadcastMessage.trim() || teams.length === 0) return;
 
     setLoading(true);
+    setError(null);
 
     try {
       const staffTeam = teams.find(t => t.type === 'Staff');
@@ -345,12 +323,12 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       });
 
       if (broadcastErr) throw broadcastErr;
+
       await recordAction(`Sent broadcast message to ${teams.length} teams. Message: "${broadcastMessage.trim()}"`);
       setBroadcastMessage('');
-      addToast('Broadcast message sent.', 'success');
       setShowBroadcastModal(false);
     } catch (err) {
-      addToast(err.message || 'Failed to send broadcast message', 'error');
+      setError(err.message || 'Failed to send broadcast message');
     } finally {
       setLoading(false);
     }
@@ -380,24 +358,23 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       if (targetRow?.hasBoth) return;
     }
 
-    // Responders and Vehicles can only be dropped onto teams
-    if (['responder', 'vehicle'].includes(draggedItem.type) && type !== 'team') return;
+    // Responders can only be dropped onto teams
+    if (draggedItem.type === 'responder' && type !== 'team') return;
 
     e.preventDefault();
   };
 
   const handleDragEnter = (e, id, type) => {
     if (!draggedItem || draggedItem.type === type) return;
+    
+    // Validate drop targets to prevent invalid visual states.
+    const targetRow = rows.find(r => r.id === id);
+    if (targetRow?.hasBoth) return;
 
-    // Validate highlighting for Team/Assignment linkage
-    if (draggedItem.type === 'team' || draggedItem.type === 'assignment') {
-      const targetRow = rows.find(r => r.id === id);
-      if (targetRow?.hasBoth) return;
-    }
+    if (draggedItem.type === 'responder' && type !== 'team') return;
 
-    // Prevent highlighting assignments when dragging logistical resources
-    if (['responder', 'vehicle'].includes(draggedItem.type) && type !== 'team') return;
-
+    // This is required to signal that this element is a valid drop target.
+    e.preventDefault();
     setDropTarget({ id, type });
   };
 
@@ -422,11 +399,6 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       else if (draggedItem.type === 'responder' && targetType === 'team') {
         const teamId = getRawUuid(targetId);
         if (teamId) await attachResponderToTeam(draggedItem.id, teamId);
-      }
-      // Vehicle -> Team attachment
-      else if (draggedItem.type === 'vehicle' && targetType === 'team') {
-        const teamId = getRawUuid(targetId);
-        if (teamId) await attachVehicleToTeam(draggedItem.id, teamId);
       }
     } catch (err) {
        // Error is handled by hook
@@ -465,11 +437,9 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     setShowAssignmentForm(true);
   };
 
-  const openEditTeamForm = async (team) => {
+  const openEditTeamForm = (team) => {
     if (!team) return;
-    // Requirement: Use the enriched metadata already present in the team object 
-    // provided by the tactical view. This prevents "stale" or "empty" member 
-    // lists caused by redundant/delayed junction table fetches.
+    console.log('[OperationsDashboardPage] openEditTeamForm: Preparing to open modal for team:', team.team_name_number);
     setTeamForm({
       ...team,
       equipment: team.equipment || [],
@@ -477,6 +447,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       vehicle_ids: team.current_vehicles?.map(v => v.vehicle_id) || [],
     });
     setShowTeamForm(true);
+    console.log('[OperationsDashboardPage] openEditTeamForm: State set for modal with initialData:', { ...team, responder_ids: team.current_responders?.map(r => r.responder_id) || [], vehicle_ids: team.current_vehicles?.map(v => v.vehicle_id) || [] });
   };
 
   const handleSaveVehicle = async (formData) => {
@@ -486,6 +457,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
         designation: formData.designation,
         type: formData.type,
         status: formData.status,
+        responder_id: formData.responder_id || null,
         incident_id: formData.incident_id || incidentId
       };
 
@@ -503,7 +475,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       setShowVehicleForm(false);
       setEditingVehicle(null);
     } catch (err) {
-      addToast(err.message || 'Failed to save vehicle', 'error');
+      setError(err.message || 'Failed to save vehicle');
     } finally {
       setLoading(false);
     }
@@ -515,91 +487,13 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     setShowAssignmentForm(true);
   };
 
-  const handleSaveTeam = async (formData, stayOpen = false) => {
-    try {
-      // Auto-generate team name if blank
-      let finalTeamName = formData.team_name_number?.trim();
-      if (!finalTeamName) {
-        const type = formData.type || 'Other';
-        const existingOfSameType = teams.filter(t => t.type === type);
-        let nextNum = existingOfSameType.length + 1;
-        finalTeamName = `${type} ${nextNum}`;
-
-        // Local uniqueness check to avoid immediate collisions
-        while (teams.some(t => t.team_name_number === finalTeamName)) {
-          nextNum++;
-          finalTeamName = `${type} ${nextNum}`;
-        }
-      }
-
-      const payload = {
-        team_name_number: finalTeamName,
-        sartopo_color_hex: formData.sartopo_color_hex || '#FF0000',
-        type: formData.type || 'Other',
-        status: formData.status || 'Staged',
-        leader_responder_id: formData.leader_responder_id || null,
-        equipment: formData.equipment || []
-      };
-
-      // Ensure leader is included in responder_ids for consistency
-      const currentResponders = formData.responder_ids || [];
-      const finalResponderIds = (formData.leader_responder_id && !currentResponders.includes(formData.leader_responder_id))
-        ? [...currentResponders, formData.leader_responder_id]
-        : currentResponders;
-
-      // Requirement: Utilize robust hook logic to handle resource reconciliation.
-      // Ensure we pass finalResponderIds (which includes the leader) to persist the full composition.
-      if (formData.team_id) {
-        await updateTeam(formData.team_id, { ...payload, responder_ids: finalResponderIds }, formData.responder_roles, formData.vehicle_ids);
-      } else {
-        const newTeam = await createTeam({ ...payload, responder_ids: finalResponderIds }, formData.responder_roles, formData.vehicle_ids);
-        if (newTeam?.team_id && pendingAssignmentId) {
-          await assignTeamToAssignment(newTeam.team_id, pendingAssignmentId);
-        }
-      }
-
-      setPendingAssignmentId(null);
-      if (stayOpen) {
-        openNewTeamForm();
-      } else {
-        setShowTeamForm(false);
-      }
-    } catch (err) {
-      addToast(err.message || 'Failed to save team.', 'error');
-      setPendingAssignmentId(null);
-    }
-  };
-
   const handleSaveAssignment = async (formData, stayOpen = false) => {
     const targetTeamId = !!formData.assignment_id ? formData.team_id : (pendingTeamId || null);
     
     try {
-      // Auto-generate assignment title if blank (Requirement: next sequential AA, AB...)
-      // This ensures assignments follow the standard [Division][Suffix] SAR pattern.
-      let finalTitle = formData.title?.trim();
-      if (!finalTitle) {
-        const division = formData.segment?.trim() || 'A';
-        const usedSuffixes = new Set(
-          (assignments || [])
-            .filter(a => a.segment === division)
-            .map(a => (a.title && a.title.startsWith(division)) ? a.title.slice(division.length) : null)
-            .filter(s => s && s.length === 1)
-        );
-
-        let nextSuffix = 'A';
-        for (let i = 65; i <= 90; i++) {
-          const s = String.fromCharCode(i);
-          if (!usedSuffixes.has(s)) {
-            nextSuffix = s;
-            break;
-          }
-        }
-        finalTitle = `${division}${nextSuffix}`;
-      }
-
       const payload = {
         op_period_id: operationalPeriodId,
-        title: finalTitle,
+        title: formData.title || '',
         status: pendingTeamId ? 'Assigned' : (formData.status || 'Planned'),
         segment: formData.segment || '',
         resource_type: formData.resource_type || '',
@@ -631,8 +525,64 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
         setShowAssignmentForm(false);
       }
     } catch (err) {
-      addToast(err.message || 'Failed to save assignment.', 'error');
       setPendingTeamId(null);
+    }
+  };
+
+  const handleSaveTeam = async (formData, stayOpen = false) => {
+    console.log('[OperationsDashboardPage] handleSaveTeam: Received form data from modal:', formData);
+    if (!formData.leader_responder_id) {
+      setError('A team leader must be selected in order to save a team.');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      
+      let finalTeamName = formData.team_name_number?.trim();
+      if (!finalTeamName) {
+        const type = formData.type || 'Other';
+        const existingOfSameType = (teams || []).filter(t => t.type === type);
+        let nextNum = existingOfSameType.length + 1;
+        finalTeamName = `${type} ${nextNum}`;
+        while ((teams || []).some(t => t.team_name_number === finalTeamName)) {
+          nextNum++;
+          finalTeamName = `${type} ${nextNum}`;
+        }
+      }
+
+      const finalResponderIds = formData.responder_ids || [];
+      console.log(`[OperationsDashboardPage] handleSaveTeam: Persisting team data. Leader: ${formData.leader_responder_id}, Members:`, finalResponderIds);
+
+      const payload = {
+        team_name_number: finalTeamName,
+        type: formData.type,
+        sartopo_color_hex: formData.sartopo_color_hex || '#ff0000',
+        op_period_id: formData.op_period_id,
+        status: formData.status,
+        leader_responder_id: formData.leader_responder_id,
+        equipment: formData.equipment,
+        responder_ids: finalResponderIds
+      };
+
+      if (formData.team_id && updateTeam) {
+        console.log('[OperationsDashboardPage] handleSaveTeam: Calling updateTeam with payload:', payload);
+        await updateTeam(formData.team_id, payload, formData.responder_roles, formData.vehicle_ids);
+      } else if (createTeam) {
+        console.log('[OperationsDashboardPage] handleSaveTeam: Calling createTeam with payload:', payload);
+        await createTeam(payload, formData.responder_roles, formData.vehicle_ids);
+      }
+
+      if (stayOpen) {
+        openNewTeamForm();
+      } else {
+        setShowTeamForm(false);
+      }
+      await fetchDashboardData();
+    } catch (err) {
+      setError(err.message || 'Failed to save team.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -692,18 +642,18 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   }
 
   return (
-    <div className={`operations-dashboard density-${displayDensity}`}>
+    <div className="operations-dashboard">
       <header className="operations-header">
         <div>
           <h1>Operations Dashboard</h1>
           <p>Drag and drop teams onto assignments (or vice versa) to link resources.</p>
         </div>
-        <div className="view-filter-container action-btn-group">
+        <div className="view-filter-container" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <label htmlFor="view-mode-select" style={{ fontSize: '13px', fontWeight: 600, color: '#475569' }}>View:</label>
           <select 
             id="view-mode-select"
-            className="status-update-select form-select" 
-            style={{ width: 'auto', minWidth: '140px' }}
+            className="status-update-select" 
+            style={{ width: 'auto', minWidth: '140px', height: '32px' }}
             value={viewMode}
             onChange={(e) => setViewMode(e.target.value)}
           >
@@ -712,7 +662,15 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
             <option value="Planning">Planning (Staged)</option>
           </select>
           <button 
-            className="action-btn action-btn-secondary" 
+            className="btn btn-secondary" 
+            style={{ 
+              height: '32px', 
+              fontSize: '13px', 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '6px',
+              padding: '0 12px'
+            }}
             onClick={() => setShowBroadcastModal(true)}
             title="Send message to all teams"
           >
@@ -726,6 +684,12 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       </header>
 
       {loading && !rows.length && <div className="operations-message">Loading operations summary…</div>}
+
+      {error && (
+        <div className="operations-error" role="alert">
+          {error}
+        </div>
+      )}
 
       {!error && (
         <div 
@@ -768,11 +732,11 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
 
       {!loading && !error && (
         <div className="operations-stats-footer" style={{ 
-          marginTop: 'var(--space-lg)',
+          marginTop: '24px',
           display: 'flex',
-          gap: 'var(--space-lg)',
+          gap: '32px',
           flexWrap: 'wrap',
-          padding: 'var(--space-sm) var(--space-md)',
+          padding: '8px 20px',
           background: '#ffffff',
           borderRadius: '12px',
           border: '1px solid #e2e8f0',
@@ -820,8 +784,9 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
           initialData={teamForm}
           responders={responders}
           vehicles={vehicles}
-          loading={loading}
           commandStaffExists={commandStaffExists}
+          pendingAssignmentId={pendingAssignmentId}
+          onEditVehicle={(v) => { setEditingVehicle(v); setShowVehicleForm(true); }}
         />
       )}
 
@@ -833,6 +798,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
           onSave={handleSaveAssignment}
           initialData={assignmentForm}
           loading={loading}
+          error={error}
         />
       )}
 
@@ -856,7 +822,6 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
                 border: '1px solid #cbd5e1', marginBottom: '20px', fontSize: '14px',
                 fontFamily: 'inherit', boxSizing: 'border-box'
               }}
-              data-lpignore="true"
               placeholder="Enter message for all teams..."
               value={broadcastMessage}
               onChange={(e) => setBroadcastMessage(e.target.value)}
@@ -864,7 +829,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
             />
             <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
               <button 
-                className="action-btn action-btn-secondary" 
+                className="btn btn-secondary" 
                 onClick={() => {
                   setShowBroadcastModal(false);
                   setBroadcastMessage('');
@@ -873,7 +838,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
                 Cancel
               </button>
               <button 
-                className="action-btn action-btn-primary" 
+                className="btn btn-primary" 
                 onClick={handleSendBroadcast}
                 disabled={!broadcastMessage.trim() || loading}
               >
@@ -892,7 +857,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
           loading={loading}
           actions={
             <button 
-              className="action-btn action-btn-primary" 
+              className="btn btn-primary" 
               disabled={!selectedAssignTarget || loading}
               onClick={() => {
                 const asnId = assigningRow.assignmentId ? assigningRow.assignmentId : selectedAssignTarget;

@@ -127,8 +127,6 @@ const IncidentEditPage = () => {
     fetchDensity();
   }, [user]);
 
-  const [isLocalSaved, setIsLocalSaved] = useState(false);
-
   const fromAdmin = location.state?.fromAdmin;
   const targetIncident = location.state?.targetIncident;
 
@@ -143,6 +141,51 @@ const IncidentEditPage = () => {
     }
     return isActive ? incidentData?.opPeriodId : null;
   }, [targetIncident, isActive, incidentData?.opPeriodId]);
+
+  // Hydrate form state from database when editing an existing incident
+  useEffect(() => {
+    const loadExistingData = async () => {
+      if (!existingId || !targetOpId) return;
+
+      try {
+        const [incRes, opRes] = await Promise.all([
+          supabase.from('incidents').select('*').eq('incident_id', existingId).maybeSingle(),
+          supabase.from('operational_periods').select('*').eq('op_period_id', targetOpId).maybeSingle()
+        ]);
+
+        if (incRes.data) {
+          const hydratedInc = {
+            name: incRes.data.name,
+            number: incRes.data.number,
+            sartopo_id: incRes.data.sartopo_id || '',
+            start_datetime: incRes.data.start_datetime ? incRes.data.start_datetime.substring(0, 16) : getCurrentLocalDatetime(),
+            end_datetime: incRes.data.end_datetime ? incRes.data.end_datetime.substring(0, 16) : '',
+            notes: incRes.data.notes || '',
+          };
+          setIncident(hydratedInc);
+          setInitialIncident(hydratedInc);
+        }
+
+        if (opRes.data) {
+          const hydratedOp = {
+            op_number: String(opRes.data.op_number),
+            start_datetime: opRes.data.start_datetime ? opRes.data.start_datetime.substring(0, 16) : getCurrentLocalDatetime(),
+            end_datetime: opRes.data.end_datetime ? opRes.data.end_datetime.substring(0, 16) : '',
+            situation_narrative: opRes.data.situation_narrative || '',
+            par_check_interval: opRes.data.par_check_interval || 60,
+            situational_awareness_narrative: opRes.data.situational_awareness_narrative || '',
+          };
+          setOperationalPeriod(hydratedOp);
+          setInitialOpPeriod(hydratedOp);
+        }
+      } catch (err) {
+        console.error('[IncidentEdit] Error hydrating page data:', err);
+      }
+    };
+    loadExistingData();
+  }, [existingId, targetOpId]);
+
+  const [isLocalSaved, setIsLocalSaved] = useState(false);
 
   // Client-side validation for SARTopo ID
   useEffect(() => {
@@ -908,7 +951,6 @@ const IncidentEditPage = () => {
                 }
               }}>Commit Changes</button>
               <button className="action-btn action-btn-secondary" onClick={() => blocker.proceed()}>Cancel Changes</button>
-              <button className="action-btn action-btn-secondary" onClick={() => blocker.reset()}>Stay</button>
             </div>
           </div>
         </div>

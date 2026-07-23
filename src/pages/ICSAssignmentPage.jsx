@@ -41,14 +41,21 @@ const ICSAssignmentPage = () => {
 
     const staffTeam = teams?.find(t => t.type === 'Staff');
     
-    if (staffTeam?.current_responders) {
-      staffTeam.current_responders.forEach(member => {
+    if (staffTeam) {
+      // Prioritize the leader_responder_id as the source of truth for the IC.
+      const leader = staffTeam.current_responders?.find(r => r.responder_id === staffTeam.leader_responder_id);
+      if (leader) {
+        mapping.ic = { name: leader.name, agency: leader.agency };
+      }
+
+      // Process other roles from the members list.
+      staffTeam.current_responders?.forEach(member => {
+        if (member.responder_id === staffTeam.leader_responder_id) return; // Already handled
+
         const role = member.role?.toLowerCase() || '';
-        // Use name and agency directly from the team member metadata provided by the database view
         const data = { name: member.name, agency: member.agency };
 
-        if (role.includes('commander')) mapping.ic = data;
-        else if (role.includes('safety')) mapping.safety = data;
+        if (role.includes('safety')) mapping.safety = data;
         else if (role.includes('pio') || role.includes('public info')) mapping.pio = data;
         else if (role.includes('liaison')) mapping.liaison = data;
         else if (role.includes('operations')) mapping.ops = data;

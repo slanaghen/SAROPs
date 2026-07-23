@@ -48,6 +48,12 @@ BEGIN
     LIMIT 1;
     END IF;
 
+    -- Clean up previous seed data for this incident to ensure idempotency
+    DELETE FROM assignments WHERE op_period_id = latest_op_id AND title = 'Medical Standby';
+    DELETE FROM responders WHERE incident_id = latest_incident_id AND (
+        identifier LIKE 'ID-10%' OR identifier = 'K9-302' OR identifier = 'PILOT-14'
+    );
+
     -- 3. Create 15 assignments with descriptions, types, and TAC channels
     INSERT INTO assignments (op_period_id, title, description, resource_type, frequency_primary, status, origin)
     VALUES
@@ -71,6 +77,7 @@ BEGIN
     -- All associated with the most recently created incident and sharing the same auth_uid.
 
     -- Dog Handler
+    -- This is idempotent and will not error on subsequent runs
     INSERT INTO responders (name, incident_id, agency, identifier, device_id, special_skills, checkin_datetime, status, auth_uid)
     VALUES (
         'Sarah Miller (K9)',
@@ -82,7 +89,8 @@ BEGIN
         incident_start_time,
         'Staged',
         assigned_responder_auth_uid
-    );
+    )
+    ON CONFLICT (device_id) DO NOTHING;
 
     -- UAS Pilot
     INSERT INTO responders (name, incident_id, agency, identifier, device_id, special_skills, checkin_datetime, status, auth_uid)
@@ -96,7 +104,8 @@ BEGIN
         incident_start_time,
         'Staged',
         assigned_responder_auth_uid
-    );
+    )
+    ON CONFLICT (device_id) DO NOTHING;
 
     -- 29 General Responders
     FOR i IN 1..29 LOOP
@@ -110,15 +119,13 @@ BEGIN
             incident_start_time,
             'Staged',
             assigned_responder_auth_uid
-        );
+        )
+        ON CONFLICT (device_id) DO NOTHING;
     END LOOP;
 
     RAISE NOTICE 'Success: Seeded 15 assignments and 31 responders for Incident % (OP %).', latest_incident_id, latest_op_id;
 END;
 $$;
-
--- Execute the function immediately so running the file in the SQL editor adds data
-SELECT public.seed_data_specific();
 
 -- Grant access to authenticated and anonymous users
 GRANT EXECUTE ON FUNCTION public.seed_data_specific() TO authenticated;

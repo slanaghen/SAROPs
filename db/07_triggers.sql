@@ -32,15 +32,5 @@ BEFORE UPDATE OF status ON teams FOR EACH ROW EXECUTE FUNCTION validate_team_act
 CREATE TRIGGER trigger_check_team_leader_membership
 BEFORE INSERT OR UPDATE OF leader_responder_id ON teams FOR EACH ROW EXECUTE FUNCTION validate_team_leader_membership();
 
--- Action Logging Triggers
-CREATE TRIGGER trigger_log_team_membership
-AFTER INSERT OR DELETE ON team_responders
-FOR EACH ROW EXECUTE FUNCTION trigger_log_team_membership_change();
-
-CREATE TRIGGER trigger_log_vehicle_team_assignment
-AFTER INSERT OR UPDATE OF team_id ON vehicles
-FOR EACH ROW EXECUTE FUNCTION trigger_log_vehicle_team_change();
-
-CREATE TRIGGER trigger_log_assignment_team_assignment
-AFTER INSERT OR UPDATE OF team_id, status ON assignments
-FOR EACH ROW EXECUTE FUNCTION trigger_log_assignment_team_change();
+CREATE TRIGGER trigger_ensure_leader_is_member
+AFTER INSERT OR UPDATE OF leader_responder_id ON teams FOR EACH ROW EXECUTE FUNCTION ensure_leader_is_member();

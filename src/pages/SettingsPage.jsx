@@ -3,23 +3,26 @@ import { supabase } from '../lib/supabase';
 import AdminUserFormModal from '../components/admin/AdminUserFormModal';
 import '../styles/IncidentEditPage.css';
 import { useToast } from '../context/ToastContext';
+import { useIncident } from '../context/IncidentContext'; // Import useIncident
 import '../styles/ActionButtons.css';
 import '../styles/FormElements.css';
 
 const SettingsPage = () => {
-  const [userProfile, setUserProfile] = useState(null);
+  const { user: globalUser } = useIncident(); // Get user from global context
+  const [userProfile, setUserProfile] = useState(null); // Local state for the profile data
   const [loading, setLoading] = useState(false);
   const { addToast } = useToast();
 
   const fetchMyProfile = useCallback(async () => {
+    // Use the globalUser from context, which is kept in sync by App.jsx
+    const userEmail = globalUser?.email || localStorage.getItem('sarops_user_email');
+
+    // Guard: If email is not yet available, the session may still be initializing.
+    // We return early instead of throwing to avoid error toasts during initial mount.
+    if (!userEmail) return;
+
     setLoading(true);
     try {
-      // Attempt to identify the user via Supabase Auth (OTP users) or localStorage (RPC users)
-      const { data: { session } } = await supabase.auth.getSession();
-      const userEmail = session?.user?.email || localStorage.getItem('sarops_user_email');
-
-      if (!userEmail) throw new Error('No active session found.');
-
       const { data, error: fetchError } = await supabase
         .from('users')
         .select('email, username, name, agency, identifier, cell_phone, responder_type, special_skills, access_level, display_density')
@@ -34,7 +37,7 @@ const SettingsPage = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [globalUser?.email, addToast]); // Dependency on globalUser.email
 
   useEffect(() => {
     fetchMyProfile();
@@ -74,8 +77,22 @@ const SettingsPage = () => {
         <p className="subtitle">Update your personal information and security credentials.</p>
       </div>
 
-      {loading && !userProfile && <div style={{ padding: 'var(--space-lg)', textAlign: 'center' }}><p className="operations-message">Loading your profile...</p></div>}
-      
+      {loading && !userProfile && (
+        <div style={{ padding: '80px 24px', textAlign: 'center' }}>
+          <div className="loading-spinner" style={{ fontSize: '40px', marginBottom: '20px' }}>⏳</div>
+          <p className="operations-message">Loading your profile details...</p>
+        </div>
+      )}
+
+      {!loading && !userProfile && (
+        <div style={{ padding: '40px 24px', textAlign: 'center' }}>
+          <div className="alert alert-error" style={{ maxWidth: '500px', margin: '0 auto' }}>
+            <h3 style={{ marginTop: 0 }}>No Session Found</h3>
+            <p style={{ margin: 0 }}>We couldn't identify your account. Please log in to manage your settings.</p>
+          </div>
+        </div>
+      )}
+
       {!loading && userProfile && (
         <div className="section-card" style={{ maxWidth: '600px', margin: '0 auto' }}>
           <AdminUserFormModal

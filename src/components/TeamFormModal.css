@@ -1,0 +1,150 @@
+.team-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.5fr 1fr;
+  gap: var(--space-lg);
+  min-height: 400px;
+}
+
+.team-form-column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.composition-section {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.composition-section > label {
+  font-weight: 600;
+  margin-bottom: var(--space-sm);
+}
+
+.drop-zone {
+  flex-grow: 1;
+  border: 2px dashed #d1d5db;
+  border-radius: 8px;
+  padding: var(--space-sm);
+  background-color: #f9fafb;
+  transition: all 0.2s ease;
+}
+
+.composition-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.composition-table th,
+.composition-table td {
+  padding: var(--space-xs) var(--space-sm);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.composition-table th {
+  font-size: 11px;
+  color: #64748b;
+  text-transform: uppercase;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.leader-row td {
+  border-bottom: 1px solid #e2e8f0;
+  padding-top: var(--space-md);
+  padding-bottom: var(--space-md);
+}
+
+.drop-hint {
+  font-size: 12px;
+  color: #94a3b8;
+  font-style: italic;
+}
+
+.role-input {
+  width: 100%;
+  padding: 4px 6px;
+  font-size: 12px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background-color: transparent;
+}
+.role-input:hover, .role-input:focus {
+  border-color: #cbd5e1;
+  background-color: #fff;
+}
+
+.remove-btn {
+  border: none;
+  background: none;
+  color: #94a3b8;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+.remove-btn:hover {
+  color: #ef4444;
+}
+
+.responder-pool {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.responder-pool > label {
+  font-weight: 600;
+  margin-bottom: var(--space-sm);
+}
+
+.pool-list {
+  flex-grow: 1;
+  overflow-y: auto;
+  background: #f1f5f9;
+  border-radius: 8px;
+  padding: var(--space-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.responder-chip {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  cursor: grab;
+  font-size: 13px;
+}
+
+.responder-chip.assigned {
+  background-color: #dbeafe;
+  border-color: #bfdbfe;
+  color: #1e40af;
+  cursor: default;
+}
+
+.responder-chip .responder-name {
+  font-weight: 600;
+}
+
+.responder-chip .responder-agency {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.responder-chip button {
+  border: none;
+  background: none;
+  color: #94a3b8;
+  cursor: pointer;
+  font-size: 16px;
+  margin-left: 8px;
+}
+.responder-chip button:hover {
+  color: #ef4444;
+}

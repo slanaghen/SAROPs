@@ -745,10 +745,9 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
 
               {team && !isLeavingTeam && (
                 <button 
-                  className="action-btn action-btn-secondary" 
+                  className="action-btn action-btn-warning" 
                   onClick={handleLeaveTeam}
                   disabled={isLeavingTeam || (team.status === 'Deployed' || assignment?.status === 'Deployed')}
-                  style={{ marginTop: '12px', borderColor: '#fecaca' }}
                   title={(team.status === 'Deployed' || assignment?.status === 'Deployed') ? "Cannot leave team while deployed" : "Remove yourself from this team"}
                 >
                   {isLeavingTeam ? 'Leaving...' : 'Leave Team'}
@@ -873,10 +872,10 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
                     </button>
 
                     <button 
-                      className="action-btn action-btn-secondary" 
+                      className="action-btn action-btn-warning" 
                       onClick={handleCancelAssignment}
                       disabled={isUpdatingAsnData || podValue === '' || !debriefValue.trim()}
-                      style={{ flex: 1, color: '#dc2626', borderColor: '#fecaca' }}
+                      style={{ flex: 1 }}
                     >
                       {isUpdatingAsnData ? 'Cancelling...' : 'Cancel'}
                     </button>
@@ -953,10 +952,10 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
         </div>
       )}
         </div>
-
       </div>
     </div>
   );
 };
 
 export default ResponderDashboardPage;
+  

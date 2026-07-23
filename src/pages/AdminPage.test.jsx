@@ -367,8 +367,10 @@ describe('AdminPage Authentication Gate', () => {
     fireEvent.click(deleteBtn);
 
     expect(window.confirm).toHaveBeenCalled();
-    expect(supabase.from).toHaveBeenCalledWith('incidents');
-    expect(mockDelete).toHaveBeenCalled();
+    await waitFor(() => {
+      expect(supabase.from).toHaveBeenCalledWith('incidents');
+      expect(mockDelete).toHaveBeenCalled();
+    });
   });
 
   it('should open the add new user modal and add a new user', async () => {

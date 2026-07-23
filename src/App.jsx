@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
-import { supabase } from './lib/supabase';
+import { supabase, SAROPS_DB_INSTANCE } from './lib/supabase';
 import { useIncident } from './context/IncidentContext';
 import useResponderTeamAndAssignment from './hooks/useResponderTeamAndAssignment';
 import { useRealTimeNotifications } from './hooks/useRealTimeNotifications';
+import { useToast } from './context/ToastContext';
 import logo from './assets/logo.png';
 import './styles.css';
 
@@ -11,6 +12,8 @@ function App() {
   const [offline, setOffline] = useState(!navigator.onLine);
   const [user, setUser] = useState(null);
   const [displayDensity, setDisplayDensity] = useState('comfortable');
+  const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
+  const { addToast } = useToast();
   const [menuOpen, setMenuOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
@@ -116,6 +119,89 @@ function App() {
     return () => window.removeEventListener('focus', handleFocus);
   }, [isActive, responderId, refetch]);
 
+  // Monitor for unread messages globally to alert the user via the banner
+  useEffect(() => {
+    if (location.pathname === '/responder') {
+      setHasUnreadMessages(false);
+      localStorage.setItem('sarops_last_read_messages', new Date().toISOString());
+    }
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (!isActive || !incidentId || !incidentData?.opPeriodId) return;
+
+    const lastRead = localStorage.getItem('sarops_last_read_messages') || new Date(Date.now() - 86400000).toISOString();
+
+    const isMessageRelevant = (msg) => {
+      // Don't alert for messages sent by the current user
+      if (msg.sender_name?.startsWith(responderName)) return false;
+
+      // Relevant if it's for the user's specific team
+      if (team?.team_id === msg.team_id) return true;
+
+      return false;
+    };
+
+    // 1. Initial check for existing "pending" messages sent since last visit
+    const fetchPending = async () => {
+      // Find the Staff team ID for the current operational period to listen for broadcasts.
+      const { data: staffTeam } = await supabase
+        .from('teams')
+        .select('team_id')
+        .eq('op_period_id', incidentData.opPeriodId)
+        .eq('type', 'Staff')
+        .maybeSingle();
+
+      const orFilterConditions = [];
+      if (team?.team_id) {
+        orFilterConditions.push(`team_id.eq.${team.team_id}`);
+      }
+      if (staffTeam?.team_id) {
+        orFilterConditions.push(`team_id.eq.${staffTeam.team_id}`);
+      }
+      if (orFilterConditions.length === 0) return; // No teams to listen to.
+
+      const { data: recentMsgs } = await supabase
+        .from('team_messages')
+        .select('*')
+        .gt('created_at', lastRead)
+        .or(orFilterConditions.join(','));
+
+      if (recentMsgs?.some(m => !m.sender_name?.startsWith(responderName))) {
+        setHasUnreadMessages(true);
+      }
+    };
+
+    fetchPending();
+
+    // 2. Real-time listener for incoming messages
+    const channel = supabase
+      .channel('global-message-monitor')
+      .on('postgres_changes', { 
+        event: 'INSERT', 
+        schema: 'public', 
+        table: 'team_messages' 
+      }, async (payload) => {
+        if (location.pathname === '/responder') return;
+        
+        const msg = payload.new;
+        if (isMessageRelevant(msg)) {
+          setHasUnreadMessages(true);
+          addToast(`New message for ${team?.team_name_number || 'your team'}`, 'info');
+        } else {
+          // Check if it was a Staff broadcast
+          const { data: teamInfo } = await supabase.from('teams').select('type, op_period_id').eq('team_id', msg.team_id).maybeSingle();
+          if (teamInfo?.type === 'Staff' && teamInfo?.op_period_id === incidentData.opPeriodId && !msg.sender_name?.startsWith(responderName)) {
+            setHasUnreadMessages(true);
+            addToast(`Broadcast: ${msg.message_text.substring(0, 30)}...`, 'info');
+          }
+        }
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [isActive, incidentId, incidentData?.opPeriodId, team?.team_id, team?.team_name_number, location.pathname, responderName, addToast]);
+
   const handleSignOut = async () => {
     // Perform operational checkout if responder is still active
     if (responderId && responderStatus !== 'CheckedOut') {
@@ -159,6 +245,35 @@ function App() {
     navigate('/checkin');
   };
 
+  const handleToggleDb = async () => {
+    const currentDb = SAROPS_DB_INSTANCE;
+    const nextDb = currentDb === 'LOCAL' ? 'REMOTE' : 'LOCAL';
+    
+    // Clear operational context and sign out of Supabase Auth before reload.
+    // This prevents JWT collisions where a token from one instance (e.g. Remote)
+    // is incorrectly sent to another (e.g. Local), resulting in 401 Unauthorized errors.
+    if (logout) logout();
+    await supabase.auth.signOut();
+    localStorage.setItem('SAROPS_DB_INSTANCE', nextDb);
+    window.location.reload();
+  };
+
+  const handleClearData = async () => {
+    const confirmMsg = "Are you sure you want to clear all operational data? This will remove all incidents, teams, assignments, and responder records. System users will be preserved.";
+    if (!window.confirm(confirmMsg)) return;
+
+    try {
+      const { error } = await supabase.rpc('clear_data');
+      if (error) throw error;
+      
+      if (logout) logout();
+      setMenuOpen(false);
+      window.location.reload();
+    } catch (err) {
+      console.error('Failed to clear operational data:', err);
+    }
+  };
+
   useEffect(() => {
     if (!isActive || !responderId || hookLoading) return;
 
@@ -175,6 +290,11 @@ function App() {
           if (isActive && logout) logout();
         }
       }
+    } else if (!hookLoading && isActive && responderId) {
+      // If we are active but the record is missing (e.g. database was reinitialized), clear context
+      console.warn('[App] Active responder record not found in database. Clearing session.');
+      localStorage.removeItem('sarops_user_email');
+      if (logout) logout();
     }
 
     if (team && team.status !== 'Disbanded') {
@@ -199,15 +319,16 @@ function App() {
     const isStaffOrAdmin = accessLevel === 'staff' || accessLevel === 'admin';
     const responderOnlyPaths = ['/', '/checkin', '/login', '/responder', '/settings', '/qrcodes', '/ics', '/checkout'];
 
-    if (!isActive && !isAdmin && !publicPaths.includes(location.pathname)) {
-      console.warn(`[App Guard] Unauthorized access attempt to ${location.pathname}. Redirecting to /checkin.`, {
-        isActive,
-        isAdmin
-      });
+    // Combined check for system-level staff or operational-level staff
+    const hasStaffPrivileges = isAdmin || isStaffOrAdmin;
+
+    // Navigation Guard: Allow system staff access even without active incident context
+    if (!isActive && !hasStaffPrivileges && !user && !hookLoading && !publicPaths.includes(location.pathname)) {
+      console.warn(`[App Guard] Unauthorized access attempt to ${location.pathname}. Redirecting to /checkin.`);
       navigate('/checkin');
-    } else if (isAdmin && accessLevel === 'responder' && !responderOnlyPaths.includes(location.pathname)) {
-      // Enforce: Responders cannot access Operations, Planning, SARTopo, Action Log, or Google ICS
-      console.warn(`[App Guard] Responder attempted to access staff-only page: ${location.pathname}`);
+    } else if (!hasStaffPrivileges && !responderOnlyPaths.includes(location.pathname)) {
+      // Enforce: Standard field responders are restricted to the responder dashboard
+      console.warn(`[App Guard] Access denied for non-staff responder: ${location.pathname}`);
       navigate('/responder');
     } else if (isAdmin && accessLevel === 'staff' && location.pathname === '/admin') {
       // Enforce: Staff cannot access Admin
@@ -223,6 +344,12 @@ function App() {
           <div className="banner-logo-container">
             <img src={logo} alt="SAROps Logo" className="banner-logo" />
             <span className="banner-brand">SAROps</span>
+            <span style={{ 
+              fontSize: '9px', fontWeight: 800, padding: '2px 5px', borderRadius: '4px', marginLeft: '6px',
+              background: SAROPS_DB_INSTANCE === 'REMOTE' ? '#fef3c7' : '#f1f5f9',
+              color: SAROPS_DB_INSTANCE === 'REMOTE' ? '#92400e' : '#475569',
+              border: `1px solid ${SAROPS_DB_INSTANCE === 'REMOTE' ? '#f59e0b' : '#cbd5e1'}`
+            }}>{SAROPS_DB_INSTANCE}</span>
           </div>
           {isActive && (
             <>
@@ -263,6 +390,17 @@ function App() {
             >!</div>
           )}
           <div className={`connection-dot ${offline ? 'offline' : 'online'}`} title={offline ? 'Offline' : 'Online'}></div>
+          {hasUnreadMessages && (
+            <div 
+              className="unread-indicator" 
+              title="New unread message received"
+              onClick={() => navigate('/responder')}
+              style={{
+                width: '10px', height: '10px', backgroundColor: '#ef4444', borderRadius: '50%',
+                marginLeft: '8px', cursor: 'pointer', border: '2px solid white', boxShadow: '0 0 4px rgba(239, 68, 68, 0.5)'
+              }}
+            />
+          )}
           {(user || isActive) && (
             <div className="banner-menu-container">
               <button onClick={() => setMenuOpen(!menuOpen)} className="hamburger-btn" title="Menu">
@@ -273,34 +411,34 @@ function App() {
               {menuOpen && (
                 <div className="banner-dropdown">
                   {isActive && <Link to="/responder" onClick={() => setMenuOpen(false)}>My Dashboard</Link>}
-                  {user && <Link to="/settings" onClick={() => setMenuOpen(false)}>Settings</Link>}
-                  {isActive && <Link to="/ics" onClick={() => setMenuOpen(false)}>ICS Chart</Link>}
-                  {isActive && <Link to="/qrcodes" onClick={() => setMenuOpen(false)}>QR Codes</Link>}
-                  {(accessLevel === 'staff' || accessLevel === 'admin') && (
+                  {isActive && <Link to="/settings" onClick={() => setMenuOpen(false)}>Settings</Link>}
+                  {(isAdmin || accessLevel === 'staff' || accessLevel === 'admin') && (
                     <>
                       <div className="dropdown-divider"></div>
-                      {isActive && <Link to="/operations" onClick={() => setMenuOpen(false)}>Operations</Link>}
-                      {isActive && <Link to="/planning" onClick={() => setMenuOpen(false)}>Planning</Link>}
+                      <Link to="/operations" onClick={() => setMenuOpen(false)}>Operations</Link>
+                      <Link to="/planning" onClick={() => setMenuOpen(false)}>Planning</Link>
                       <Link to="/incident" onClick={() => setMenuOpen(false)}>Incident</Link>
-                      {isActive && <Link to="/action-log" onClick={() => setMenuOpen(false)}>Action Log</Link>}
-                      {isActive && <Link to="/sartopo" onClick={() => setMenuOpen(false)}>SARTopo</Link>}
-                      {isActive && <Link to="/google-ics" onClick={() => setMenuOpen(false)}>Google Forms</Link>}
+                      <Link to="/action-log" onClick={() => setMenuOpen(false)}>Action Log</Link>
+                      <Link to="/sartopo" onClick={() => setMenuOpen(false)}>SARTopo (Draft)</Link>
+                      <Link to="/google-ics" onClick={() => setMenuOpen(false)}>Google Forms (Draft)</Link>
                     </>
                   )}
+                  {isActive && <Link to="/ics" onClick={() => setMenuOpen(false)}>ICS Chart</Link>}
+                  {isActive && <Link to="/qrcodes" onClick={() => setMenuOpen(false)}>QR Codes</Link>}
+                  {isActive && <Link to="/checkout" onClick={() => setMenuOpen(false)}>Check Out</Link>}
                   {accessLevel === 'admin' && <Link to="/admin" onClick={() => setMenuOpen(false)}>Administration</Link>}
                   <div className="dropdown-divider"></div>
-                  <Link to="/checkout" onClick={() => setMenuOpen(false)} className="dropdown-item">Check Out</Link>
-                  <button onClick={handleSignOut} className="dropdown-item checkout">Sign Out / Clear All</button>
+                  <a href="#" onClick={(e) => { e.preventDefault(); handleToggleDb(); }}>
+                    {SAROPS_DB_INSTANCE}: Switch to { SAROPS_DB_INSTANCE === 'LOCAL' ? 'Remote' : 'Local' } DB
+                  </a>
+                  <a href="#" onClick={(e) => { e.preventDefault(); handleSignOut(); }}>Sign Out</a>
                 </div>
               )}
             </div>
           )}
         </div>
       </div>
-
-      <main>
-        <Outlet />
-      </main>
+      <Outlet />
     </div>
   );
 }

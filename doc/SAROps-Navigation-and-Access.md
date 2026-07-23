@@ -57,6 +57,8 @@ The navigation menu (hamburger menu) dynamically shows or hides links based on t
 *   **Admins** see: Administration.
 *   **Everyone (Active)** see: My Dashboard, Settings, ICS Chart, and QR Codes.
 
+### Database security
+*   **`RLS`** All tables will have Row Level Security applied.
 ---
 
 *Note: Access is also governed by an "Active" session state. Most tools require a responder to be checked in (`isActive`) to display incident-specific data.*

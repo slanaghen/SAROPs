@@ -1,9 +1,6 @@
 -- Suppress "does not exist" notices during the cleanup phase
 SET client_min_messages TO warning;
 
--- Force PostgREST to reload the schema cache to recognize dropped columns
-NOTIFY pgrst, 'reload schema';
-
 -- Ensure a clean slate for checkin_responder_securely to avoid "function name not unique" errors
 DROP FUNCTION IF EXISTS checkin_responder_securely(TEXT, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT); -- Old 12-parameter version (with p_vehicles)
 DROP FUNCTION IF EXISTS checkin_responder_securely(TEXT, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT); -- Current 11-parameter version

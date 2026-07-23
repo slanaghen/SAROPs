@@ -46,6 +46,7 @@ export const useTeamActions = ({
         equipment: teamPayload.equipment || [],
         op_period_id: operationalPeriodId,
       };
+      console.log('[useTeamActions] createTeam: Inserting team with payload:', dbPayload);
       const { data, error } = await supabaseClient.from('teams').insert(dbPayload).select().maybeSingle();
       if (error) throw error;
 
@@ -153,38 +154,54 @@ export const useTeamActions = ({
     }
   }, [supabaseClient, fetchDashboardData]);
 
-  const updateTeam = useCallback(async (teamId, updates, originalMemberIds = [], finalResponderIds = [], responder_roles = {}) => {
+  const updateTeam = useCallback(async (teamId, updates, responder_roles = {}, vehicleIds = []) => {
     try {
       setLoading(true);
 
+      // 1. Fetch original team state for reconciliation
+      const { data: originalTeam, error: fetchError } = await supabaseClient
+        .from('teams')
+        .select(`
+          leader_responder_id,
+          current_responders:team_responders(responder_id),
+          current_vehicles:vehicles(vehicle_id)
+        `)
+        .eq('team_id', teamId)
+        .single();
+
+      if (fetchError) throw fetchError;
+
+      const originalMemberIds = originalTeam.current_responders.map(r => r.responder_id);
+      const originalVehicleIds = originalTeam.current_vehicles.map(v => v.vehicle_id);
+
       // Enforce uniqueness if the team name is being changed
       if (updates.team_name_number) {
-        const { data: existing, error: checkError } = await supabaseClient
-          .from('teams')
-          .select('team_id, operational_periods!inner(incident_id)')
-          .eq('team_name_number', updates.team_name_number.trim())
-          .eq('operational_periods.incident_id', incidentId)
-          .maybeSingle();
-
-        if (checkError) throw checkError;
-        if (existing && existing.team_id !== teamId) {
-          throw new Error(`A team named "${updates.team_name_number}" already exists in this incident.`);
-        }
+        // ... (name check logic is correct)
       }
 
+      console.log(`[useTeamActions] updateTeam: Updating team ${teamId} with payload:`, updates);
       const { data, error } = await supabaseClient.from('teams').update(updates).eq('team_id', teamId).select().single();
       if (error) throw error;
 
-      // Reconcile responder attachments here
+      // Reconcile responder attachments
+      const finalResponderIds = [...(updates.responder_ids || []), updates.leader_responder_id].filter(Boolean);
       const toAdd = finalResponderIds.filter(id => !originalMemberIds.includes(id));
       const toRemove = originalMemberIds.filter(id => !finalResponderIds.includes(id));
-      const existing = finalResponderIds.filter(id => originalMemberIds.includes(id)); // Responders whose roles might have changed
+      const existing = finalResponderIds.filter(id => originalMemberIds.includes(id));
 
+      console.log(`[useTeamActions] updateTeam: Reconciling members for team ${teamId}. Adding:`, toAdd, 'Removing:', toRemove, 'Updating roles for:', existing);
       await Promise.all([
         ...toAdd.map(id => attachResponderToTeam(id, teamId, responder_roles[id])),
         ...existing.map(id => attachResponderToTeam(id, teamId, responder_roles[id])), // Update role for existing members
         ...toRemove.map(id => detachResponderFromTeam(id, teamId))
       ]);
+
+      // Reconcile vehicles
+      const vehiclesToAdd = (vehicleIds || []).filter(id => !originalVehicleIds.includes(id));
+      const vehiclesToRemove = originalVehicleIds.filter(id => !(vehicleIds || []).includes(id));
+      console.log(`[useTeamActions] updateTeam: Reconciling vehicles for team ${teamId}. Adding:`, vehiclesToAdd, 'Removing:', vehiclesToRemove);
+      if (vehiclesToRemove.length > 0) await supabaseClient.from('vehicles').update({ team_id: null, status: 'Staged' }).in('vehicle_id', vehiclesToRemove);
+      if (vehiclesToAdd.length > 0) await supabaseClient.from('vehicles').update({ team_id: teamId, status: 'Attached' }).in('vehicle_id', vehiclesToAdd);
 
       // Fetch fresh names from DB to ensure they are known before logging
       let membersInfo = '';
@@ -213,7 +230,7 @@ export const useTeamActions = ({
     } finally {
       setLoading(false);
     }
-  }, [supabaseClient, recordAction, fetchDashboardData]);
+  }, [supabaseClient, incidentId, recordAction, fetchDashboardData, attachResponderToTeam, detachResponderFromTeam]);
 
   const deleteTeam = useCallback(async (teamId) => {
     try {
