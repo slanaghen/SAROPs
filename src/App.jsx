@@ -144,13 +144,28 @@ function App() {
 
     // 1. Initial check for existing "pending" messages sent since last visit
     const fetchPending = async () => {
-      // Fetch messages since last read that are either for the user's team 
-      // OR for the Staff team (acting as a broadcast) in the current operational period.
+      // Find the Staff team ID for the current operational period to listen for broadcasts.
+      const { data: staffTeam } = await supabase
+        .from('teams')
+        .select('team_id')
+        .eq('op_period_id', incidentData.opPeriodId)
+        .eq('type', 'Staff')
+        .maybeSingle();
+
+      const orFilterConditions = [];
+      if (team?.team_id) {
+        orFilterConditions.push(`team_id.eq.${team.team_id}`);
+      }
+      if (staffTeam?.team_id) {
+        orFilterConditions.push(`team_id.eq.${staffTeam.team_id}`);
+      }
+      if (orFilterConditions.length === 0) return; // No teams to listen to.
+
       const { data: recentMsgs } = await supabase
         .from('team_messages')
-        .select('*, teams!inner(type, op_period_id)')
+        .select('*')
         .gt('created_at', lastRead)
-        .or(`team_id.eq.${team?.team_id},and(teams.type.eq.Staff,teams.op_period_id.eq.${incidentData.opPeriodId})`);
+        .or(orFilterConditions.join(','));
 
       if (recentMsgs?.some(m => !m.sender_name?.startsWith(responderName))) {
         setHasUnreadMessages(true);
@@ -397,9 +412,6 @@ function App() {
                 <div className="banner-dropdown">
                   {isActive && <Link to="/responder" onClick={() => setMenuOpen(false)}>My Dashboard</Link>}
                   {isActive && <Link to="/settings" onClick={() => setMenuOpen(false)}>Settings</Link>}
-                  {isActive && <Link to="/ics" onClick={() => setMenuOpen(false)}>ICS Chart</Link>}
-                  {isActive && <Link to="/qrcodes" onClick={() => setMenuOpen(false)}>QR Codes</Link>}
-                  {isActive && <Link to="/checkout" onClick={() => setMenuOpen(false)}>Check Out</Link>}
                   {(isAdmin || accessLevel === 'staff' || accessLevel === 'admin') && (
                     <>
                       <div className="dropdown-divider"></div>
@@ -407,10 +419,13 @@ function App() {
                       <Link to="/planning" onClick={() => setMenuOpen(false)}>Planning</Link>
                       <Link to="/incident" onClick={() => setMenuOpen(false)}>Incident</Link>
                       <Link to="/action-log" onClick={() => setMenuOpen(false)}>Action Log</Link>
-                      <Link to="/sartopo" onClick={() => setMenuOpen(false)}>SARTopo</Link>
-                      <Link to="/google-ics" onClick={() => setMenuOpen(false)}>Google Forms</Link>
+                      <Link to="/sartopo" onClick={() => setMenuOpen(false)}>SARTopo (Draft)</Link>
+                      <Link to="/google-ics" onClick={() => setMenuOpen(false)}>Google Forms (Draft)</Link>
                     </>
                   )}
+                  {isActive && <Link to="/ics" onClick={() => setMenuOpen(false)}>ICS Chart</Link>}
+                  {isActive && <Link to="/qrcodes" onClick={() => setMenuOpen(false)}>QR Codes</Link>}
+                  {isActive && <Link to="/checkout" onClick={() => setMenuOpen(false)}>Check Out</Link>}
                   {accessLevel === 'admin' && <Link to="/admin" onClick={() => setMenuOpen(false)}>Administration</Link>}
                   <div className="dropdown-divider"></div>
                   <a href="#" onClick={(e) => { e.preventDefault(); handleToggleDb(); }}>

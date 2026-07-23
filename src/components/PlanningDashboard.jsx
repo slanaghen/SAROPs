@@ -315,14 +315,6 @@ const PlanningDashboard = ({
     });
   }, [assignments, assignmentFilter, viewMode, operationalPeriodId]);
 
-  // Show responders who are Staged (available) OR already part of the team being edited
-  const stagedResponders = (responders || []).filter(r => {
-    const isStaged = isStagedResponder(r);
-    const isCurrentMember = (teamForm.responder_ids || []).includes(r.responder_id);
-    const isCurrentLeader = teamForm.leader_responder_id === r.responder_id;
-    return isStaged || isCurrentMember || isCurrentLeader;
-  });
-
   const openNewTeamForm = () => {
     setTeamForm({
       op_period_id: operationalPeriodId,
@@ -354,22 +346,29 @@ const PlanningDashboard = ({
     setShowAssignmentForm(true);
   };
 
-  const openEditAssignmentForm = (assignment) => {
-    console.log('📝 Opening Assignment Editor for:', assignment.title);
-    setAssignmentForm({
-      ...assignment
-    });
+  const openEditAssignmentForm = (assignmentId) => {
+    const assignmentToEdit = assignments.find(a => a.assignment_id === assignmentId);
+    if (!assignmentToEdit) {
+      console.error(`Assignment with ID ${assignmentId} not found.`);
+      addToast('Could not find the specified assignment.', 'error');
+      return;
+    }
+    console.log('📝 Opening Assignment Editor for:', assignmentToEdit.title);
+    setAssignmentForm({ ...assignmentToEdit });
     setShowAssignmentForm(true);
   };
 
-  const openEditTeamForm = (team) => {
-    console.log('📝 Opening Team Editor for:', team.team_name_number);
+  const openEditTeamForm = (teamId) => {
+    const teamToEdit = teams.find(t => t.team_id === teamId);
+    if (!teamToEdit) {
+      console.error(`Team with ID ${teamId} not found.`);
+      addToast('Could not find the specified team.', 'error');
+      return;
+    }
+    console.log('📝 Opening Team Editor for:', teamToEdit.team_name_number);
+    console.log('[PlanningDashboard] openEditTeamForm: Setting initialData for modal:', teamToEdit);
     setTeamForm({
-      ...team,
-      equipment: team.equipment || [],
-      responder_ids: team.current_responders?.map(r => r.responder_id) || [],
-      // Requirement: Ensure vehicle associations are mapped to the form state when editing a team.
-      vehicle_ids: team.current_vehicles?.map(v => v.vehicle_id) || [],
+      ...teamToEdit,
     });
     setShowTeamForm(true);
   };
@@ -473,6 +472,7 @@ const PlanningDashboard = ({
   };
 
   const handleSaveTeam = async (formData, stayOpen = false) => {
+    console.log('[PlanningDashboard] handleSaveTeam: Received form data from modal:', formData);
     if (!formData.leader_responder_id) {
       throw new Error('A team leader must be selected in order to save a team.'); // Error handled by catch block
     }
@@ -495,12 +495,9 @@ const PlanningDashboard = ({
         }
       }
 
-      // Ensure leader is included in responder_ids for consistency
-      const currentResponders = formData.responder_ids || [];
-      const finalResponderIds = (formData.leader_responder_id && !currentResponders.includes(formData.leader_responder_id))
-        ? [...currentResponders, formData.leader_responder_id]
-        : currentResponders;
+      const finalResponderIds = formData.responder_ids || [];
 
+      console.log(`[PlanningDashboard] handleSaveTeam: Processing ${formData.team_id ? 'UPDATE' : 'CREATE'}. Final name: "${finalTeamName}". Leader: ${formData.leader_responder_id}, Members:`, finalResponderIds);
       if (formData.team_id && updateTeam) {
         const payload = {
           team_name_number: finalTeamName,
@@ -512,6 +509,7 @@ const PlanningDashboard = ({
           equipment: formData.equipment,
           responder_ids: finalResponderIds
         };
+        console.log('[PlanningDashboard] handleSaveTeam: Calling updateTeam with payload:', payload);
         await updateTeam(formData.team_id, payload, formData.responder_roles, formData.vehicle_ids);
         addToast('Team updated.', 'success');
       } else if (createTeam) {
@@ -524,6 +522,7 @@ const PlanningDashboard = ({
           equipment: formData.equipment,
           responder_ids: finalResponderIds
         };
+        console.log('[PlanningDashboard] handleSaveTeam: Calling createTeam with payload:', payload);
         await createTeam(payload, formData.responder_roles, formData.vehicle_ids);
         addToast('Team created.', 'success');
       }
@@ -945,7 +944,7 @@ const PlanningDashboard = ({
                 <div
                   key={team.team_id}
                   className={`team-card ${isTeamHighlighted(team.team_id) ? 'selected' : ''}`}
-                  onClick={() => openEditTeamForm(team)}
+                  onClick={() => openEditTeamForm(team.team_id)}
                   draggable="true"
                   onDragStart={(e) => handleDragStart(e, team.team_id, 'team')}
                   onDragEnd={handleDragEnd}
@@ -1032,7 +1031,7 @@ const PlanningDashboard = ({
                 <div
                   key={assignment.assignment_id}
                   className={`assignment-card ${isAssignmentHighlighted(assignment.assignment_id) ? 'selected' : ''}`}
-                  onClick={() => openEditAssignmentForm(assignment)}
+                  onClick={() => openEditAssignmentForm(assignment.assignment_id)}
                   draggable="true"
                   onDragStart={(e) => handleDragStart(e, assignment.assignment_id, 'assignment')}
                   onDragEnd={handleDragEnd}

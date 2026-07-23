@@ -48,6 +48,7 @@ The system uses PostgreSQL triggers to maintain "operational parity," ensuring t
 *   **Completed / Incomplete**: These terminal statuses trigger the linked team to move to `Disbanded`.
 
 ### Team -> Responder Sync
+A Responder can only be attached/assigned/deployed to one team at a time. 
 *   **Staged**: Responders attached to a `Staged` team are marked as `Attached`.
 *   **Assigned**: Responders move to `Assigned`.
 *   **Deployed**: Responders move to `Deployed`.

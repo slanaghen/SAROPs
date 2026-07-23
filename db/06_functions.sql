@@ -355,3 +355,16 @@ BEGIN
     RETURN NEW;
 END;
 $func$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Function to ensure the team leader is always a member of the team
+CREATE OR REPLACE FUNCTION ensure_leader_is_member()
+RETURNS TRIGGER AS $func$
+BEGIN
+    IF NEW.leader_responder_id IS NOT NULL THEN
+        INSERT INTO team_responders (team_id, responder_id, role)
+        VALUES (NEW.team_id, NEW.leader_responder_id, CASE WHEN NEW.type = 'Staff' THEN 'Incident Commander' ELSE 'Team Leader' END)
+        ON CONFLICT (team_id, responder_id) DO UPDATE SET role = EXCLUDED.role;
+    END IF;
+    RETURN NEW;
+END;
+$func$ LANGUAGE plpgsql SECURITY DEFINER;

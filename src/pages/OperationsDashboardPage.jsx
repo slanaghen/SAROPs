@@ -199,6 +199,13 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     return () => clearInterval(timer);
   }, []);
 
+  // Log when responder data is loaded to help debug modal issues
+  useEffect(() => {
+    if (responders && responders.length > 0) {
+      console.log(`[OperationsDashboardPage] Data loaded: ${responders.length} responders, ${vehicles.length} vehicles.`);
+    }
+  }, [responders, vehicles]);
+
   useEffect(() => {
     fetchDashboardData();
   }, [operationalPeriodId, fetchDashboardData]);
@@ -359,16 +366,15 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
 
   const handleDragEnter = (e, id, type) => {
     if (!draggedItem || draggedItem.type === type) return;
+    
+    // Validate drop targets to prevent invalid visual states.
+    const targetRow = rows.find(r => r.id === id);
+    if (targetRow?.hasBoth) return;
 
-    // Validate highlighting for Team/Assignment linkage
-    if (draggedItem.type === 'team' || draggedItem.type === 'assignment') {
-      const targetRow = rows.find(r => r.id === id);
-      if (targetRow?.hasBoth) return;
-    }
-
-    // Prevent highlighting assignments when dragging a responder
     if (draggedItem.type === 'responder' && type !== 'team') return;
 
+    // This is required to signal that this element is a valid drop target.
+    e.preventDefault();
     setDropTarget({ id, type });
   };
 
@@ -431,30 +437,17 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     setShowAssignmentForm(true);
   };
 
-  const openEditTeamForm = async (team) => {
+  const openEditTeamForm = (team) => {
     if (!team) return;
-    setLoading(true);
-    try {
-      // Requirement: Fetch both current membership and vehicle attachments for reconciliation
-      const [membersRes, vehiclesRes] = await Promise.all([
-        supabase.from('team_responders').select('responder_id, role').eq('team_id', team.team_id),
-        supabase.from('vehicles').select('vehicle_id').eq('team_id', team.team_id)
-      ]);
-
-      const members = membersRes.data || [];
-      const currentVehicles = vehiclesRes.data || [];
-
-      setTeamForm({
-        ...team,
-        current_responders: members,
-        responder_ids: members.map(m => m.responder_id),
-        current_vehicles: currentVehicles,
-        vehicle_ids: currentVehicles.map(v => v.vehicle_id)
-      });
-      setShowTeamForm(true);
-    } finally {
-      setLoading(false);
-    }
+    console.log('[OperationsDashboardPage] openEditTeamForm: Preparing to open modal for team:', team.team_name_number);
+    setTeamForm({
+      ...team,
+      equipment: team.equipment || [],
+      responder_ids: team.current_responders?.map(r => r.responder_id) || [],
+      vehicle_ids: team.current_vehicles?.map(v => v.vehicle_id) || [],
+    });
+    setShowTeamForm(true);
+    console.log('[OperationsDashboardPage] openEditTeamForm: State set for modal with initialData:', { ...team, responder_ids: team.current_responders?.map(r => r.responder_id) || [], vehicle_ids: team.current_vehicles?.map(v => v.vehicle_id) || [] });
   };
 
   const handleSaveVehicle = async (formData) => {
@@ -492,76 +485,6 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     if (!assignment) return;
     setAssignmentForm(assignment);
     setShowAssignmentForm(true);
-  };
-
-  const handleSaveTeam = async (formData, stayOpen = false) => {
-    try {
-      // Auto-generate team name if blank
-      let finalTeamName = formData.team_name_number?.trim();
-      if (!finalTeamName) {
-        const type = formData.type || 'Other';
-        const existingOfSameType = teams.filter(t => t.type === type);
-        let nextNum = existingOfSameType.length + 1;
-        finalTeamName = `${type} ${nextNum}`;
-
-        // Local uniqueness check to avoid immediate collisions
-        while (teams.some(t => t.team_name_number === finalTeamName)) {
-          nextNum++;
-          finalTeamName = `${type} ${nextNum}`;
-        }
-      }
-
-      const payload = {
-        team_name_number: finalTeamName,
-        sartopo_color_hex: formData.sartopo_color_hex || '#FF0000',
-        type: formData.type || 'Other',
-        status: formData.status || 'Staged',
-        leader_responder_id: formData.leader_responder_id || null,
-        equipment: formData.equipment || []
-      };
-
-      if (formData.team_id) {
-        const finalIds = formData.responder_ids || [];
-        const roles = formData.responder_roles || {};
-        const originalIds = teamById[formData.team_id]?.current_responders?.map(r => r.responder_id) || [];
-        // Reconciliation is now handled within updateTeam
-        await updateTeam(formData.team_id, payload, originalIds, finalIds, roles);
-
-        // Reconcile vehicles
-        const finalVehIds = formData.vehicle_ids || [];
-        const originalVehIds = teamById[formData.team_id]?.current_vehicles?.map(v => v.vehicle_id) || [];
-        const vehToAdd = finalVehIds.filter(id => !originalVehIds.includes(id));
-        const vehToRemove = originalVehIds.filter(id => !finalVehIds.includes(id));
-
-        await Promise.all([
-          ...vehToAdd.map(id => supabase.from('vehicles').update({ team_id: formData.team_id }).eq('vehicle_id', id)),
-          ...vehToRemove.map(id => supabase.from('vehicles').update({ team_id: null }).eq('vehicle_id', id))
-        ]);
-      } else {
-        const newTeam = await createTeam({ 
-          ...payload, 
-          op_period_id: operationalPeriodId, 
-          responder_ids: formData.responder_ids, 
-          responder_roles: formData.responder_roles 
-        });
-        
-        // Process initial vehicle assignments for new team
-        if (formData.vehicle_ids?.length > 0) {
-          await supabase.from('vehicles').update({ team_id: newTeam.team_id }).in('vehicle_id', formData.vehicle_ids);
-        }
-
-        if (pendingAssignmentId) await assignTeamToAssignment(newTeam.team_id, pendingAssignmentId);
-      }
-
-      setPendingAssignmentId(null);
-      if (stayOpen) {
-        openNewTeamForm();
-      } else {
-        setShowTeamForm(false);
-      }
-    } catch (err) {
-      setPendingAssignmentId(null);
-    }
   };
 
   const handleSaveAssignment = async (formData, stayOpen = false) => {
@@ -603,6 +526,63 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       }
     } catch (err) {
       setPendingTeamId(null);
+    }
+  };
+
+  const handleSaveTeam = async (formData, stayOpen = false) => {
+    console.log('[OperationsDashboardPage] handleSaveTeam: Received form data from modal:', formData);
+    if (!formData.leader_responder_id) {
+      setError('A team leader must be selected in order to save a team.');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      
+      let finalTeamName = formData.team_name_number?.trim();
+      if (!finalTeamName) {
+        const type = formData.type || 'Other';
+        const existingOfSameType = (teams || []).filter(t => t.type === type);
+        let nextNum = existingOfSameType.length + 1;
+        finalTeamName = `${type} ${nextNum}`;
+        while ((teams || []).some(t => t.team_name_number === finalTeamName)) {
+          nextNum++;
+          finalTeamName = `${type} ${nextNum}`;
+        }
+      }
+
+      const finalResponderIds = formData.responder_ids || [];
+      console.log(`[OperationsDashboardPage] handleSaveTeam: Persisting team data. Leader: ${formData.leader_responder_id}, Members:`, finalResponderIds);
+
+      const payload = {
+        team_name_number: finalTeamName,
+        type: formData.type,
+        sartopo_color_hex: formData.sartopo_color_hex || '#ff0000',
+        op_period_id: formData.op_period_id,
+        status: formData.status,
+        leader_responder_id: formData.leader_responder_id,
+        equipment: formData.equipment,
+        responder_ids: finalResponderIds
+      };
+
+      if (formData.team_id && updateTeam) {
+        console.log('[OperationsDashboardPage] handleSaveTeam: Calling updateTeam with payload:', payload);
+        await updateTeam(formData.team_id, payload, formData.responder_roles, formData.vehicle_ids);
+      } else if (createTeam) {
+        console.log('[OperationsDashboardPage] handleSaveTeam: Calling createTeam with payload:', payload);
+        await createTeam(payload, formData.responder_roles, formData.vehicle_ids);
+      }
+
+      if (stayOpen) {
+        openNewTeamForm();
+      } else {
+        setShowTeamForm(false);
+      }
+      await fetchDashboardData();
+    } catch (err) {
+      setError(err.message || 'Failed to save team.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -804,9 +784,9 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
           initialData={teamForm}
           responders={responders}
           vehicles={vehicles}
-          loading={loading}
-          error={error}
           commandStaffExists={commandStaffExists}
+          pendingAssignmentId={pendingAssignmentId}
+          onEditVehicle={(v) => { setEditingVehicle(v); setShowVehicleForm(true); }}
         />
       )}
 

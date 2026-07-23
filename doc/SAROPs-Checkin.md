@@ -18,8 +18,7 @@ The check-in process captures essential operational metadata:
 ### Incident Selection
 Users select from a real-time list of active incidents (incidents where `end_datetime` is NULL). 
 *   **Real-time Sync**: The list updates automatically if an incident is started or ended by an administrator.
-*   **Admin Override**: If the user is an Admin, they are provided the option to create a new incident directly from the check-in flow.
-
+*   **Incident Creation**: New incidents can only be created by `Staff` or `Admin` users from the `/login` page or the `/admin` page. The "Create an incident" option is not available on the `/checkin` page.
 ### The "First Responder" Logic
 A critical system feature: if a responder checks into an incident that has no Incident Commander, the system:
 1.  Identifies the "Staff" team for the current Operational Period.
