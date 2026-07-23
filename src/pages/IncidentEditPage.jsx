@@ -198,6 +198,57 @@ const IncidentEditPage = () => {
     setSartopoSyncErrorMessage(null); // Clear sync error when ID changes
   }, [incident.sartopo_id]);
 
+  // Load existing incident data or reset to default
+  useEffect(() => {
+    const loadIncidentData = async () => {
+      // Case 1: Navigated from Admin page with full incident object in state
+      if (targetIncident) {
+        const latestOp = [...(targetIncident.operational_periods || [])].sort((a, b) => (b.op_number || 0) - (a.op_number || 0))[0];
+        const incidentState = {
+          ...targetIncident,
+          start_datetime: targetIncident.start_datetime ? targetIncident.start_datetime.slice(0, 16) : '',
+          end_datetime: targetIncident.end_datetime ? targetIncident.end_datetime.slice(0, 16) : '',
+        };
+        setIncident(incidentState);
+        setInitialIncident(incidentState);
+
+        if (latestOp) {
+          const opState = {
+            ...latestOp,
+            start_datetime: latestOp.start_datetime ? latestOp.start_datetime.slice(0, 16) : '',
+            end_datetime: latestOp.end_datetime ? latestOp.end_datetime.slice(0, 16) : '',
+            par_check_interval: latestOp.par_check_interval ?? 60,
+          };
+          setOperationalPeriod(opState);
+          setInitialOpPeriod(opState);
+        }
+      } 
+      // Case 2: Navigated directly while an incident is active in the context
+      else if (isActive && contextIncidentId) {
+        const { data: incData, error: incError } = await supabase.from('incidents').select('*').eq('incident_id', contextIncidentId).single();
+        const { data: opData, error: opError } = await supabase.from('operational_periods').select('*').eq('op_period_id', incidentData.opPeriodId).single();
+
+        if (incError || opError) {
+          addToast('Failed to load active incident data.', 'error');
+          return;
+        }
+
+        if (incData) {
+          const incidentState = { ...incData, start_datetime: incData.start_datetime.slice(0, 16), end_datetime: incData.end_datetime ? incData.end_datetime.slice(0, 16) : '' };
+          setIncident(incidentState);
+          setInitialIncident(incidentState);
+        }
+        if (opData) {
+          const opState = { ...opData, start_datetime: opData.start_datetime.slice(0, 16), end_datetime: opData.end_datetime ? opData.end_datetime.slice(0, 16) : '' };
+          setOperationalPeriod(opState);
+          setInitialOpPeriod(opState);
+        }
+      }
+    };
+
+    loadIncidentData();
+  }, [targetIncident, isActive, contextIncidentId, incidentData?.opPeriodId]);
+
   const sartopoConfig = useMemo(() => getSartopoConfig(incident.sartopo_id), [incident.sartopo_id]);
 
   /**

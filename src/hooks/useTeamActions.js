@@ -61,6 +61,12 @@ export const useTeamActions = ({
         ]);
       }
 
+      // Requirement: Attach selected vehicles to the new team.
+      if (vehicleIds?.length > 0) {
+        console.log(`[useTeamActions] createTeam: Attaching vehicles to new team ${data.team_id}:`, vehicleIds);
+        await supabaseClient.from('vehicles').update({ team_id: data.team_id, status: 'Attached' }).in('vehicle_id', vehicleIds);
+      }
+
       // Fetch fresh names from DB to ensure they are known before logging
       let membersInfo = '';
       if (teamPayload.responder_ids?.length) {
@@ -77,8 +83,17 @@ export const useTeamActions = ({
         }).join(', ');
       }
 
+      let vehicleInfo = '';
+      if (vehicleIds?.length > 0) {
+        const { data: vehicleData } = await supabaseClient.from('vehicles').select('designation').in('vehicle_id', vehicleIds);
+        if (vehicleData) {
+          vehicleInfo = vehicleData.map(v => v.designation).join(', ');
+        }
+      }
+
       const actionMessage = `Created team "${teamPayload.team_name_number}" (Type: ${teamPayload.type}, Status: ${teamPayload.status}).` +
-        (membersInfo ? ` Members: ${membersInfo}.` : '');
+        (membersInfo ? ` Members: ${membersInfo}.` : '') +
+        (vehicleInfo ? ` Vehicles: ${vehicleInfo}.` : '');
       await recordAction(actionMessage);
       await fetchDashboardData();
       return data;
@@ -90,7 +105,7 @@ export const useTeamActions = ({
     }
   }, [supabaseClient, operationalPeriodId, recordAction, fetchDashboardData]);
 
-  const detachTeam = useCallback(async (teamId) => {
+  const disbandTeam = useCallback(async (teamId) => {
     try {
       setLoading(true);
       const { data: members } = await supabaseClient.from('team_responders').select('responder_id').eq('team_id', teamId);
@@ -106,8 +121,9 @@ export const useTeamActions = ({
         if (responderId && responderIds.includes(responderId)) setResponderStatus('Staged');
       }
 
+      const { data: teamData } = await supabaseClient.from('teams').select('team_name_number').eq('team_id', teamId).single();
       await supabaseClient.from('teams').update({ status: 'Disbanded', last_par_check: null }).eq('team_id', teamId);
-      await recordAction(`Disbanded team.`);
+      await recordAction(`Disbanded team "${teamData?.team_name_number || 'Unknown'}".`);
       await fetchDashboardData();
       return { success: true };
     } catch (err) {
@@ -161,11 +177,7 @@ export const useTeamActions = ({
       // 1. Fetch original team state for reconciliation
       const { data: originalTeam, error: fetchError } = await supabaseClient
         .from('teams')
-        .select(`
-          leader_responder_id,
-          current_responders:team_responders(responder_id),
-          current_vehicles:vehicles(vehicle_id)
-        `)
+        .select('team_name_number, leader_responder_id, current_responders:team_responders(responder_id), current_vehicles:vehicles(vehicle_id)')
         .eq('team_id', teamId)
         .single();
 
@@ -189,7 +201,30 @@ export const useTeamActions = ({
       const toRemove = originalMemberIds.filter(id => !finalResponderIds.includes(id));
       const existing = finalResponderIds.filter(id => originalMemberIds.includes(id));
 
-      console.log(`[useTeamActions] updateTeam: Reconciling members for team ${teamId}. Adding:`, toAdd, 'Removing:', toRemove, 'Updating roles for:', existing);
+      // Reconcile vehicles
+      const vehiclesToAdd = (vehicleIds || []).filter(id => !originalVehicleIds.includes(id));
+      const vehiclesToRemove = originalVehicleIds.filter(id => !(vehicleIds || []).includes(id));
+
+      // Build detailed change log
+      let changes = [];
+      if (toAdd.length > 0) {
+        const { data: names } = await supabaseClient.from('responders').select('name').in('responder_id', toAdd);
+        changes.push(`Added members: ${names.map(n => n.name).join(', ')}`);
+      }
+      if (toRemove.length > 0) {
+        const { data: names } = await supabaseClient.from('responders').select('name').in('responder_id', toRemove);
+        changes.push(`Removed members: ${names.map(n => n.name).join(', ')}`);
+      }
+      if (vehiclesToAdd.length > 0) {
+        const { data: names } = await supabaseClient.from('vehicles').select('designation').in('vehicle_id', vehiclesToAdd);
+        changes.push(`Attached vehicles: ${names.map(n => n.designation).join(', ')}`);
+      }
+      if (vehiclesToRemove.length > 0) {
+        const { data: names } = await supabaseClient.from('vehicles').select('designation').in('vehicle_id', vehiclesToRemove);
+        changes.push(`Detached vehicles: ${names.map(n => n.designation).join(', ')}`);
+      }
+
+      // Perform database updates
       await Promise.all([
         ...toAdd.map(id => attachResponderToTeam(id, teamId, responder_roles[id])),
         ...existing.map(id => attachResponderToTeam(id, teamId, responder_roles[id])), // Update role for existing members
@@ -251,6 +286,7 @@ export const useTeamActions = ({
   const updateTeamStatus = useCallback(async (teamId, newStatus) => {
     if (!teamId || !newStatus) throw new Error('Team ID and status are required');
     try {
+      const { data: teamData } = await supabaseClient.from('teams').select('team_name_number').eq('team_id', teamId).single();
       setLoading(true);
       let teamUpdatePayload = { status: newStatus };
       if (['Assigned', 'Deployed'].includes(newStatus)) {
@@ -260,7 +296,7 @@ export const useTeamActions = ({
       }
       const { error } = await supabaseClient.from('teams').update(teamUpdatePayload).eq('team_id', teamId);
       if (error) throw error;
-      await recordAction(`Updated status of team to ${newStatus}`);
+      await recordAction(`Updated status of team "${teamData?.team_name_number || 'Unknown'}" to ${newStatus}.`);
       await fetchDashboardData();
       return { success: true };
     } catch (err) {
@@ -271,5 +307,5 @@ export const useTeamActions = ({
     }
   }, [supabaseClient, fetchDashboardData, recordAction, setLoading, setError]);
 
-  return { createTeam, detachTeam, attachResponderToTeam, detachResponderFromTeam, updateTeam, deleteTeam, updateTeamStatus };
+  return { createTeam, disbandTeam, attachResponderToTeam, detachResponderFromTeam, updateTeam, deleteTeam, updateTeamStatus };
 };
