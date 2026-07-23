@@ -37,6 +37,7 @@ const PlanningDashboard = ({
   updateAssignment,
   deleteAssignment,
   updateTeam,
+  disbandTeam,
   updateResponder,
   checkOutResponder,
   attachResponderToTeam,
@@ -424,34 +425,19 @@ const PlanningDashboard = ({
     });
   };
 
-  const handleReleaseTeam = async (team) => {
-    if (team.status === 'Deployed') {
-      alert(`Cannot disband team "${team.team_name_number}" while it is Deployed. Please complete or cancel the assignment first.`);
-      return;
-    }
-
-    const msg = `Are you sure you want to release "${team.team_name_number}"? This will return all members to Staged status and delete the team record.`;
+  const handleDisbandTeam = async (team) => {
+    const msg = `Are you sure you want to disband team "${team.team_name_number}"? This will return all members to Staged status.`;
     if (!window.confirm(msg)) return;
 
     try {
-      setLoading(true);
-
-      // Ensure all members return to Staged status before deleting the team
-      const rIds = (team.current_responders || []).map(r => r.responder_id);
-      if (rIds.length > 0 && updateResponder) {
-        // Update each responder's status to 'Staged'
-        await Promise.all(rIds.map(id => updateResponder(id, { status: 'Staged' })));
-        // Note: history closure and status are now synchronized through these updates (hook handles its own error)
-      }
-
-      if (deleteTeam) {
-        await deleteTeam(team.team_id); // Hook handles its own error
+      if (disbandTeam) {
+        // This performs a "soft delete" by setting the team's status to 'Disbanded'
+        // and relies on database triggers to correctly update member statuses.
+        await disbandTeam(team.team_id);
         addToast(`Team "${team.team_name_number}" released.`, 'success');
       }
     } catch (err) {
       addToast(err.message || 'Failed to release team', 'error');
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -983,7 +969,7 @@ const PlanningDashboard = ({
                   <div className="team-actions" style={{ marginTop: '4px', display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
                     <button 
                       className="btn btn-secondary btn-sm" 
-                      onClick={(e) => { e.stopPropagation(); handleReleaseTeam(team); }}
+                      onClick={(e) => { e.stopPropagation(); handleDisbandTeam(team); }}
                       disabled={team.status === 'Deployed'}
                       style={{ color: '#dc2626' }}
                       title={team.status === 'Deployed' ? "Cannot disband team while deployed" : "Release team members to staging"}

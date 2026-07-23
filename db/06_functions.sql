@@ -1,3 +1,23 @@
+-- Authorization: Check if the current user has operational staff privileges
+-- This function is the cornerstone of RLS policies for creating and managing incidents.
+-- It robustly checks the user's role from the users table, rather than relying on
+-- potentially absent JWT claims, which is critical when creating a new incident
+-- where no incident-specific context exists yet.
+CREATE OR REPLACE FUNCTION check_is_operational_staff()
+RETURNS BOOLEAN AS $$
+DECLARE
+    user_role TEXT;
+BEGIN
+    -- Get the role from the users table based on the logged-in user's email.
+    SELECT access_level INTO user_role
+    FROM public.users
+    WHERE email = auth.email()
+    LIMIT 1;
+
+    RETURN (user_role IN ('staff', 'admin'));
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
 -- Function to update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $func$

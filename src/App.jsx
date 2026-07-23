@@ -274,11 +274,10 @@ function App() {
                 <div className="banner-dropdown">
                   {isActive && <Link to="/responder" onClick={() => setMenuOpen(false)}>My Dashboard</Link>}
                   {user && <Link to="/settings" onClick={() => setMenuOpen(false)}>Settings</Link>}
-                  {isActive && <Link to="/ics" onClick={() => setMenuOpen(false)}>ICS Chart</Link>}
-                  {isActive && <Link to="/qrcodes" onClick={() => setMenuOpen(false)}>QR Codes</Link>}
                   {(accessLevel === 'staff' || accessLevel === 'admin') && (
                     <>
                       <div className="dropdown-divider"></div>
+                      {accessLevel === 'admin' && <Link to="/admin" onClick={() => setMenuOpen(false)}>Administration</Link>}
                       {isActive && <Link to="/operations" onClick={() => setMenuOpen(false)}>Operations</Link>}
                       {isActive && <Link to="/planning" onClick={() => setMenuOpen(false)}>Planning</Link>}
                       <Link to="/incident" onClick={() => setMenuOpen(false)}>Incident</Link>
@@ -287,7 +286,8 @@ function App() {
                       {isActive && <Link to="/google-ics" onClick={() => setMenuOpen(false)}>Google Forms</Link>}
                     </>
                   )}
-                  {accessLevel === 'admin' && <Link to="/admin" onClick={() => setMenuOpen(false)}>Administration</Link>}
+                  {isActive && <Link to="/ics" onClick={() => setMenuOpen(false)}>ICS Chart</Link>}
+                  {isActive && <Link to="/qrcodes" onClick={() => setMenuOpen(false)}>QR Codes</Link>}
                   <div className="dropdown-divider"></div>
                   <Link to="/checkout" onClick={() => setMenuOpen(false)} className="dropdown-item">Check Out</Link>
                   <button onClick={handleSignOut} className="dropdown-item checkout">Sign Out / Clear All</button>
