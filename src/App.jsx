@@ -13,6 +13,7 @@ function App() {
   const [user, setUser] = useState(null);
   const [displayDensity, setDisplayDensity] = useState('comfortable');
   const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
+  const [operationalPeriod, setOperationalPeriod] = useState(null);
   const { addToast } = useToast();
   const [menuOpen, setMenuOpen] = useState(false);
   const navigate = useNavigate();
@@ -355,6 +356,37 @@ function App() {
     }
   }, [isActive, isAdmin, accessLevel, location.pathname, navigate]);
 
+  // SARStream: Fetch operational period data to check for active stream
+  useEffect(() => {
+    const fetchOpPeriod = async () => {
+      if (incidentData?.opPeriodId) {
+        const { data, error } = await supabase
+          .from('operational_periods')
+          .select('sarstream_enabled, sarstream_data')
+          .eq('op_period_id', incidentData.opPeriodId)
+          .maybeSingle();
+        
+        if (error) console.error("SARStream: Error fetching OP data", error);
+        else setOperationalPeriod(data);
+      } else {
+        setOperationalPeriod(null);
+      }
+    };
+    fetchOpPeriod();
+
+    if (!incidentData?.opPeriodId) return;
+
+    const channel = supabase.channel(`op-period-sarstream-sync-${incidentData.opPeriodId}`)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'operational_periods', filter: `op_period_id=eq.${incidentData.opPeriodId}` }, 
+        (payload) => setOperationalPeriod(payload.new)
+      ).subscribe();
+    
+    return () => supabase.removeChannel(channel);
+  }, [incidentData?.opPeriodId]);
+
+  const showLiveFeed = operationalPeriod?.sarstream_enabled && (operationalPeriod?.sarstream_data?.url || operationalPeriod?.sarstream_data?.view_url);
+  const liveFeedUrl = operationalPeriod?.sarstream_data?.url || operationalPeriod?.sarstream_data?.view_url;
+
   return (
     <div className={`app-shell density-${displayDensity} ${displayDensity === 'compact' ? 'compact-mode' : ''}`}>
       <div className="incident-banner">
@@ -429,6 +461,7 @@ function App() {
               {menuOpen && (
                 <div className="banner-dropdown">
                   {isActive && <Link to="/responder" onClick={() => setMenuOpen(false)}>My Dashboard</Link>}
+                  {showLiveFeed && <a href={liveFeedUrl} target="_blank" rel="noopener noreferrer" onClick={() => setMenuOpen(false)}>Live Feed</a>}
                   {isActive && <Link to="/settings" onClick={() => setMenuOpen(false)}>Settings</Link>}
                   {(isAdmin || accessLevel === 'staff' || accessLevel === 'admin') && (
                     <>

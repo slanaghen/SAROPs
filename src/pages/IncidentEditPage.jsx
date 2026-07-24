@@ -82,6 +82,10 @@ const IncidentEditPage = () => {
   const [operationalPeriod, setOperationalPeriod] = useState(defaultOperationalPeriod);
   const [initialOpPeriod, setInitialOpPeriod] = useState(defaultOperationalPeriod);
 
+  // SARStream State
+  const [isStreamEnabled, setIsStreamEnabled] = useState(false);
+  const [isStreamLoading, setIsStreamLoading] = useState(false);
+
   // Anonymous session initialization (required for RLS)
   const [isAuthenticating, setIsAuthenticating] = useState(true);
   useEffect(() => {
@@ -126,6 +130,13 @@ const IncidentEditPage = () => {
     };
     fetchDensity();
   }, [user]);
+
+  // SARStream: Sync toggle state with loaded operational period data
+  useEffect(() => {
+    if (operationalPeriod) {
+      setIsStreamEnabled(operationalPeriod.sarstream_enabled || false);
+    }
+  }, [operationalPeriod?.sarstream_enabled]);
 
   const fromAdmin = location.state?.fromAdmin;
   const targetIncident = location.state?.targetIncident;
@@ -403,6 +414,44 @@ const IncidentEditPage = () => {
 
   const handleOperationalPeriodChange = (field, value) => {
     setOperationalPeriod(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handleToggleSarStream = async () => {
+    const shouldEnable = !isStreamEnabled;
+    setIsStreamLoading(true);
+    try {
+      let streamData = null;
+      if (shouldEnable) {
+        // Ensure we have an incident name to use as a label
+        if (!incident.name) {
+          addToast('Please provide an Incident Name before activating SARStream.', 'error');
+          return;
+        }
+        const { data, error } = await supabase.functions.invoke('sarstream-proxy', {
+          body: { label: incident.name },
+        });
+        if (error) throw error;
+        streamData = data;
+      }
+
+      const { error: updateError } = await supabase
+        .from('operational_periods')
+        .update({
+          sarstream_enabled: shouldEnable,
+          sarstream_data: streamData,
+        })
+        .eq('op_period_id', targetOpId);
+
+      if (updateError) throw updateError;
+
+      addToast(`SARStream has been ${shouldEnable ? 'activated' : 'deactivated'}.`, 'success');
+      // Optimistically update local state to match DB
+      setOperationalPeriod(prev => ({...prev, sarstream_enabled: shouldEnable, sarstream_data: streamData }));
+    } catch (err) {
+      addToast(`SARStream Error: ${err.message}`, 'error');
+    } finally {
+      setIsStreamLoading(false);
+    }
   };
 
   const saveData = async (autoResetSaving = true, shouldCleanState = true) => {
@@ -871,8 +920,8 @@ const IncidentEditPage = () => {
               </div>
 
               <div className="par-config-row" style={{ display: 'flex', alignItems: 'flex-end', gap: '12px', flex: 1 }}>
-                <div className="form-field" style={{ flex: 1 }}>
-                  <label className="form-label" htmlFor="par_int">PAR/Status Check Interval (minutes)</label>
+                <div className="form-field" style={{ flex: '0 1 140px' }}>
+                  <label className="form-label" htmlFor="par_int">PAR Interval (minutes)</label>
                   <input
                     id="par_int"
                     type="number"
@@ -894,10 +943,23 @@ const IncidentEditPage = () => {
                 >
                   {operationalPeriod.par_check_interval === 0 ? 'Enable PAR' : 'Disable PAR'}
                 </button>
+                <div>
+                {existingId && (
+                    <button
+                      type="button"
+                      className={`action-btn ${isStreamEnabled ? 'action-btn-secondary' : 'action-btn-primary'}`}
+                      style={{ whiteSpace: 'nowrap' }}
+                      onClick={handleToggleSarStream}
+                      disabled={isStreamLoading || !targetOpId}
+                    >
+                      {isStreamLoading ? 'Updating...' : (isStreamEnabled ? 'Disable SARStream' : 'Enable SARStream')}
+                    </button>
+                )}
+                </div>
               </div>
             </div>
 
-            <div className="timing-row" style={{ gap: 'var(--space-md)' }}>
+            <div className="timing-row" style={{ display: 'flex', gap: 'var(--space-md)', alignItems: 'flex-end' }}>
               <div className="form-field">
                 <label className="form-label" htmlFor="op_start">OP Start Date / Time</label>
                 <input
@@ -910,16 +972,18 @@ const IncidentEditPage = () => {
               </div>
 
               {existingId && (
-                <div className="form-field">
-                  <label className="form-label" htmlFor="op_end">OP End Date / Time</label>
-                  <input
-                    id="op_end"
-                    type="datetime-local"
-                    className="form-input"
-                    value={operationalPeriod.end_datetime}
-                    onChange={(e) => handleOperationalPeriodChange('end_datetime', e.target.value)}
-                  />
-                </div>
+                <>
+                  <div className="form-field">
+                    <label className="form-label" htmlFor="op_end">OP End Date / Time</label>
+                    <input
+                      id="op_end"
+                      type="datetime-local"
+                      className="form-input"
+                      value={operationalPeriod.end_datetime}
+                      onChange={(e) => handleOperationalPeriodChange('end_datetime', e.target.value)}
+                    />
+                  </div>
+                </>
               )}
             </div>
             

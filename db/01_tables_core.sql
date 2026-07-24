@@ -28,6 +28,8 @@ CREATE TABLE operational_periods (
   situation_narrative TEXT,
   situational_awareness_narrative TEXT,
   par_check_interval INTEGER DEFAULT 60,
+  sarstream_enabled BOOLEAN DEFAULT FALSE,
+  sarstream_data JSONB,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT unique_op_number_per_incident UNIQUE (incident_id, op_number)

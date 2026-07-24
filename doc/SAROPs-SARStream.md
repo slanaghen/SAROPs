@@ -4,7 +4,7 @@ SARStream provides live video streaming and session management capabilities inte
 
 ---
 
-## 1. Feature Overview
+## 1. Feature Overview & Design Decisions
 
 SARStream allows Incident Commanders and Staff to initialize a secure live video session for an active incident. When enabled, a "Live Feed" link becomes available in the application's top banner menu for all authenticated personnel.
 
@@ -14,9 +14,9 @@ SARStream allows Incident Commanders and Staff to initialize a secure live video
 
 1.  **Activation**: A Staff member or Admin toggles the **SARStream** checkbox on the **Incident Management** page (`/incident`).
 2.  **Initialization**: The application automatically performs a `POST` request to the SARStream API.
-3.  **Persistence**: The resulting session metadata (including the view URL) is saved to the `sarstream_data` field of the `incidents` table in Supabase.
+3.  **Persistence**: The resulting session metadata (including the view URL) is saved to the `sarstream_data` field of the `operational_periods` table in Supabase.
 4.  **Access**: Once active, a "Live Feed" link appears in the global banner menu for all users currently checked into the incident.
-5.  **Termination**: If the toggle is turned off, or if the incident is ended, the session metadata is cleared.
+5.  **Termination**: If the toggle is turned off, or if the incident is ended, the session metadata (`sarstream_data`) is set to `NULL` and the `sarstream_enabled` flag is set to `false`.
 
 ---
 
@@ -27,8 +27,13 @@ SARStream allows Incident Commanders and Staff to initialize a secure live video
 *   **Method**: `POST`
 *   **Authentication**: Custom Header `X-API-Key` using the `VITE_SARSTREAM_API_KEY` environment variable.
 
+### Frontend API (Supabase Edge Function)
+*   **Invocation Path**: `/functions/v1/sarstream-proxy`
+*   **Method**: `POST`
+*   **Authentication**: The client must use the authenticated Supabase client to invoke the function, which passes the user's JWT for server-side validation.
+
 ### Request Payload
-The request is sent with `Content-Type: application/json`:
+The client sends the following payload to the Supabase Edge Function:
 ```json
 {
   "requester": "SAROPs",
