@@ -12,7 +12,7 @@ const OperationsTable = ({
   onStatusUpdate,
   onResetPar,
   onUnassignTeam,
-  onReleaseTeam,
+  onDisbandTeam,
   onDeleteAssignment,
   onEditTeam,
   onEditAssignment,
@@ -233,7 +233,7 @@ const OperationsTable = ({
                   else if (act === 'edit') row.teamId ? onEditTeam(row.teamId) : onEditAssignment(row.assignmentId);
                   else if (act === 'new-team') onNewTeam(row.assignmentId);
                   else if (act === 'new-assignment') onNewAssignment(row.teamId);
-                  else if (act === 'detach') onReleaseTeam(row.teamId, row.teamName);
+                  else if (act === 'detach') onDisbandTeam(row.teamId, row.teamName);
                   else if (act === 'delete') onDeleteAssignment(row.assignmentId, row.assignmentName);
                 }}>
                   <option value="" disabled>Actions...</option>

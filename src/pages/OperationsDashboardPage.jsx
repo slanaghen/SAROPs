@@ -23,8 +23,8 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   const {
     teams, assignments, responders, vehicles, opPeriod, loading, error, setError, setLoading, stats,
     fetchDashboardData, updateResourceStatus, assignTeamToAssignment, unassignTeam,
-    createTeam, createAssignment, deleteAssignment, deleteTeam,
-    detachTeam: disbandTeam, updateTeam, updateAssignment,
+    createTeam, createAssignment, deleteAssignment,
+    disbandTeam, updateTeam, updateAssignment,
     attachResponderToTeam, detachResponderFromTeam
   } = usePlanningDashboard(supabase, operationalPeriodId);
 
@@ -45,7 +45,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   const [draggedItem, setDraggedItem] = useState(null); // { id, type }
   const [viewMode, setViewMode] = useState(() => localStorage.getItem('sarops_view_mode') || 'All'); 
   const [dropTarget, setDropTarget] = useState(null); // { id, type }
-  const [assigningRow, setAssigningRow] = useState(null); // Stores the row object being manually assigned
+  const [assigningRow, setAssigningRow] = useState(null);
   const [selectedAssignTarget, setSelectedAssignTarget] = useState('');
   const [showBroadcastModal, setShowBroadcastModal] = useState(false);
   const [broadcastMessage, setBroadcastMessage] = useState('');
@@ -272,32 +272,6 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       await fetchDashboardData();
     } catch (err) {
       setError(err.message || 'Failed to reset PAR');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  /**
-   * Manually detach a staged team
-   */
-  const handleDisbandTeam = async (teamId, teamName, teamType) => {
-    const team = teams.find(t => t.team_id === teamId);
-    if (team?.status === 'Deployed') {
-      alert(`Cannot disband team "${teamName}" while it is Deployed.`);
-      return;
-    }
-    if (!window.confirm(`Disband "${teamName}"? Members will be released back to staging, but the team record will remain for logs.`)) return;
-
-    try {
-      setLoading(true);
-      // Update team status - Redundant responder status updates removed.
-      // The database trigger 'sync_team_status_on_team_update' automatically 
-      // handles releasing responders to "Staged" and closing history logs.
-      await supabase.from('teams').update({ status: 'Disbanded', last_par_check: null }).eq('team_id', teamId);
-      await recordAction(`Disbanded team "${teamName}" (ID: ${teamId}, Type: ${teamType}). Fields modified: status="Disbanded", last_par_check=null. All members released back to "Staged" status.`);
-      await fetchDashboardData();
-    } catch (err) {
-      setError(err.message || 'Failed to disband team');
     } finally {
       setLoading(false);
     }
@@ -606,12 +580,12 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     }
   };
 
-  const handleReleaseTeam = async (teamId, teamName) => {
-    const msg = `Are you sure you want to release "${teamName}"? This will return all members to Staged status and delete the team record.`;
+  const handleDisbandTeam = async (teamId, teamName) => {
+    const msg = `Are you sure you want to disband team "${teamName}"? This will return all members to Staged status.`;
     if (!window.confirm(msg)) return;
 
     try {
-      await deleteTeam(teamId);
+      await disbandTeam(teamId);
     } catch (err) {
        // Error handled by hook
     }
@@ -715,7 +689,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
               parInterval={parInterval}
               onStatusUpdate={(asnId, teamId, status) => handleStatusUpdate(asnId, teamId, status)}
               onResetPar={handleResetPar} onUnassignTeam={handleUnassignTeam}
-              onEditTeam={(id) => openEditTeamForm(teamById[id])} onReleaseTeam={handleReleaseTeam}
+              onEditTeam={(id) => openEditTeamForm(teamById[id])} onReleaseTeam={handleDisbandTeam}
               openNewTeamForm={openNewTeamForm}
               openNewAssignmentForm={openNewAssignmentForm}
               onEditAssignment={(id) => openEditAssignmentForm(assignmentById[id])}

@@ -52,6 +52,12 @@ export const useTeamActions = ({
       // The `ensure_leader_is_member` trigger handles the leader. Now, attach the other members.
       if (teamPayload.responder_ids?.length > 0) await Promise.all(teamPayload.responder_ids.map(id => attachResponderToTeam(id, data.team_id, teamPayload.responder_roles?.[id])));
 
+      // Requirement: Attach selected vehicles to the new team.
+      if (vehicleIds?.length > 0) {
+        console.log(`[useTeamActions] createTeam: Attaching vehicles to new team ${data.team_id}:`, vehicleIds);
+        await supabaseClient.from('vehicles').update({ team_id: data.team_id, status: 'Attached' }).in('vehicle_id', vehicleIds);
+      }
+
       // Fetch fresh names from DB to ensure they are known before logging
       let membersInfo = '';
       if (teamPayload.responder_ids?.length) {
@@ -100,7 +106,7 @@ export const useTeamActions = ({
 
       const { data: teamData } = await supabaseClient.from('teams').select('team_name_number').eq('team_id', teamId).single();
       await supabaseClient.from('teams').update({ status: 'Disbanded', last_par_check: null }).eq('team_id', teamId);
-      await recordAction(`Disbanded team "${teamData?.team_name_number || 'Unknown'}".`);
+      await recordAction(`Disbanded team "${teamData?.team_name_number || 'Unknown'}". All members returned to Staged.`);
       await fetchDashboardData();
       return { success: true };
     } catch (err) {

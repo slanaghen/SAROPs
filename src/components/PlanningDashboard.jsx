@@ -62,8 +62,8 @@ const PlanningDashboard = ({
   const [teamFilter, setTeamFilter] = useState('');
   const [assignmentFilter, setAssignmentFilter] = useState('');
   const [viewMode, setViewMode] = useState(() => localStorage.getItem('sarops_view_mode') || 'All');
-  const [draggedItem, setDraggedItem] = useState(null); // { id, type }
-  const [dropTarget, setDropTarget] = useState(null); // { id, type }
+  const [draggedItem, setDraggedItem] = useState(null);
+  const [dropTarget, setDropTarget] = useState(null);
 
   // Define helper functions before they are used in useMemo hooks to avoid initialization errors
   const getResponderName = (responderId) => {
