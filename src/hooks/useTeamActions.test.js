@@ -27,7 +27,7 @@ describe('useTeamActions Cascading Logic', () => {
     }));
 
     await act(async () => {
-      await result.current.detachTeam('t1');
+      await result.current.disbandTeam('t1');
     });
 
     // Verify Assignment Orphaning: assignments NOT completed should become orphaned
@@ -36,33 +36,20 @@ describe('useTeamActions Cascading Logic', () => {
     }));
     expect(mockTableChains.assignments.not).toHaveBeenCalledWith('status', 'in', '("Completed")');
 
-    // Verify Responder Release
-    expect(mockTableChains.responders.update).toHaveBeenCalledWith({ status: 'Staged' });
-
-    // Verify History Closure
-    expect(mockTableChains.responder_team_history.update).toHaveBeenCalledWith(expect.objectContaining({
-      detached_datetime: expect.any(String)
-    }));
-
     // Verify Team Disbanding
     expect(mockTableChains.teams.update).toHaveBeenCalledWith(expect.objectContaining({
       status: 'Disbanded'
     }));
+    // NOTE: Responder status and history are now handled by database triggers,
+    // so we no longer test for client-side updates to those tables here.
   });
 
   it('idempotently attaches a responder to a team', async () => {
-    const mockTableChains = {
-      team_responders: globalThis.createSupabaseQueryMock({ team_id: 't1' }), // Simulate existing record
-      responders: globalThis.createSupabaseQueryMock({})
-    };
-
-    const mockSupabase = {
-      from: vi.fn((table) => mockTableChains[table])
-    };
+    const mockTeamRespondersTable = globalThis.createSupabaseQueryMock({});
+    const mockSupabase = { from: vi.fn(() => mockTeamRespondersTable) };
 
     const { result } = renderHook(() => useTeamActions({
       supabaseClient: mockSupabase,
-      fetchDashboardData: vi.fn(),
       setLoading: vi.fn(),
       setError: vi.fn()
     }));
@@ -71,33 +58,27 @@ describe('useTeamActions Cascading Logic', () => {
       await result.current.attachResponderToTeam('r1', 't1', 'Medic');
     });
 
-    // Should have checked if membership exists
-    expect(mockTableChains.team_responders.match).toHaveBeenCalledWith({ team_id: 't1', responder_id: 'r1' });
-    // Should update the role and status regardless of whether insert was needed
-    expect(mockTableChains.team_responders.update).toHaveBeenCalledWith({ role: 'Medic' });
+    // Verify that upsert is used to handle both new and existing memberships efficiently,
+    // and that the responder's status change is correctly handled by a database trigger.
+    expect(mockTeamRespondersTable.upsert).toHaveBeenCalledWith(
+      { team_id: 't1', responder_id: 'r1', role: 'Medic' },
+      { onConflict: 'team_id, responder_id' }
+    );
   });
 
-  it('detaches a responder from a team and reverts their operational status', async () => {
-    const mockRespondersTable = globalThis.createSupabaseQueryMock({});
-    const mockSupabase = {
-      from: vi.fn((table) => {
-        if (table === 'responders') return mockRespondersTable;
-        return globalThis.createSupabaseQueryMock({});
-      })
-    };
+  it('detaches a responder from a team', async () => {
+    const mockTeamRespondersTable = globalThis.createSupabaseQueryMock({});
+    const mockSupabase = { from: vi.fn(() => mockTeamRespondersTable) };
 
-    const { result } = renderHook(() => useTeamActions({
-      supabaseClient: mockSupabase,
-      fetchDashboardData: vi.fn(),
-      setLoading: vi.fn(),
-      setError: vi.fn()
-    }));
+    const { result } = renderHook(() => useTeamActions({ supabaseClient: mockSupabase, setLoading: vi.fn(), setError: vi.fn() }));
 
     await act(async () => {
       await result.current.detachResponderFromTeam('r1', 't1');
     });
 
-    expect(mockRespondersTable.update).toHaveBeenCalledWith({ status: 'Staged' });
-    expect(mockRespondersTable.eq).toHaveBeenCalledWith('responder_id', 'r1');
+    // Verify the correct record is deleted from the junction table.
+    // The responder's status change is handled by a database trigger.
+    expect(mockTeamRespondersTable.delete).toHaveBeenCalled();
+    expect(mockTeamRespondersTable.match).toHaveBeenCalledWith({ team_id: 't1', responder_id: 'r1' });
   });
 });

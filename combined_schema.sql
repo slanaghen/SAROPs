@@ -390,7 +390,8 @@ BEGIN
 
     INSERT INTO assignments (op_period_id, title, resource_type, status, team_id)
     VALUES (NEW.op_period_id, 'Command Staff', 'Staff', 'Deployed', _team_id)
-    ON CONFLICT (op_period_id, sartopo_id) DO UPDATE SET team_id = EXCLUDED.team_id;
+    ON CONFLICT (op_period_id, title) WHERE (sartopo_id IS NULL)
+    DO UPDATE SET team_id = EXCLUDED.team_id, updated_at = CURRENT_TIMESTAMP;
 
     RETURN NEW;
 END;
@@ -432,7 +433,9 @@ BEGIN
     
     SELECT tr.team_id, t.status, (t.type = 'Staff') INTO _team_id, _team_status, is_staff
     FROM team_responders tr JOIN teams t ON tr.team_id = t.team_id
-    WHERE tr.responder_id = _responder_id AND t.status != 'Disbanded' LIMIT 1;
+    WHERE tr.responder_id = _responder_id AND t.status != 'Disbanded'
+    ORDER BY (t.type = 'Staff') ASC -- Prioritize tactical teams over the Staff team for status
+    LIMIT 1;
 
     is_staff := COALESCE(is_staff, false);
     target_access := CASE WHEN is_staff THEN 'staff'::access_level ELSE 'responder'::access_level END;
@@ -724,89 +727,14 @@ BEGIN
 END;
 $func$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Logging: Team Membership
-CREATE OR REPLACE FUNCTION trigger_log_team_membership_change()
+-- Function to ensure the team leader is always a member of the team
+CREATE OR REPLACE FUNCTION ensure_leader_is_member()
 RETURNS TRIGGER AS $func$
-DECLARE
-    _incident_id TEXT;
-    _responder_name TEXT;
-    _team_name TEXT;
-    _user_name TEXT;
 BEGIN
-    -- Get context and names
-    SELECT op.incident_id, t.team_name_number INTO _incident_id, _team_name
-    FROM teams t JOIN operational_periods op ON t.op_period_id = op.op_period_id
-    WHERE t.team_id = COALESCE(NEW.team_id, OLD.team_id);
-
-    SELECT name INTO _responder_name FROM responders WHERE responder_id = COALESCE(NEW.responder_id, OLD.responder_id);
-    
-    SELECT COALESCE(name, username, 'System') INTO _user_name FROM users 
-    WHERE email = (SELECT email FROM auth.users WHERE id = auth.uid());
-
-    IF TG_OP = 'INSERT' THEN
-        INSERT INTO action_logs (incident_id, action, user_name)
-        VALUES (_incident_id, format('Responder "%s" joined team "%s" (Role: %s)', _responder_name, _team_name, COALESCE(NEW.role, 'Member')), COALESCE(_user_name, 'System'));
-    ELSIF TG_OP = 'DELETE' THEN
-        INSERT INTO action_logs (incident_id, action, user_name)
-        VALUES (_incident_id, format('Responder "%s" left team "%s"', _responder_name, _team_name), COALESCE(_user_name, 'System'));
-    END IF;
-    RETURN NULL;
-END;
-$func$ LANGUAGE plpgsql SECURITY DEFINER;
-
--- Logging: Vehicle Assignments
-CREATE OR REPLACE FUNCTION trigger_log_vehicle_team_change()
-RETURNS TRIGGER AS $func$
-DECLARE
-    _team_name TEXT;
-    _user_name TEXT;
-BEGIN
-    SELECT COALESCE(name, username, 'System') INTO _user_name FROM users 
-    WHERE email = (SELECT email FROM auth.users WHERE id = auth.uid());
-
-    IF (TG_OP = 'UPDATE' AND OLD.team_id IS DISTINCT FROM NEW.team_id) OR (TG_OP = 'INSERT' AND NEW.team_id IS NOT NULL) THEN
-        IF NEW.team_id IS NOT NULL THEN
-            SELECT team_name_number INTO _team_name FROM teams WHERE team_id = NEW.team_id;
-            INSERT INTO action_logs (incident_id, action, user_name)
-            VALUES (NEW.incident_id, format('Vehicle "%s" attached to team "%s"', NEW.designation, _team_name), COALESCE(_user_name, 'System'));
-        ELSIF OLD.team_id IS NOT NULL THEN
-            SELECT team_name_number INTO _team_name FROM teams WHERE team_id = OLD.team_id;
-            INSERT INTO action_logs (incident_id, action, user_name)
-            VALUES (NEW.incident_id, format('Vehicle "%s" detached from team "%s"', NEW.designation, _team_name), COALESCE(_user_name, 'System'));
-        END IF;
-    END IF;
-    RETURN NEW;
-END;
-$func$ LANGUAGE plpgsql SECURITY DEFINER;
-
--- Logging: Team Tasking
-CREATE OR REPLACE FUNCTION trigger_log_assignment_team_change()
-RETURNS TRIGGER AS $func$
-DECLARE
-    _incident_id TEXT;
-    _team_name TEXT;
-    _user_name TEXT;
-BEGIN
-    SELECT incident_id INTO _incident_id FROM operational_periods WHERE op_period_id = NEW.op_period_id;
-    
-    SELECT COALESCE(name, username, 'System') INTO _user_name FROM users 
-    WHERE email = (SELECT email FROM auth.users WHERE id = auth.uid());
-
-    IF (TG_OP = 'UPDATE' AND OLD.team_id IS DISTINCT FROM NEW.team_id) OR (TG_OP = 'INSERT' AND NEW.team_id IS NOT NULL) THEN
-        IF NEW.team_id IS NOT NULL THEN
-            SELECT team_name_number INTO _team_name FROM teams WHERE team_id = NEW.team_id;
-            INSERT INTO action_logs (incident_id, action, user_name)
-            VALUES (_incident_id, format('Team "%s" tasked to assignment "%s"', _team_name, NEW.title), COALESCE(_user_name, 'System'));
-        ELSIF OLD.team_id IS NOT NULL THEN
-            SELECT team_name_number INTO _team_name FROM teams WHERE team_id = OLD.team_id;
-            INSERT INTO action_logs (incident_id, action, user_name)
-            VALUES (_incident_id, format('Team "%s" unassigned from "%s"', _team_name, NEW.title), COALESCE(_user_name, 'System'));
-        END IF;
-    END IF;
-
-    IF (TG_OP = 'UPDATE' AND OLD.status IS DISTINCT FROM NEW.status) THEN
-        INSERT INTO action_logs (incident_id, action, user_name)
-        VALUES (_incident_id, format('Assignment "%s" status changed to %s', NEW.title, NEW.status), COALESCE(_user_name, 'System'));
+    IF NEW.leader_responder_id IS NOT NULL THEN
+        INSERT INTO team_responders (team_id, responder_id, role)
+        VALUES (NEW.team_id, NEW.leader_responder_id, CASE WHEN NEW.type = 'Staff' THEN 'Incident Commander' ELSE 'Team Leader' END)
+        ON CONFLICT (team_id, responder_id) DO UPDATE SET role = EXCLUDED.role;
     END IF;
     RETURN NEW;
 END;
@@ -823,7 +751,7 @@ CREATE TRIGGER ensure_staff_team_on_new_op AFTER INSERT ON operational_periods F
 CREATE TRIGGER trigger_first_responder_ic_check AFTER INSERT ON responders FOR EACH ROW EXECUTE FUNCTION auto_assign_first_responder_as_ic();
 CREATE TRIGGER trigger_sync_assignment_team_size BEFORE INSERT OR UPDATE OF team_id ON assignments FOR EACH ROW EXECUTE FUNCTION sync_assignment_team_size();
 CREATE TRIGGER trigger_sync_assignment_size_from_membership AFTER INSERT OR UPDATE OR DELETE ON team_responders FOR EACH ROW EXECUTE FUNCTION sync_assignment_size_on_membership_change();
-CREATE TRIGGER trigger_sync_team_status_from_assignment AFTER INSERT OR UPDATE OF status ON assignments FOR EACH ROW EXECUTE FUNCTION sync_team_status_on_assignment_update();
+CREATE TRIGGER trigger_sync_team_status_from_assignment AFTER INSERT OR UPDATE OF status, team_id ON assignments FOR EACH ROW EXECUTE FUNCTION sync_team_status_on_assignment_update();
 
 -- Status Synchronization
 CREATE TRIGGER trigger_sync_vehicle_status_on_team_link BEFORE UPDATE OF team_id ON vehicles FOR EACH ROW EXECUTE FUNCTION sync_vehicle_status_on_team_link();
@@ -844,18 +772,8 @@ BEFORE UPDATE OF status ON teams FOR EACH ROW EXECUTE FUNCTION validate_team_act
 CREATE TRIGGER trigger_check_team_leader_membership
 BEFORE INSERT OR UPDATE OF leader_responder_id ON teams FOR EACH ROW EXECUTE FUNCTION validate_team_leader_membership();
 
--- Action Logging Triggers
-CREATE TRIGGER trigger_log_team_membership
-AFTER INSERT OR DELETE ON team_responders
-FOR EACH ROW EXECUTE FUNCTION trigger_log_team_membership_change();
-
-CREATE TRIGGER trigger_log_vehicle_team_assignment
-AFTER INSERT OR UPDATE OF team_id ON vehicles
-FOR EACH ROW EXECUTE FUNCTION trigger_log_vehicle_team_change();
-
-CREATE TRIGGER trigger_log_assignment_team_assignment
-AFTER INSERT OR UPDATE OF team_id, status ON assignments
-FOR EACH ROW EXECUTE FUNCTION trigger_log_assignment_team_change();-- Enable RLS on all tables
+CREATE TRIGGER trigger_ensure_leader_is_member
+AFTER INSERT OR UPDATE OF leader_responder_id ON teams FOR EACH ROW EXECUTE FUNCTION ensure_leader_is_member();-- Enable RLS on all tables
 ALTER TABLE incidents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE responders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE operational_periods ENABLE ROW LEVEL SECURITY;
@@ -866,6 +784,8 @@ ALTER TABLE team_responders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE action_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE team_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE vehicles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE responder_team_history ENABLE ROW LEVEL SECURITY;
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 
 -- RLS HELPERS
 CREATE OR REPLACE FUNCTION is_anonymous_responder()
@@ -939,8 +859,13 @@ $func$ LANGUAGE sql STABLE SECURITY DEFINER;
 
 CREATE OR REPLACE FUNCTION is_incident_active(_incident_id TEXT)
 RETURNS BOOLEAN AS $func$
-  SELECT EXISTS (SELECT 1 FROM incidents WHERE incident_id = _incident_id AND end_datetime IS NULL);
-$func$ LANGUAGE sql STABLE SECURITY DEFINER;
+BEGIN
+  RETURN EXISTS (
+    SELECT 1 FROM incidents 
+    WHERE incident_id = _incident_id AND end_datetime IS NULL
+  );
+END;
+$func$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
 
 CREATE OR REPLACE FUNCTION is_active_op_period(_op_period_id UUID)
 RETURNS BOOLEAN AS $func$
@@ -956,12 +881,12 @@ RETURNS BOOLEAN AS $func$
 $func$ LANGUAGE sql STABLE SECURITY DEFINER;
 
 -- POLICIES: Incidents
-CREATE POLICY "Visible to all authenticated" ON incidents FOR SELECT TO authenticated USING (TRUE);
+CREATE POLICY "Visible to everyone" ON incidents FOR SELECT TO anon, authenticated USING (TRUE);
 CREATE POLICY "Admins manage incidents" ON incidents FOR ALL TO authenticated USING (check_is_operational_staff());
 CREATE POLICY "Allow all authenticated to start an incident" ON incidents FOR INSERT TO authenticated WITH CHECK (TRUE);
 
 -- POLICIES: Operational Periods
-CREATE POLICY "Visible to all authenticated" ON operational_periods FOR SELECT TO authenticated USING (TRUE);
+CREATE POLICY "Visible to everyone" ON operational_periods FOR SELECT TO anon, authenticated USING (TRUE);
 CREATE POLICY "Admins manage OPs" ON operational_periods FOR ALL TO authenticated USING (check_is_operational_staff());
 CREATE POLICY "Allow all authenticated to create OPs" ON operational_periods FOR INSERT TO authenticated WITH CHECK (TRUE);
 
@@ -1019,6 +944,15 @@ CREATE POLICY "Allow team members to update their assignment" ON assignments
 -- POLICIES: Messaging
 CREATE POLICY "View relevant messages" ON team_messages FOR SELECT TO authenticated 
   USING (team_id IN (SELECT team_id FROM team_responders WHERE responder_id = get_my_responder_id()) OR check_is_operational_staff());
+CREATE POLICY "Allow all authenticated to insert messages to their team or staff" ON team_messages
+  FOR INSERT TO authenticated 
+  WITH CHECK (
+    is_member_of_team(team_id) 
+    OR EXISTS (SELECT 1 FROM teams WHERE team_id = team_messages.team_id AND type = 'Staff') 
+    OR check_is_operational_staff()
+  );
+CREATE POLICY "Admins/Staff can manage all team messages" ON team_messages
+  FOR ALL TO authenticated USING (check_is_operational_staff()) WITH CHECK (check_is_operational_staff());
 
 -- POLICIES: Action Logs
 CREATE POLICY "Visible to relevant responders" ON action_logs FOR SELECT TO authenticated
@@ -1030,7 +964,9 @@ CREATE POLICY "Allow all authenticated to record action logs in active incidents
   WITH CHECK (is_incident_active(incident_id));
 
 -- POLICIES: Users (Staff Only)
-CREATE POLICY "Staff view users" ON users FOR SELECT TO authenticated USING (check_is_operational_staff());
+-- Allow users to view their own profile, and staff/admins to view all users
+CREATE POLICY "Allow authenticated to view own profile" ON users FOR SELECT TO authenticated USING (auth.jwt() ->> 'email' = users.email OR check_is_operational_staff());
+CREATE POLICY "Admins can manage all users" ON users FOR ALL TO authenticated USING (check_is_operational_staff()) WITH CHECK (check_is_operational_staff());
 
 -- POLICIES: Clues
 CREATE POLICY "View clues in incident" ON clues 
@@ -1044,6 +980,8 @@ CREATE POLICY "Allow anonymous to insert clues" ON clues
 CREATE POLICY "Allow authenticated to view their own team history" ON responder_team_history
   FOR SELECT TO authenticated 
   USING (responder_id IN (SELECT responder_id FROM responders WHERE auth_uid = auth.uid()));
+CREATE POLICY "Admins/Staff can manage all team history" ON responder_team_history
+  FOR ALL TO authenticated USING (check_is_operational_staff()) WITH CHECK (check_is_operational_staff());
 
 -- POLICIES: Team Responders (Junction Table)
 CREATE POLICY "Allow authenticated to view active team memberships" ON team_responders
@@ -1057,9 +995,6 @@ CREATE POLICY "Allow authenticated to leave teams" ON team_responders
 CREATE POLICY "Admins/Staff can manage all team memberships" ON team_responders
   FOR ALL TO authenticated USING (check_is_operational_staff()) WITH CHECK (check_is_operational_staff());-- Suppress "does not exist" notices during the cleanup phase
 SET client_min_messages TO warning;
-
--- Force PostgREST to reload the schema cache to recognize dropped columns
-NOTIFY pgrst, 'reload schema';
 
 -- Ensure a clean slate for checkin_responder_securely to avoid "function name not unique" errors
 DROP FUNCTION IF EXISTS checkin_responder_securely(TEXT, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT); -- Old 12-parameter version (with p_vehicles)
@@ -1282,4 +1217,169 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
-GRANT EXECUTE ON FUNCTION reinitialize_database TO authenticated;
+GRANT EXECUTE ON FUNCTION reinitialize_database TO authenticated;CREATE OR REPLACE FUNCTION public.seed_data_specific()
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER -- Runs with elevated permissions to bypass RLS for development seeding
+AS $$
+DECLARE
+    latest_incident_id TEXT;
+    latest_op_id UUID;
+    incident_start_time TIMESTAMP WITH TIME ZONE;
+    assigned_responder_auth_uid UUID;
+BEGIN
+    -- 1. Identify the most recently created incident and operational period
+    SELECT incident_id, start_datetime INTO latest_incident_id, incident_start_time
+    FROM incidents
+    ORDER BY created_at DESC
+    LIMIT 1;
+
+    -- 1a. Fallback: Create a default incident and OP if none exist
+    IF latest_incident_id IS NULL THEN
+        latest_incident_id := 'DEV-' || TO_CHAR(NOW(), 'YYYYMMDD-HH24MI');
+        incident_start_time := NOW();
+        INSERT INTO incidents (incident_id, name, number, start_datetime)
+        VALUES (latest_incident_id, 'Development Seed Incident', latest_incident_id, incident_start_time)
+        ON CONFLICT (incident_id) DO NOTHING;
+    END IF;
+
+    SELECT op_period_id INTO latest_op_id
+    FROM operational_periods
+    WHERE incident_id = latest_incident_id
+    ORDER BY created_at DESC
+    LIMIT 1;
+
+    IF latest_op_id IS NULL THEN
+        latest_op_id := gen_random_uuid();
+        INSERT INTO operational_periods (op_period_id, incident_id, op_number, start_datetime)
+        VALUES (latest_op_id, latest_incident_id, 1, incident_start_time)
+        ON CONFLICT (incident_id, op_number) DO NOTHING;
+    END IF;
+
+    -- 2. Identify the auth_uid for testing (Current user or latest Assigned responder)
+    assigned_responder_auth_uid := auth.uid();
+
+    IF assigned_responder_auth_uid IS NULL THEN
+    SELECT auth_uid INTO assigned_responder_auth_uid
+    FROM responders
+    WHERE status = 'Assigned' AND auth_uid IS NOT NULL
+    ORDER BY created_at DESC
+    LIMIT 1;
+    END IF;
+
+    -- Clean up previous seed data for this incident to ensure idempotency
+    DELETE FROM assignments WHERE op_period_id = latest_op_id AND title = 'Medical Standby';
+    DELETE FROM responders WHERE incident_id = latest_incident_id AND (
+        identifier LIKE 'ID-10%' OR identifier = 'K9-302' OR identifier = 'PILOT-14'
+    );
+
+    -- 3. Create 15 assignments with descriptions, types, and TAC channels
+    INSERT INTO assignments (op_period_id, title, description, resource_type, frequency_primary, status, origin)
+    VALUES
+    --(latest_op_id, 'Hasty 1', 'Rapid sweep of primary trail corridor', 'Hasty', 'TAC 1', 'Planned', 'SAROps'),
+    --(latest_op_id, 'Hasty 2', 'Rapid sweep of north creek bed', 'Hasty', 'TAC 1', 'Planned', 'SAROps'),
+    --(latest_op_id, 'Grid Alpha', 'Thorough grid search of Sector 1', 'Ground', 'TAC 2', 'Planned', 'SAROps'),
+    --(latest_op_id, 'Grid Beta', 'Thorough grid search of Sector 2', 'Ground', 'TAC 2', 'Planned', 'SAROps'),
+    --(latest_op_id, 'Grid Gamma', 'Thorough grid search of Sector 3', 'Ground', 'TAC 2', 'Planned', 'SAROps'),
+    --(latest_op_id, 'K9 Block A', 'Area search of high-probability block A', 'Dog', 'TAC 3', 'Planned', 'SAROps'),
+    --(latest_op_id, 'K9 Block B', 'Area search of high-probability block B', 'Dog', 'TAC 3', 'Planned', 'SAROps'),
+    --(latest_op_id, 'UAS Recon 1', 'Thermal scan of ridge line and cliffs', 'Other', 'UAV-DATA', 'Planned', 'SAROps'),
+    --(latest_op_id, 'Road Patrol North', 'Vehicle patrol of Hwy 40 North', 'Vehicle', 'ROAD-BASE', 'Planned', 'SAROps'),
+    --(latest_op_id, 'Road Patrol South', 'Vehicle patrol of Hwy 40 South', 'Vehicle', 'ROAD-BASE', 'Planned', 'SAROps'),
+    --(latest_op_id, 'Water Recon', 'Shoreline inspection of reservoir', 'Water', 'MARINE 1', 'Planned', 'SAROps'),
+    --(latest_op_id, 'Tracking 1', 'Sign cutting at Last Known Point', 'Tracking', 'TAC 4', 'Planned', 'SAROps'),
+    --(latest_op_id, 'Summit Relay', 'Establish radio relay at Peak 10', 'Other', 'TAC 5', 'Planned', 'SAROps'),
+    --(latest_op_id, 'LZ Preparation', 'Clear and mark helicopter landing zone Alpha', 'Helicopter', 'AIR-GUARD', 'Planned', 'SAROps'),
+    (latest_op_id, 'Medical Standby', 'Medical and logistics support at Base', 'Medical', 'EMS-LINK', 'Planned', 'SAROps');
+
+    -- 4. Create 31 responders (1 Dog, 1 UAS, 29 general)
+    -- All associated with the most recently created incident and sharing the same auth_uid.
+
+    -- Dog Handler
+    -- This is idempotent and will not error on subsequent runs
+    INSERT INTO responders (name, incident_id, agency, identifier, device_id, special_skills, checkin_datetime, status, auth_uid)
+    VALUES (
+        'Sarah Miller (K9)',
+        latest_incident_id,
+        'K9 Search Unit',
+        'K9-302',
+        'dev_k9_' || latest_incident_id || '_' || substr(md5(random()::text), 1, 4),
+        'Air Scent Dog',
+        incident_start_time,
+        'Staged',
+        assigned_responder_auth_uid
+    )
+    ON CONFLICT (device_id) DO NOTHING;
+
+    -- UAS Pilot
+    INSERT INTO responders (name, incident_id, agency, identifier, device_id, special_skills, checkin_datetime, status, auth_uid)
+    VALUES (
+        'James Chen (UAS)',
+        latest_incident_id,
+        'UAS Response',
+        'PILOT-14',
+        'dev_uas_' || latest_incident_id || '_' || substr(md5(random()::text), 1, 4),
+        'UAS',
+        incident_start_time,
+        'Staged',
+        assigned_responder_auth_uid
+    )
+    ON CONFLICT (device_id) DO NOTHING;
+
+    -- 29 General Responders
+    FOR i IN 1..29 LOOP
+        INSERT INTO responders (name, incident_id, agency, identifier, device_id, checkin_datetime, status, auth_uid)
+        VALUES (
+            'Responder ' || i,
+            latest_incident_id,
+            'County SAR',
+            'ID-' || (1000 + i),
+            'dev_res_' || i || '_' || latest_incident_id || '_' || substr(md5(random()::text), 1, 4),
+            incident_start_time,
+            'Staged',
+            assigned_responder_auth_uid
+        )
+        ON CONFLICT (device_id) DO NOTHING;
+    END LOOP;
+
+    RAISE NOTICE 'Success: Seeded 15 assignments and 31 responders for Incident % (OP %).', latest_incident_id, latest_op_id;
+END;
+$$;
+
+-- Grant access to authenticated and anonymous users
+GRANT EXECUTE ON FUNCTION public.seed_data_specific() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.seed_data_specific() TO anon;-- SAROps Data Reset Script
+-- This script clears all operational data (Incidents, Teams, Responders, etc.)
+-- while preserving the 'users' table (System Admin/Staff accounts).
+
+CREATE OR REPLACE FUNCTION public.clear_data()
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER -- Runs with elevated permissions to bypass RLS for data clearing
+AS $$
+BEGIN
+-- Temporarily disable triggers to allow for a clean bulk truncation.
+-- This prevents sync triggers from attempting to update related rows that are being deleted.
+SET session_replication_role = 'replica';
+
+  TRUNCATE TABLE 
+      team_messages,
+      action_logs,
+      team_responders,
+      clues,
+      responder_team_history,
+      assignments,
+      vehicles,
+      teams,
+      operational_periods,
+      responders,
+      incidents
+  RESTART IDENTITY CASCADE;
+
+-- Restore trigger behavior
+SET session_replication_role = 'origin';
+END;
+$$;
+
+-- Grant access to authenticated users to execute this function
+GRANT EXECUTE ON FUNCTION public.clear_data() TO authenticated;

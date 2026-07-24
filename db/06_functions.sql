@@ -84,7 +84,9 @@ BEGIN
     
     SELECT tr.team_id, t.status, (t.type = 'Staff') INTO _team_id, _team_status, is_staff
     FROM team_responders tr JOIN teams t ON tr.team_id = t.team_id
-    WHERE tr.responder_id = _responder_id AND t.status != 'Disbanded' LIMIT 1;
+    WHERE tr.responder_id = _responder_id AND t.status != 'Disbanded'
+    ORDER BY (t.type = 'Staff') ASC -- Prioritize tactical teams over the Staff team for status
+    LIMIT 1;
 
     is_staff := COALESCE(is_staff, false);
     target_access := CASE WHEN is_staff THEN 'staff'::access_level ELSE 'responder'::access_level END;
@@ -195,7 +197,9 @@ BEGIN
 
     IF NEW.team_id IS NOT NULL AND (TG_OP = 'INSERT' OR OLD.status IS DISTINCT FROM NEW.status OR OLD.team_id IS DISTINCT FROM NEW.team_id) THEN
         _target_team_status := CASE
-            WHEN NEW.status = 'Planned' THEN 'Staged'::team_status
+            -- If an assignment is 'Planned' but now has a team, the team should be 'Assigned'.
+            -- This will then trigger sync_team_members_on_status_change to update the assignment status.
+            WHEN NEW.status = 'Planned' THEN 'Assigned'::team_status
             WHEN NEW.status = 'Assigned' THEN 'Assigned'::team_status
             WHEN NEW.status = 'Deployed' THEN 'Deployed'::team_status
             WHEN NEW.status = 'Completed' OR NEW.status = 'Incomplete' THEN 'Disbanded'::team_status

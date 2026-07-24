@@ -1,5 +1,4 @@
 import { useCallback } from 'react';
-import { assignResponderToTeam, removeResponderFromTeam } from '../services/responderService';
 
 /**
  * useTeamActions Hook
@@ -50,22 +49,8 @@ export const useTeamActions = ({
       const { data, error } = await supabaseClient.from('teams').insert(dbPayload).select().maybeSingle();
       if (error) throw error;
 
-      if (teamPayload.responder_ids?.length) {
-        const roles = teamPayload.responder_roles || {};
-        await Promise.all(teamPayload.responder_ids.map(id => assignResponderToTeam(supabaseClient, id, data.team_id)));
-        await Promise.all([
-          ...teamPayload.responder_ids.map(id => 
-            supabaseClient.from('team_responders').update({ role: roles[id] || null }).match({ team_id: data.team_id, responder_id: id })
-          ),
-          supabaseClient.from('responders').update({ status: 'Attached' }).in('responder_id', teamPayload.responder_ids)
-        ]);
-      }
-
-      // Requirement: Attach selected vehicles to the new team.
-      if (vehicleIds?.length > 0) {
-        console.log(`[useTeamActions] createTeam: Attaching vehicles to new team ${data.team_id}:`, vehicleIds);
-        await supabaseClient.from('vehicles').update({ team_id: data.team_id, status: 'Attached' }).in('vehicle_id', vehicleIds);
-      }
+      // The `ensure_leader_is_member` trigger handles the leader. Now, attach the other members.
+      if (teamPayload.responder_ids?.length > 0) await Promise.all(teamPayload.responder_ids.map(id => attachResponderToTeam(id, data.team_id, teamPayload.responder_roles?.[id])));
 
       // Fetch fresh names from DB to ensure they are known before logging
       let membersInfo = '';
@@ -113,14 +98,6 @@ export const useTeamActions = ({
 
       await supabaseClient.from('assignments').update({ is_orphaned: true }).eq('team_id', teamId).not('status', 'in', '("Completed")');
 
-      if (responderIds.length > 0) {
-        await Promise.all([
-          supabaseClient.from('responders').update({ status: 'Staged' }).in('responder_id', responderIds),
-          supabaseClient.from('responder_team_history').update({ detached_datetime: new Date().toISOString() }).eq('team_id', teamId).is('detached_datetime', null)
-        ]);
-        if (responderId && responderIds.includes(responderId)) setResponderStatus('Staged');
-      }
-
       const { data: teamData } = await supabaseClient.from('teams').select('team_name_number').eq('team_id', teamId).single();
       await supabaseClient.from('teams').update({ status: 'Disbanded', last_par_check: null }).eq('team_id', teamId);
       await recordAction(`Disbanded team "${teamData?.team_name_number || 'Unknown'}".`);
@@ -137,13 +114,13 @@ export const useTeamActions = ({
   const attachResponderToTeam = useCallback(async (resId, teamId, role = null) => {
     try {
       setLoading(true);
-      const { data: existing } = await supabaseClient.from('team_responders').select('team_id').match({ team_id: teamId, responder_id: resId }).maybeSingle();
-      if (!existing) await assignResponderToTeam(supabaseClient, resId, teamId);
-      await Promise.all([
-        supabaseClient.from('responders').update({ status: 'Attached' }).eq('responder_id', resId),
-        supabaseClient.from('team_responders').update({ role }).match({ team_id: teamId, responder_id: resId })
-      ]);
-      await fetchDashboardData();
+      // This is now the single point of attachment. The database trigger `sync_responder_access_level`
+      // will handle updating the responder's status to 'Attached' automatically.
+      const { error } = await supabaseClient.from('team_responders').upsert(
+        { team_id: teamId, responder_id: resId, role: role },
+        { onConflict: 'team_id, responder_id' }
+      );
+      if (error) throw error;
       return { success: true };
     } catch (err) {
       setError(err.message);
@@ -151,16 +128,15 @@ export const useTeamActions = ({
     } finally {
       setLoading(false);
     }
-  }, [supabaseClient, fetchDashboardData]);
+  }, [supabaseClient]);
 
   const detachResponderFromTeam = useCallback(async (resId, teamId) => {
     try {
       setLoading(true);
-      await Promise.all([
-        removeResponderFromTeam(supabaseClient, resId, teamId),
-        supabaseClient.from('responders').update({ status: 'Staged' }).eq('responder_id', resId)
-      ]);
-      await fetchDashboardData();
+      // This is the single point of detachment. The database trigger `sync_responder_access_level`
+      // will handle updating the responder's status back to 'Staged' automatically.
+      const { error } = await supabaseClient.from('team_responders').delete().match({ team_id: teamId, responder_id: resId });
+      if (error) throw error;
       return { success: true };
     } catch (err) {
       setError(err.message);
@@ -168,7 +144,7 @@ export const useTeamActions = ({
     } finally {
       setLoading(false);
     }
-  }, [supabaseClient, fetchDashboardData]);
+  }, [supabaseClient]);
 
   const updateTeam = useCallback(async (teamId, updates, responder_roles = {}, vehicleIds = []) => {
     try {
@@ -231,31 +207,13 @@ export const useTeamActions = ({
         ...toRemove.map(id => detachResponderFromTeam(id, teamId))
       ]);
 
-      // Reconcile vehicles
-      const vehiclesToAdd = (vehicleIds || []).filter(id => !originalVehicleIds.includes(id));
-      const vehiclesToRemove = originalVehicleIds.filter(id => !(vehicleIds || []).includes(id));
       console.log(`[useTeamActions] updateTeam: Reconciling vehicles for team ${teamId}. Adding:`, vehiclesToAdd, 'Removing:', vehiclesToRemove);
       if (vehiclesToRemove.length > 0) await supabaseClient.from('vehicles').update({ team_id: null, status: 'Staged' }).in('vehicle_id', vehiclesToRemove);
       if (vehiclesToAdd.length > 0) await supabaseClient.from('vehicles').update({ team_id: teamId, status: 'Attached' }).in('vehicle_id', vehiclesToAdd);
 
-      // Fetch fresh names from DB to ensure they are known before logging
-      let membersInfo = '';
-      if (finalResponderIds?.length) {
-        const { data: nameData } = await supabaseClient
-          .from('responders')
-          .select('responder_id, name')
-          .in('responder_id', finalResponderIds);
-
-        membersInfo = finalResponderIds.map(id => {
-          // Prioritize name from local responders list to ensure availability during logging
-          const responder = responders?.find(r => r.responder_id === id) || nameData?.find(r => r.responder_id === id);
-          const role = responder_roles?.[id];
-          return `${responder?.name || 'Unknown'} (${role || 'Member'})`;
-        }).join(', ');
-      }
-
-      const actionMessage = `Updated team "${updates.team_name_number || data.team_name_number}" (ID: ${teamId}, Type: ${updates.type || data.type}, Status: ${updates.status || data.status}).` +
-        (membersInfo ? ` Members: ${membersInfo}.` : '');
+      // Log the action
+      const actionMessage = `Updated team "${updates.team_name_number || originalTeam.team_name_number}".` +
+        (changes.length > 0 ? ` Changes: ${changes.join('. ')}.` : '');
       await recordAction(actionMessage);
       await fetchDashboardData();
       return data;

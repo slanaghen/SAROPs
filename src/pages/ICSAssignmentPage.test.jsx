@@ -70,6 +70,7 @@ describe('ICSAssignmentPage', () => {
 
   it('loads existing assignments and renders names', async () => {
     const mockStaffTeam = {
+      leader_responder_id: 'r1',
       type: 'Staff',
       current_responders: [
         { responder_id: 'r1', name: 'Steve', agency: 'SAR', role: 'Incident Commander' }

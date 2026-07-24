@@ -11,6 +11,7 @@ import {
   SARTOPO_REFRESH_INTERVAL
 } from '../components/operationalConstants';
 import AdminUserFormModal from '../components/admin/AdminUserFormModal';
+import { useTeamActions } from '../hooks/useTeamActions';
 import ResponderFormModal from '../components/ResponderFormModal';
 import TeamFormModal from '../components/TeamFormModal';
 import AssignmentFormModal from '../components/AssignmentFormModal';
@@ -44,10 +45,6 @@ const AdminPage = () => {
   } = useAdminData();
 
   const { addToast } = useToast();
-  const [loading, setLoading] = useState(false);
-  const [isRespondersExpanded, setIsRespondersExpanded] = useState(true);
-  const [isVehiclesExpanded, setIsVehiclesExpanded] = useState(true);
-  const [currentTime, setCurrentTime] = useState(Date.now());
 
   const recordAction = useCallback(async (actionText) => {
     if (!incidentId) return;
@@ -57,6 +54,25 @@ const AdminPage = () => {
       user_name: responderName || 'Administration'
     });
   }, [incidentId, responderName]);
+
+  const [loading, setLoading] = useState(false);
+
+  // Centralize team actions using the dedicated hook
+  const { updateTeam } = useTeamActions({
+    supabaseClient: supabase,
+    incidentId,
+    teams: allTeams,
+    responders: allResponders,
+    recordAction,
+    fetchDashboardData: refreshDashboardData,
+    setLoading,
+    setError: (msg) => addToast(msg, 'error'),
+    setResponderStatus
+  });
+
+  const [isRespondersExpanded, setIsRespondersExpanded] = useState(true);
+  const [isVehiclesExpanded, setIsVehiclesExpanded] = useState(true);
+  const [currentTime, setCurrentTime] = useState(Date.now());
 
   const [opRefresh, setOpRefresh] = useState(OPERATIONS_REFRESH_INTERVAL / 1000);
   const [resRefresh, setResRefresh] = useState(RESPONDER_REFRESH_INTERVAL / 1000);
@@ -549,19 +565,10 @@ const AdminPage = () => {
     console.log('[AdminPage] handleSaveTeam: Received form data from modal:', formData);
     setLoading(true);
     try {
-      const { team_id } = formData;
-      if (!team_id) {
+      if (!formData.team_id) {
         addToast('Team creation is not supported from the Admin page. Please use the Planning dashboard.', 'error');
         return;
       }
-
-      // Find the original team data to calculate differences in membership
-      const originalTeam = allTeams.find(t => t.team_id === team_id);
-      const originalMemberIds = originalTeam?.current_responders?.map(r => r.responder_id) || [];
-      const originalVehicleIds = originalTeam?.current_vehicles?.map(v => v.vehicle_id) || [];
-
-      const finalMemberIds = formData.responder_ids || []; // This is just members, leader is separate
-      const finalVehicleIds = formData.vehicle_ids || [];
 
       const teamUpdates = {
         team_name_number: formData.team_name_number,
@@ -569,28 +576,11 @@ const AdminPage = () => {
         status: formData.status,
         leader_responder_id: formData.leader_responder_id,
         equipment: formData.equipment,
+        responder_ids: formData.responder_ids || []
       };
-      console.log(`[AdminPage] handleSaveTeam: Updating team ${team_id} with payload:`, teamUpdates);
-      const { error: teamUpdateError } = await supabase.from('teams').update(teamUpdates).eq('team_id', team_id);
-      if (teamUpdateError) throw teamUpdateError;
-
-      // Reconcile members. The `ensure_leader_is_member` trigger handles the leader.
-      const allFinalIds = [...finalMemberIds, formData.leader_responder_id].filter(Boolean);
-      const membersToAdd = allFinalIds.filter(id => !originalMemberIds.includes(id));
-      const membersToRemove = originalMemberIds.filter(id => !allFinalIds.includes(id));
-
-      console.log(`[AdminPage] handleSaveTeam: Reconciling members for team ${team_id}. Adding:`, membersToAdd, 'Removing:', membersToRemove);
-      if (membersToRemove.length > 0) await supabase.from('team_responders').delete().eq('team_id', team_id).in('responder_id', membersToRemove);
-      if (membersToAdd.length > 0) await supabase.from('team_responders').insert(membersToAdd.map(id => ({ team_id, responder_id: id })));
-      await Promise.all(allFinalIds.map(id => supabase.from('team_responders').update({ role: formData.responder_roles?.[id] || null }).match({ team_id, responder_id: id })));
-
-      // Reconcile vehicles
-      const vehiclesToAdd = finalVehicleIds.filter(id => !originalVehicleIds.includes(id));
-      const vehiclesToRemove = originalVehicleIds.filter(id => !finalVehicleIds.includes(id));
-      console.log(`[AdminPage] handleSaveTeam: Reconciling vehicles for team ${team_id}. Adding:`, vehiclesToAdd, 'Removing:', vehiclesToRemove);
-      if (vehiclesToRemove.length > 0) await supabase.from('vehicles').update({ team_id: null, status: 'Staged' }).in('vehicle_id', vehiclesToRemove);
-      if (vehiclesToAdd.length > 0) await supabase.from('vehicles').update({ team_id, status: 'Attached' }).in('vehicle_id', vehiclesToAdd);
-
+      
+      // Use the centralized hook for persistence
+      await updateTeam(formData.team_id, teamUpdates, formData.responder_roles, formData.vehicle_ids);
       addToast('Team updated successfully.', 'success');
       if (!stayOpen) setShowTeamModal(false);
       await refreshDashboardData();

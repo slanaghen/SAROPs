@@ -201,7 +201,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
 
   // Log when responder data is loaded to help debug modal issues
   useEffect(() => {
-    if (responders && responders.length > 0) {
+    if (responders && vehicles) {
       console.log(`[OperationsDashboardPage] Data loaded: ${responders.length} responders, ${vehicles.length} vehicles.`);
     }
   }, [responders, vehicles]);

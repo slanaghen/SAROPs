@@ -3,6 +3,7 @@ import * as matchers from '@testing-library/jest-dom/matchers';
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import SettingsPage from './SettingsPage';
 import { supabase } from '../lib/supabase';
+import { IncidentProvider, useIncident } from '../context/IncidentContext';
 import { useToast } from '../context/ToastContext';
 
 expect.extend(matchers);
@@ -16,6 +17,12 @@ vi.mock('../lib/supabase', () => ({
     rpc: vi.fn(),
   },
 }));
+
+// Mock the IncidentContext to provide necessary values like the user session
+vi.mock('../context/IncidentContext', async () => {
+  const actual = await vi.importActual('../context/IncidentContext');
+  return { ...actual, useIncident: vi.fn() };
+});
 
 // Mock the toast context to capture notification calls
 vi.mock('../context/ToastContext', () => ({
@@ -33,6 +40,15 @@ vi.mock('../components/admin/AdminUserFormModal', () => ({
   ),
 }));
 
+const renderWithProviders = (ui, options) => {
+  return render(
+    <IncidentProvider>
+      {ui}
+    </IncidentProvider>,
+    options
+  );
+};
+
 describe('SettingsPage Functional Tests', () => {
   const mockAddToast = vi.fn();
 
@@ -40,6 +56,10 @@ describe('SettingsPage Functional Tests', () => {
     vi.clearAllMocks();
     localStorage.clear();
     vi.mocked(useToast).mockReturnValue({ addToast: mockAddToast });
+    // Provide a default mock for the user session via the IncidentContext
+    vi.mocked(useIncident).mockReturnValue({
+      user: { email: 'session@example.com' },
+    });
   });
 
   afterEach(() => {
@@ -48,18 +68,13 @@ describe('SettingsPage Functional Tests', () => {
 
   it('loads user profile using email identity from session', async () => {
     const mockUser = { email: 'session@example.com', name: 'Session User' };
-    vi.mocked(supabase.auth.getSession).mockResolvedValue({
-      data: { session: { user: { email: 'session@example.com' } } },
-      error: null,
-    });
-
     vi.mocked(supabase.from).mockReturnValue({
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
       maybeSingle: vi.fn().mockResolvedValue({ data: mockUser, error: null }),
     });
 
-    render(<SettingsPage />);
+    renderWithProviders(<SettingsPage />);
 
     await waitFor(() => {
       expect(screen.getByTestId('user-email')).toHaveTextContent('session@example.com');
@@ -68,11 +83,12 @@ describe('SettingsPage Functional Tests', () => {
 
   it('successfully updates profile via administrative RPC', async () => {
     const mockUser = { email: 'test@example.com', name: 'Old Name' };
+    // The component appears to fetch the session directly, ignoring the context value for the user.
+    // We must mock getSession to provide the correct user for this test.
     vi.mocked(supabase.auth.getSession).mockResolvedValue({
       data: { session: { user: { email: 'test@example.com' } } },
       error: null,
     });
-
     vi.mocked(supabase.from).mockReturnValue({
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
@@ -81,7 +97,7 @@ describe('SettingsPage Functional Tests', () => {
 
     vi.mocked(supabase.rpc).mockResolvedValue({ error: null });
 
-    render(<SettingsPage />);
+    renderWithProviders(<SettingsPage />);
     await waitFor(() => screen.getByTestId('user-form-modal'));
     
     fireEvent.click(screen.getByText('Save'));
