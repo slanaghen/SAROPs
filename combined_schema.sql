@@ -403,16 +403,20 @@ RETURNS TRIGGER AS $func$
 DECLARE
     _staff_team_id UUID;
 BEGIN
-    SELECT t.team_id INTO _staff_team_id FROM teams t
-    JOIN operational_periods op ON t.op_period_id = op.op_period_id
-    WHERE op.incident_id = NEW.incident_id AND t.type = 'Staff' AND t.leader_responder_id IS NULL
-    ORDER BY op.op_number ASC LIMIT 1;
+    -- This logic should only apply to standard responders, not staff/admins
+    -- who might be checking in just to manage the incident.
+    IF NEW.access_level = 'responder' THEN
+        SELECT t.team_id INTO _staff_team_id FROM teams t
+        JOIN operational_periods op ON t.op_period_id = op.op_period_id
+        WHERE op.incident_id = NEW.incident_id AND t.type = 'Staff' AND t.leader_responder_id IS NULL
+        ORDER BY op.op_number ASC LIMIT 1;
 
-    IF _staff_team_id IS NOT NULL THEN
-        INSERT INTO team_responders (team_id, responder_id, role)
-        VALUES (_staff_team_id, NEW.responder_id, 'Incident Commander') ON CONFLICT DO NOTHING;
+        IF _staff_team_id IS NOT NULL THEN
+            INSERT INTO team_responders (team_id, responder_id, role)
+            VALUES (_staff_team_id, NEW.responder_id, 'Incident Commander') ON CONFLICT DO NOTHING;
 
-        UPDATE teams SET leader_responder_id = NEW.responder_id WHERE team_id = _staff_team_id;
+            UPDATE teams SET leader_responder_id = NEW.responder_id WHERE team_id = _staff_team_id;
+        END IF;
     END IF;
     RETURN NEW;
 END;
@@ -729,12 +733,100 @@ $func$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Function to ensure the team leader is always a member of the team
 CREATE OR REPLACE FUNCTION ensure_leader_is_member()
-RETURNS TRIGGER AS $func$
+RETURNS TRIGGER AS $$
 BEGIN
     IF NEW.leader_responder_id IS NOT NULL THEN
         INSERT INTO team_responders (team_id, responder_id, role)
         VALUES (NEW.team_id, NEW.leader_responder_id, CASE WHEN NEW.type = 'Staff' THEN 'Incident Commander' ELSE 'Team Leader' END)
         ON CONFLICT (team_id, responder_id) DO UPDATE SET role = EXCLUDED.role;
+    END IF;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Logging: Team Membership
+CREATE OR REPLACE FUNCTION trigger_log_team_membership_change()
+RETURNS TRIGGER AS $func$
+DECLARE
+    _incident_id TEXT;
+    _responder_name TEXT;
+    _team_name TEXT;
+    _user_name TEXT;
+BEGIN  
+    -- Get context and names
+    SELECT op.incident_id, t.team_name_number INTO _incident_id, _team_name
+    FROM teams t JOIN operational_periods op ON t.op_period_id = op.op_period_id
+    WHERE t.team_id = COALESCE(NEW.team_id, OLD.team_id);
+
+    SELECT name INTO _responder_name FROM responders WHERE responder_id = COALESCE(NEW.responder_id, OLD.responder_id);
+    
+    SELECT COALESCE(name, username, 'System') INTO _user_name FROM users 
+    WHERE email = (SELECT email FROM auth.users WHERE id = auth.uid());
+
+    IF TG_OP = 'INSERT' THEN
+        INSERT INTO action_logs (incident_id, action, user_name)
+        VALUES (_incident_id, format('Responder "%s" joined team "%s" (Role: %s)', _responder_name, _team_name, COALESCE(NEW.role, 'Member')), COALESCE(_user_name, 'System'));
+    ELSIF TG_OP = 'DELETE' THEN
+        INSERT INTO action_logs (incident_id, action, user_name)
+        VALUES (_incident_id, format('Responder "%s" left team "%s"', _responder_name, _team_name), COALESCE(_user_name, 'System'));
+    END IF;
+    RETURN NULL;
+END;
+$func$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Logging: Vehicle Assignments
+CREATE OR REPLACE FUNCTION trigger_log_vehicle_team_change()
+RETURNS TRIGGER AS $func$
+DECLARE
+    _team_name TEXT;
+    _user_name TEXT;
+BEGIN
+    SELECT COALESCE(name, username, 'System') INTO _user_name FROM users 
+    WHERE email = (SELECT email FROM auth.users WHERE id = auth.uid());
+
+    IF (TG_OP = 'UPDATE' AND OLD.team_id IS DISTINCT FROM NEW.team_id) OR (TG_OP = 'INSERT' AND NEW.team_id IS NOT NULL) THEN
+        IF NEW.team_id IS NOT NULL THEN
+            SELECT team_name_number INTO _team_name FROM teams WHERE team_id = NEW.team_id;
+            INSERT INTO action_logs (incident_id, action, user_name)
+            VALUES (NEW.incident_id, format('Vehicle "%s" attached to team "%s"', NEW.designation, _team_name), COALESCE(_user_name, 'System'));
+        ELSIF OLD.team_id IS NOT NULL THEN
+            SELECT team_name_number INTO _team_name FROM teams WHERE team_id = OLD.team_id;
+            INSERT INTO action_logs (incident_id, action, user_name)
+            VALUES (NEW.incident_id, format('Vehicle "%s" detached from team "%s"', NEW.designation, _team_name), COALESCE(_user_name, 'System'));
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$func$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Logging: Team Tasking
+CREATE OR REPLACE FUNCTION trigger_log_assignment_team_change()
+RETURNS TRIGGER AS $func$
+DECLARE
+    _incident_id TEXT;
+    _team_name TEXT;
+    _user_name TEXT;
+BEGIN
+    SELECT incident_id INTO _incident_id FROM operational_periods WHERE op_period_id = NEW.op_period_id;
+    
+    SELECT COALESCE(name, username, 'System') INTO _user_name FROM users 
+    WHERE email = (SELECT email FROM auth.users WHERE id = auth.uid());
+
+    IF (TG_OP = 'UPDATE' AND OLD.team_id IS DISTINCT FROM NEW.team_id) OR (TG_OP = 'INSERT' AND NEW.team_id IS NOT NULL) THEN
+        IF NEW.team_id IS NOT NULL THEN
+            SELECT team_name_number INTO _team_name FROM teams WHERE team_id = NEW.team_id;
+            INSERT INTO action_logs (incident_id, action, user_name)
+            VALUES (_incident_id, format('Team "%s" tasked to assignment "%s"', _team_name, NEW.title), COALESCE(_user_name, 'System'));
+        ELSIF OLD.team_id IS NOT NULL THEN
+            SELECT team_name_number INTO _team_name FROM teams WHERE team_id = OLD.team_id;
+            INSERT INTO action_logs (incident_id, action, user_name)
+            VALUES (_incident_id, format('Team "%s" unassigned from "%s"', _team_name, NEW.title), COALESCE(_user_name, 'System'));
+        END IF;
+    END IF;
+
+    IF (TG_OP = 'UPDATE' AND OLD.status IS DISTINCT FROM NEW.status) THEN
+        INSERT INTO action_logs (incident_id, action, user_name)
+        VALUES (_incident_id, format('Assignment "%s" status changed to %s', NEW.title, NEW.status), COALESCE(_user_name, 'System'));
     END IF;
     RETURN NEW;
 END;

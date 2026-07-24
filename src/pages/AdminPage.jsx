@@ -881,6 +881,9 @@ const AdminPage = () => {
           .order('created_at', { ascending: false }).limit(1).maybeSingle();
         const { error: insertError } = await supabase.from('assignments').insert({ ...payload, assignment_id: uuidv4(), op_period_id: opData?.op_period_id });
         if (insertError) throw insertError;
+        
+        const teamName = payload.team_id ? allTeams.find(t => t.team_id === payload.team_id)?.team_name_number || 'Unknown' : 'none';
+        await recordAction?.(`Admin created assignment "${formData.title}"` + (payload.team_id ? ` and assigned it to team "${teamName}".` : '.'));
         addToast(`Assignment ${formData.title} created.`, 'success');
       }
       await refreshDashboardData();

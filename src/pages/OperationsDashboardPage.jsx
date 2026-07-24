@@ -232,6 +232,8 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
 
   const handleStatusUpdate = async (assignmentId, teamId, newStatus) => {
     try {
+      const assignment = assignmentById[assignmentId];
+      await recordAction(`Updated status of assignment "${assignment?.title || 'Unknown'}" to ${newStatus}.`);
       await updateResourceStatus(assignmentId, teamId, newStatus);
       
       // Force immediate recalculation of PAR timers and overdue counts across the table
@@ -312,8 +314,9 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
    * Manually link a team and assignment via the action menu
    */
   const handlePerformLink = async (assignmentId, teamId) => {
-    // The logging is now handled within the assignTeamToAssignment hook function.
-    // This function only needs to call the hook function.
+    const assignment = assignmentById[assignmentId];
+    const team = teamById[teamId];
+    await recordAction(`Assigned team "${team?.team_name_number || 'Unknown'}" to assignment "${assignment?.title || 'Unknown'}".`);
     await assignTeamToAssignment(teamId, assignmentId);
   };
 
@@ -362,10 +365,14 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
         const targetRow = rows.find(r => r.id === targetId);
         if (targetRow?.hasBoth) return;
 
-        const rawTeamId = draggedItem.type === 'team' ? draggedItem.id : targetId;
-        const teamId = getRawUuid(rawTeamId);
-        const rawAssignmentId = draggedItem.type === 'assignment' ? draggedItem.id : targetId;
-        const assignmentId = getRawUuid(rawAssignmentId);
+        let teamId, assignmentId;
+        if (draggedItem.type === 'team') {
+          teamId = getRawUuid(draggedItem.id);
+          assignmentId = getRawUuid(targetId);
+        } else {
+          teamId = getRawUuid(targetId);
+          assignmentId = getRawUuid(draggedItem.id);
+        }
         
         await assignTeamToAssignment(teamId, assignmentId);
       } 
@@ -564,6 +571,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     if (!window.confirm(`Are you sure you want to unassign "${teamName || 'the team'}" from "${assignmentName || 'this assignment'}"?`)) return;
 
     try {
+      await recordAction(`Unassigned team "${teamName || 'Unknown'}" from assignment "${assignmentName || 'Unknown'}".`);
       await unassignTeam(assignmentId);
     } catch (err) {
        // Error handled by hook

@@ -275,12 +275,20 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
       // Pass the auth_uid to the checkIn function
       await checkIn({ ...responder, auth_uid });
 
+      // The RPC uses a predictable device_id if one isn't provided. We can
+      // reconstruct it to reliably fetch the record that was just created/updated.
+      const predictable_device_id = `web_${auth_uid}_${targetIncidentId}`;
+
       // Fetch the latest responder record to catch trigger-updated access_level
       const { data: updatedResp } = await supabase
         .from('responders')
         .select('*')
-        .eq('responder_id', responder.responder_id)
+        .eq('device_id', responder.device_id || predictable_device_id)
         .maybeSingle();
+
+      if (!updatedResp && !responder.responder_id) {
+        throw new Error("Failed to retrieve responder record after check-in. The record could not be found using its device identifier.");
+      }
 
       let finalResponder = updatedResp || responder;
 

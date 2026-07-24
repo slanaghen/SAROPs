@@ -22,6 +22,16 @@ CREATE TRIGGER sync_access_level_on_team_responders AFTER INSERT OR UPDATE OR DE
 -- Lifecycle Cleanup
 CREATE TRIGGER trigger_incident_cleanup_on_end AFTER UPDATE OF end_datetime ON incidents FOR EACH ROW EXECUTE FUNCTION cleanup_resources_on_incident_end();
 
+-- Logging
+CREATE TRIGGER trigger_log_team_membership
+AFTER INSERT OR DELETE ON team_responders FOR EACH ROW EXECUTE FUNCTION trigger_log_team_membership_change();
+
+CREATE TRIGGER trigger_log_vehicle_assignment 
+AFTER INSERT OR UPDATE OF team_id ON vehicles FOR EACH ROW EXECUTE FUNCTION trigger_log_vehicle_team_change();
+
+CREATE TRIGGER trigger_log_assignment_changes 
+AFTER INSERT OR UPDATE OF team_id, status ON assignments FOR EACH ROW EXECUTE FUNCTION trigger_log_assignment_team_change();
+
 -- Membership Validation
 CREATE TRIGGER trigger_check_responder_membership
 BEFORE INSERT OR UPDATE ON team_responders FOR EACH ROW EXECUTE FUNCTION validate_responder_active_membership();

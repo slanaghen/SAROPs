@@ -246,6 +246,16 @@ const TeamFormModal = ({
     };
     console.log('[TeamFormModal] handleSave: Final payload being sent to parent component:', payload);
     onSave(payload, stayOpen);
+
+    // If we are staying open to add another, reset the form state to a clean slate
+    // for a new team, but preserve the last-used team type for convenience.
+    if (stayOpen) {
+      setTeamForm(getInitialState({
+        op_period_id: incidentData?.opPeriodId,
+        type: teamForm.type,
+        status: 'Staged'
+      }));
+    }
   };
 
   const leaderRole = isStaffTeam ? 'Incident Commander' : 'Team Leader';

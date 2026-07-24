@@ -65,12 +65,12 @@ if [ "$SAROPS_DB_INSTANCE" = "LOCAL" ]; then
   # Notify PostgREST to reload schema after local DB changes
   PGPASSWORD=postgres psql -h 127.0.0.1 -p ${DB_LOCAL_PORT:-54322} -U postgres -d postgres -c "NOTIFY pgrst, 'reload schema';"
 else
-  if ! supabase sql query --project-ref $SUPABASE_PROJECT_ID --file "$COMBINED_SQL"; then
+  if ! supabase sql query --project-ref $SUPABASE_PROJECT_ID --file "$COMBINED_SQL" >/dev/null 2>&1; then
     echo "❌ Error: Failed to execute query on remote database."
     exit 1
   fi
   # Notify PostgREST to reload schema after remote DB changes
   # Note: The project-ref needs to be passed again for the NOTIFY command.
-  supabase sql query --project-ref $SUPABASE_PROJECT_ID "NOTIFY pgrst, 'reload schema';"
+  #supabase sql query --project-ref $SUPABASE_PROJECT_ID "NOTIFY pgrst, 'reload schema';"
 fi
 echo "✅ ${SAROPS_DB_INSTANCE} Database reinitialized successfully."

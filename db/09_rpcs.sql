@@ -19,6 +19,12 @@ DECLARE
     _team_id UUID;
     _v_text TEXT;
 BEGIN
+  -- Guard: Prevent check-in if no incident is selected. This is a server-side
+  -- enforcement of the business rule that a responder record must be associated
+  -- with a valid, active incident.
+  IF p_incident_id IS NULL OR p_incident_id = '' THEN
+    RAISE EXCEPTION 'An incident must be selected to complete the check-in process.';
+  END IF;
   -- Resolve elevated status persistence
   IF p_access_level = 'responder' THEN
     SELECT access_level INTO p_access_level 

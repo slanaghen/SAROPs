@@ -312,25 +312,43 @@ function App() {
   // Centralized Notifications
   const { permission: notificationPermission } = useRealTimeNotifications(isActive, responderStatus, currentTeamStatus, currentAssignmentStatus);
 
-  // Navigation Guard: Redirect to check-in if trying to access operational pages without a session
+  // Navigation Guard: Centralized access control for all application routes.
   useEffect(() => {
-    const publicPaths = ['/', '/checkin', '/admin', '/incident', '/qrcodes', '/login'];
+    // Define paths accessible without any active session or special privileges.
+    const publicPaths = ['/', '/checkin', '/login'];
     
-    const isStaffOrAdmin = accessLevel === 'staff' || accessLevel === 'admin';
-    const responderOnlyPaths = ['/', '/checkin', '/login', '/responder', '/settings', '/qrcodes', '/ics', '/checkout'];
+    // Define paths accessible to a standard field responder.
+    const responderAllowedPaths = ['/', '/checkin', '/login', '/responder', '/settings', '/qrcodes', '/ics', '/checkout'];
 
-    // Combined check for system-level staff or operational-level staff
+    const isStaffOrAdmin = accessLevel === 'staff' || accessLevel === 'admin';
+    // A user has staff privileges if they are an admin system user OR have been elevated to staff for an incident.
     const hasStaffPrivileges = isAdmin || isStaffOrAdmin;
 
-    // Navigation Guard: Allow system staff access even without active incident context
-    if (!isActive && !hasStaffPrivileges && !user && !hookLoading && !publicPaths.includes(location.pathname)) {
-      console.warn(`[App Guard] Unauthorized access attempt to ${location.pathname}. Redirecting to /checkin.`);
-      navigate('/checkin');
-    } else if (!hasStaffPrivileges && !responderOnlyPaths.includes(location.pathname)) {
-      // Enforce: Standard field responders are restricted to the responder dashboard
-      console.warn(`[App Guard] Access denied for non-staff responder: ${location.pathname}`);
-      navigate('/responder');
-    } else if (isAdmin && accessLevel === 'staff' && location.pathname === '/admin') {
+    // Guard 1: The main gate for unauthenticated/unactivated users.
+    // If the user is not in an active incident AND is not a system admin,
+    // they should only be able to access the public pages.
+    if (!isActive && !isAdmin) {
+      if (!publicPaths.includes(location.pathname)) {
+        console.warn(`[App Guard] Guest access denied for ${location.pathname}. Redirecting to /checkin.`);
+        navigate('/checkin');
+        return;
+      }
+    }
+    
+    // Guards below apply only to users who are active in an incident or are system staff/admins.
+
+    // Guard 2: Role enforcement for active responders.
+    // If a user is active but NOT staff, restrict them to responder-level pages.
+    if (isActive && !hasStaffPrivileges) {
+      if (!responderAllowedPaths.includes(location.pathname)) {
+        console.warn(`[App Guard] Responder access denied for staff page: ${location.pathname}. Redirecting to /responder.`);
+        navigate('/responder');
+        return;
+      }
+    }
+
+    // Guard 3: Prevent non-admins from accessing the admin page.
+    if (accessLevel !== 'admin' && location.pathname === '/admin') {
       // Enforce: Staff cannot access Admin
       console.warn(`[App Guard] Staff attempted to access admin page.`);
       navigate('/operations');
@@ -415,6 +433,7 @@ function App() {
                   {(isAdmin || accessLevel === 'staff' || accessLevel === 'admin') && (
                     <>
                       <div className="dropdown-divider"></div>
+                      {accessLevel === 'admin' && <Link to="/admin" onClick={() => setMenuOpen(false)}>Administration</Link>}
                       <Link to="/operations" onClick={() => setMenuOpen(false)}>Operations</Link>
                       <Link to="/planning" onClick={() => setMenuOpen(false)}>Planning</Link>
                       <Link to="/incident" onClick={() => setMenuOpen(false)}>Incident</Link>
@@ -426,7 +445,6 @@ function App() {
                   {isActive && <Link to="/ics" onClick={() => setMenuOpen(false)}>ICS Chart</Link>}
                   {isActive && <Link to="/qrcodes" onClick={() => setMenuOpen(false)}>QR Codes</Link>}
                   {isActive && <Link to="/checkout" onClick={() => setMenuOpen(false)}>Check Out</Link>}
-                  {accessLevel === 'admin' && <Link to="/admin" onClick={() => setMenuOpen(false)}>Administration</Link>}
                   <div className="dropdown-divider"></div>
                   <a href="#" onClick={(e) => { e.preventDefault(); handleToggleDb(); }}>
                     {SAROPS_DB_INSTANCE}: Switch to { SAROPS_DB_INSTANCE === 'LOCAL' ? 'Remote' : 'Local' } DB

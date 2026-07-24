@@ -113,8 +113,14 @@ const PlanningDashboard = ({
 
     // Team <-> Assignment logic
     if ((draggedItem.type === 'team' && type === 'assignment') || (draggedItem.type === 'assignment' && type === 'team')) {
-      const teamId = draggedItem.type === 'team' ? draggedItem.id : id;
-      const assignmentId = draggedItem.type === 'assignment' ? draggedItem.id : id;
+      let teamId, assignmentId;
+      if (draggedItem.type === 'team') {
+        teamId = draggedItem.id;
+        assignmentId = id;
+      } else {
+        teamId = id;
+        assignmentId = draggedItem.id;
+      }
       const team = teams.find(t => t.team_id === teamId);
       const assignment = assignments.find(a => a.assignment_id === assignmentId);
 

@@ -355,23 +355,20 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
    * based on the responder's current mission status and access level.
    */
   const getDashboardVisibilities = () => {
-    // isStaffOrAdmin is already defined above
+    // A team is considered active and should be shown if it exists and is not disbanded.
+    // The `currentTeamStatus` from context provides a fallback for quick UI updates.
+    const showTeam = !!currentTeamStatus || (team && team.status !== 'Disbanded');
 
-    // Show team if staff/admin (ICS view) or if responder has an active team attachment
-    const showTeam = isStaffOrAdmin || !!currentTeamStatus || (team && team.status !== 'Disbanded');
-
-    // Show assignment if staff/admin (ICS view) or if responder has an active tasking
-    const showAssignment = isStaffOrAdmin || !!currentAssignmentStatus || (
+    // An assignment is active if it exists and is not in a terminal state.
+    const showAssignment = !!currentAssignmentStatus || (
       assignment &&
       assignment.status !== 'Completed' &&
       assignment.status !== 'Incomplete'
     );
 
-    // Show empty state only for regular responders who are not attached to anything
-    const showEmptyState = !isStaffOrAdmin && 
-                           (!team || team.status === 'Disbanded') && 
-                           !currentTeamStatus && 
-                           !assignment;
+    // The empty state should be shown to ANY user (including admins) if they are not
+    // part of an active team or assignment.
+    const showEmptyState = !showTeam && !showAssignment;
 
     return { showTeam, showAssignment, showEmptyState };
   };
@@ -668,20 +665,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
 
           {isExpanded.team && (
             <div style={{ marginTop: '10px' }}>
-              {accessLevel === 'staff' || accessLevel === 'admin' ? (
-                <div className="staff-status-card" style={{ padding: '24px', background: '#f0f9ff', borderRadius: '12px', border: '1px solid #bae6fd', textAlign: 'center' }}>
-                  <div style={{ fontSize: '32px', marginBottom: '12px' }}>🛡️</div>
-                  <h3 style={{ color: '#0369a1', marginBottom: '8px' }}>{icsRole ? icsRole.toUpperCase() : 'Staff'}</h3>
-                  {icsRole && (
-                    <p style={{ color: '#0c4a6e', fontSize: '14px', marginBottom: '16px' }}>
-                      You are assigned as the {icsRole} for this incident.
-                    </p>
-                  )}
-                  <button className="btn btn-primary" style={{ width: '100%', fontSize: '18px' }} onClick={() => navigate('/operations')}>
-                    Go to Operations Dashboard
-                  </button>
-                </div>
-              ) : team && (
+              {team && (
                 <>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px', marginBottom: '10px' }}>
                     <div>
@@ -761,21 +745,12 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
       {showAssignment && (
         <div className="dashboard-section assignment-info">
           <SectionHeader
-            title={accessLevel === 'staff' || accessLevel === 'admin' ? 'ICS Chart' : `Team Assignment: ${assignment?.title}`} 
+            title={`Team Assignment: ${assignment?.title}`} 
             sectionKey="assignment" 
           />
           {isExpanded.assignment && (
             <div style={{ marginTop: '10px' }}>
-              {accessLevel === 'staff' || accessLevel === 'admin' ? (
-                <div style={{ padding: '16px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <div style={{ fontSize: '24px' }}>📋</div>
-                  <div>
-                    <div style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', marginBottom: '2px' }}>Current Position</div>
-                    <div style={{ fontSize: '16px', fontWeight: 600, color: '#1e293b' }}>{icsRole ? icsRole.toUpperCase() : 'General Staff'}</div>
-                    <div style={{ fontSize: '14px', color: '#64748b', marginTop: '4px' }}>{responderDisplayName}</div>
-                  </div>
-                </div>
-              ) : assignment && (
+              {assignment && (
                 <>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '10px', marginBottom: '10px' }}>
