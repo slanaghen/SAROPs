@@ -394,12 +394,19 @@ function App() {
           <div className="banner-logo-container">
             <img src={logo} alt="SAROps Logo" className="banner-logo" />
             <span className="banner-brand">SAROps</span>
-            <span style={{ 
-              fontSize: '9px', fontWeight: 800, padding: '2px 5px', borderRadius: '4px', marginLeft: '6px',
-              background: SAROPS_DB_INSTANCE === 'REMOTE' ? '#fef3c7' : '#f1f5f9',
-              color: SAROPS_DB_INSTANCE === 'REMOTE' ? '#92400e' : '#475569',
-              border: `1px solid ${SAROPS_DB_INSTANCE === 'REMOTE' ? '#f59e0b' : '#cbd5e1'}`
-            }}>{SAROPS_DB_INSTANCE}</span>
+            <button 
+              onClick={handleToggleDb}
+              title={`Switch to ${SAROPS_DB_INSTANCE === 'LOCAL' ? 'Remote' : 'Local'} DB`}
+              style={{ 
+                fontSize: '9px', fontWeight: 800, padding: '2px 5px', borderRadius: '4px', marginLeft: '6px',
+                background: SAROPS_DB_INSTANCE === 'REMOTE' ? '#fef3c7' : '#f1f5f9',
+                color: SAROPS_DB_INSTANCE === 'REMOTE' ? '#92400e' : '#475569',
+                border: `1px solid ${SAROPS_DB_INSTANCE === 'REMOTE' ? '#f59e0b' : '#cbd5e1'}`,
+                cursor: 'pointer'
+              }}
+            >
+              {SAROPS_DB_INSTANCE}
+            </button>
           </div>
           {isActive && (
             <>
@@ -479,9 +486,6 @@ function App() {
                   {isActive && <Link to="/qrcodes" onClick={() => setMenuOpen(false)}>QR Codes</Link>}
                   {isActive && <Link to="/checkout" onClick={() => setMenuOpen(false)}>Check Out</Link>}
                   <div className="dropdown-divider"></div>
-                  <a href="#" onClick={(e) => { e.preventDefault(); handleToggleDb(); }}>
-                    {SAROPS_DB_INSTANCE}: Switch to { SAROPS_DB_INSTANCE === 'LOCAL' ? 'Remote' : 'Local' } DB
-                  </a>
                   <a href="#" onClick={(e) => { e.preventDefault(); handleSignOut(); }}>Sign Out</a>
                 </div>
               )}

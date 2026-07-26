@@ -524,7 +524,7 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
                 required
               >
                 <option value="">— Select an Incident —</option>
-                {incidents.map((inc) => (
+                {incidents.filter(inc => !inc.end_datetime).map((inc) => (
                   <option key={inc.incident_id} value={inc.incident_id}>
                     {inc.name} ({inc.number})
                   </option>
