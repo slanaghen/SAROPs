@@ -1037,6 +1037,11 @@ const PlanningDashboard = ({
                   <div className="assignment-header" style={{ gap: '8px', justifyContent: 'flex-start', alignItems: 'center', flexWrap: 'wrap' }}>
                     <div className="assignment-name clickable-name" style={{ marginRight: '4px' }}>{assignment.title}</div>
                     {assignment.resource_type && <div className="team-type" style={{ background: '#f1f5f9', color: '#475569' }}>{assignment.resource_type}</div>}
+                {assignment.team_name && (
+                  <span style={{ fontSize: '11px', fontWeight: 600, color: '#059669', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <span style={{ fontSize: '14px' }}>➔</span> {assignment.team_name}
+                  </span>
+                )}
                     <span style={{ fontSize: '11px', color: '#64748b' }}>Size: {assignment.team_size}</span>
                     <div className={`assignment-status ${assignment.status.toLowerCase()}`} style={{ marginLeft: 'auto' }}>
                       {assignment.status}
@@ -1089,6 +1094,7 @@ const PlanningDashboard = ({
           onClose={() => setShowAssignmentForm(false)}
           onSave={handleSaveAssignment}
           initialData={assignmentForm}
+          teams={teams}
           loading={loading}
         />
       )}

@@ -24,7 +24,8 @@ describe('AssignmentFormModal', () => {
       status: 'Planned',
       probability_of_detection: 0,
       debrief_narrative: ''
-    }
+    },
+    teams: []
   };
 
   it('renders correctly when open', () => {

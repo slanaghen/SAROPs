@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import BaseModal from './BaseModal';
 import { RESOURCE_TYPES } from '../constants/operationalConstants';
 import { normalizeResourceTypeName } from '../utils/dataNormalization';
@@ -12,7 +12,8 @@ const AssignmentFormModal = ({
   onClose,
   onSave,
   initialData = {},
-  loading = false
+  loading = false,
+  teams = []
 }) => {
   const [formData, setFormData] = useState(initialData || {});
 
@@ -29,6 +30,10 @@ const AssignmentFormModal = ({
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
   };
+
+  const availableTeams = useMemo(() => {
+    return (teams || []).filter(t => t.status === 'Staged' || t.team_id === initialData.team_id);
+  }, [teams, initialData.team_id]);
 
   return (
     <BaseModal
@@ -63,22 +68,40 @@ const AssignmentFormModal = ({
           />
         </div>
 
-        <div className="form-row">
-          <label htmlFor="asn_status">Status</label>
-          <select 
-            id="asn_status" 
-            name="status" 
-            value={formData.status || 'Planned'} 
-            onChange={handleInputChange}
-            disabled={!formData.assignment_id}
-            required
-          >
-            <option value="Planned">Planned</option>
-            <option value="Assigned">Assigned</option>
-            <option value="Deployed">Deployed</option>
-            <option value="Completed">Completed</option>
-            <option value="Incomplete">Incomplete</option>
-          </select>
+        <div style={{ display: 'flex', gap: '16px', marginBottom: '16px' }}>
+          <div className="form-row" style={{ flex: 1 }}>
+            <label htmlFor="asn_team">Assigned Team</label>
+            <select
+              id="asn_team"
+              name="team_id"
+              value={formData.team_id || ''}
+              onChange={handleInputChange}
+            >
+              <option value="">-- Unassigned --</option>
+              {availableTeams.map(team => (
+                <option key={team.team_id} value={team.team_id}>
+                  {team.team_name_number} ({team.type})
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="form-row" style={{ flex: 1 }}>
+            <label htmlFor="asn_status">Status</label>
+            <select 
+              id="asn_status" 
+              name="status" 
+              value={formData.status || 'Planned'} 
+              onChange={handleInputChange}
+              disabled={!formData.assignment_id}
+              required
+            >
+              <option value="Planned">Planned</option>
+              <option value="Assigned">Assigned</option>
+              <option value="Deployed">Deployed</option>
+              <option value="Completed">Completed</option>
+              <option value="Incomplete">Incomplete</option>
+            </select>
+          </div>
         </div>
 
         <div style={{ display: 'flex', gap: '16px', marginBottom: '16px', alignItems: 'flex-start' }}>
