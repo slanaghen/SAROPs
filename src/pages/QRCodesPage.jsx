@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { useIncident } from '../context/IncidentContext';
 import '../styles/ActionButtons.css';
@@ -20,8 +20,18 @@ const QRCodesPage = () => {
     fetchDensity();
   }, [user]);
 
-  const currentUrl = window.location.origin;
-  const checkinUrl = `${currentUrl}/checkin`;
+  const checkinUrl = useMemo(() => {
+    const currentOrigin = window.location.origin;
+    const currentHostname = window.location.hostname;
+
+    // In development, if we are on localhost, use the machine's network IP
+    // so other devices on the LAN can scan the QR code and connect.
+    // __LOCAL_IP__ is injected by vite.config.js.
+    if (import.meta.env.DEV && currentHostname === 'localhost' && typeof __LOCAL_IP__ !== 'undefined' && __LOCAL_IP__) {
+      return `http://${__LOCAL_IP__}:${window.location.port}/checkin`;
+    }
+    return `${currentOrigin}/checkin`;
+  }, []);
 
   // Helper to ensure we have a valid SARTopo URL regardless of whether an ID or URL was provided
   const getSartopoUrl = (id) => {

@@ -98,7 +98,7 @@ CREATE OR REPLACE FUNCTION admin_add_user(
   p_email TEXT, p_username TEXT, p_password TEXT, p_access_level TEXT,
   p_name TEXT DEFAULT NULL, p_agency TEXT DEFAULT NULL, p_identifier TEXT DEFAULT NULL,
   p_phone TEXT DEFAULT NULL, p_type TEXT DEFAULT NULL, p_skills TEXT DEFAULT NULL, p_vehicles TEXT DEFAULT NULL,
-  p_display_density TEXT DEFAULT 'comfortable'
+  p_display_density TEXT DEFAULT 'compact'
 )
 RETURNS VOID AS $func$
 BEGIN
@@ -157,6 +157,26 @@ BEGIN
 END;
 $func$ LANGUAGE plpgsql SECURITY DEFINER;
 
+-- RPC: Reset PAR Timer
+-- Allows any authenticated team member to reset the PAR timer for their own team,
+-- bypassing the more restrictive RLS policy that only allows leaders to update team records.
+CREATE OR REPLACE FUNCTION reset_par_for_my_team(p_team_id UUID, p_par_status TEXT)
+RETURNS VOID AS $$
+BEGIN
+  -- The is_member_of_team function checks if the calling user is part of the specified team.
+  IF is_member_of_team(p_team_id) THEN
+    UPDATE teams
+    SET 
+      last_par_check = now(),
+      par_status = p_par_status
+    WHERE team_id = p_team_id;
+  ELSE
+    -- This exception will be caught by the client and displayed as an error.
+    RAISE EXCEPTION 'PAR update blocked: You must be a member of the team to perform this action.';
+  END IF;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
 -- GRANTS
 GRANT EXECUTE ON FUNCTION verify_user_login(TEXT, TEXT) TO anon, authenticated; -- Existing grant
 GRANT EXECUTE ON FUNCTION checkin_responder_securely(TEXT, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated; -- Updated signature (re-added vehicles)
@@ -164,6 +184,7 @@ GRANT EXECUTE ON FUNCTION admin_add_user(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEX
 GRANT EXECUTE ON FUNCTION admin_remove_user(TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION admin_update_password(TEXT, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION start_next_operational_period(TEXT, UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION reset_par_for_my_team(UUID, TEXT) TO authenticated;
 
 -- Restore default message level for function creation and grants
 RESET client_min_messages;

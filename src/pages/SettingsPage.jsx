@@ -71,7 +71,7 @@ const SettingsPage = () => {
   };
 
   return (
-    <div className={`incident-edit-page density-${userProfile?.display_density || 'comfortable'}`} style={{ paddingBottom: 'var(--space-lg)' }}>
+    <div className={`incident-edit-page density-${userProfile?.display_density || 'compact'}`} style={{ paddingBottom: 'var(--space-lg)' }}>
       <div className="page-header" style={{ textAlign: 'center' }}>
         <h1>Account Settings</h1>
         <p className="subtitle">Update your personal information and security credentials.</p>

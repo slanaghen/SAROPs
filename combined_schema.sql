@@ -70,6 +70,8 @@ CREATE TABLE operational_periods (
   situation_narrative TEXT,
   situational_awareness_narrative TEXT,
   par_check_interval INTEGER DEFAULT 60,
+  sarstream_enabled BOOLEAN DEFAULT FALSE,
+  sarstream_data JSONB,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT unique_op_number_per_incident UNIQUE (incident_id, op_number)
@@ -854,6 +856,16 @@ CREATE TRIGGER sync_access_level_on_team_responders AFTER INSERT OR UPDATE OR DE
 -- Lifecycle Cleanup
 CREATE TRIGGER trigger_incident_cleanup_on_end AFTER UPDATE OF end_datetime ON incidents FOR EACH ROW EXECUTE FUNCTION cleanup_resources_on_incident_end();
 
+-- Logging
+CREATE TRIGGER trigger_log_team_membership
+AFTER INSERT OR DELETE ON team_responders FOR EACH ROW EXECUTE FUNCTION trigger_log_team_membership_change();
+
+CREATE TRIGGER trigger_log_vehicle_assignment 
+AFTER INSERT OR UPDATE OF team_id ON vehicles FOR EACH ROW EXECUTE FUNCTION trigger_log_vehicle_team_change();
+
+CREATE TRIGGER trigger_log_assignment_changes 
+AFTER INSERT OR UPDATE OF team_id, status ON assignments FOR EACH ROW EXECUTE FUNCTION trigger_log_assignment_team_change();
+
 -- Membership Validation
 CREATE TRIGGER trigger_check_responder_membership
 BEFORE INSERT OR UPDATE ON team_responders FOR EACH ROW EXECUTE FUNCTION validate_responder_active_membership();
@@ -1106,6 +1118,12 @@ DECLARE
     _team_id UUID;
     _v_text TEXT;
 BEGIN
+  -- Guard: Prevent check-in if no incident is selected. This is a server-side
+  -- enforcement of the business rule that a responder record must be associated
+  -- with a valid, active incident.
+  IF p_incident_id IS NULL OR p_incident_id = '' THEN
+    RAISE EXCEPTION 'An incident must be selected to complete the check-in process.';
+  END IF;
   -- Resolve elevated status persistence
   IF p_access_level = 'responder' THEN
     SELECT access_level INTO p_access_level 
@@ -1179,7 +1197,7 @@ CREATE OR REPLACE FUNCTION admin_add_user(
   p_email TEXT, p_username TEXT, p_password TEXT, p_access_level TEXT,
   p_name TEXT DEFAULT NULL, p_agency TEXT DEFAULT NULL, p_identifier TEXT DEFAULT NULL,
   p_phone TEXT DEFAULT NULL, p_type TEXT DEFAULT NULL, p_skills TEXT DEFAULT NULL, p_vehicles TEXT DEFAULT NULL,
-  p_display_density TEXT DEFAULT 'comfortable'
+  p_display_density TEXT DEFAULT 'compact'
 )
 RETURNS VOID AS $func$
 BEGIN
@@ -1238,6 +1256,26 @@ BEGIN
 END;
 $func$ LANGUAGE plpgsql SECURITY DEFINER;
 
+-- RPC: Reset PAR Timer
+-- Allows any authenticated team member to reset the PAR timer for their own team,
+-- bypassing the more restrictive RLS policy that only allows leaders to update team records.
+CREATE OR REPLACE FUNCTION reset_par_for_my_team(p_team_id UUID, p_par_status TEXT)
+RETURNS VOID AS $$
+BEGIN
+  -- The is_member_of_team function checks if the calling user is part of the specified team.
+  IF is_member_of_team(p_team_id) THEN
+    UPDATE teams
+    SET 
+      last_par_check = now(),
+      par_status = p_par_status
+    WHERE team_id = p_team_id;
+  ELSE
+    -- This exception will be caught by the client and displayed as an error.
+    RAISE EXCEPTION 'PAR update blocked: You must be a member of the team to perform this action.';
+  END IF;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
 -- GRANTS
 GRANT EXECUTE ON FUNCTION verify_user_login(TEXT, TEXT) TO anon, authenticated; -- Existing grant
 GRANT EXECUTE ON FUNCTION checkin_responder_securely(TEXT, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated; -- Updated signature (re-added vehicles)
@@ -1245,6 +1283,7 @@ GRANT EXECUTE ON FUNCTION admin_add_user(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEX
 GRANT EXECUTE ON FUNCTION admin_remove_user(TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION admin_update_password(TEXT, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION start_next_operational_period(TEXT, UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION reset_par_for_my_team(UUID, TEXT) TO authenticated;
 
 -- Restore default message level for function creation and grants
 RESET client_min_messages;-- ============================================================================
