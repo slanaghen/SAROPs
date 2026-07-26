@@ -613,6 +613,19 @@ const SARTopoDataPage = () => {
             )}
           </div>
           <div style={{ display: 'flex', gap: '12px' }}>
+              {sartopoId && (
+              <a
+                href={`https://sartopo.com/m/${sartopoConfig.id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="action-btn action-btn-secondary"
+                style={{ textDecoration: 'none' }}
+              >
+                Open Map
+              </a>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: '12px' }}>
             <button 
               className="action-btn action-btn-secondary" 
               onClick={async () => {

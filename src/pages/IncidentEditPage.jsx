@@ -855,6 +855,18 @@ const IncidentEditPage = () => {
                   style={{ borderColor: (sartopoIdValidationMessage || sartopoSyncErrorMessage) ? '#dc2626' : undefined }}
                 />
               </div>
+              {sartopoConfig.id && (
+                <a
+                  href={`https://sartopo.com/m/${sartopoConfig.id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="action-btn action-btn-secondary"
+                  style={{ textDecoration: 'none' }}
+                  title="Open the configured SARTopo map in a new tab"
+                >
+                  Open Map
+                </a>
+              )}
               <button 
                 type="button" 
                 className="action-btn action-btn-secondary" 

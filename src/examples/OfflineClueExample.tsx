@@ -360,8 +360,8 @@ export const SyncStatus: React.FC = () => {
         });
       }
 
-      // Clear message after 5 seconds
-      setTimeout(() => setSyncProgress({ inProgress: false, message: '' }), 5000);
+      // Clear message after 3 seconds
+      setTimeout(() => setSyncProgress({ inProgress: false, message: '' }), 3000);
     });
 
     return cleanup;
@@ -409,8 +409,8 @@ export const SyncStatus: React.FC = () => {
       const status = await getSyncReadiness();
       setReadiness(status);
 
-      // Clear message after 5 seconds
-      setTimeout(() => setSyncProgress({ inProgress: false, message: '' }), 5000);
+      // Clear message after 3 seconds
+      setTimeout(() => setSyncProgress({ inProgress: false, message: '' }), 3000);
     } catch (err) {
       setSyncProgress({
         inProgress: false,

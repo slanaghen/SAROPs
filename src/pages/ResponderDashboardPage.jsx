@@ -61,6 +61,12 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
   // This hook must be called before any useMemos or useEffects that depend on 'team' or 'assignment'
   const { team, assignment, loading, error, refetch } = useResponderTeamAndAssignment(supabase, responderId); 
 
+  const sartopoUrl = useMemo(() => {
+    if (!sartopoId) return null;
+    if (sartopoId.startsWith('http')) return sartopoId;
+    return `https://sartopo.com/m/${sartopoId}`;
+  }, [sartopoId]);
+
   // Section Collapsibility State
   const [isExpanded, setIsExpanded] = useState({
     narratives: true,
@@ -389,9 +395,9 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
   const handleLeaveTeam = async () => {
     if (!team || !responderId) return;
     
-    // Safety guard: Team Leaders cannot leave while the team is deployed
-    if (isLeader && (team.status === 'Deployed' || assignment?.status === 'Deployed')) {
-      alert("As the Team Leader, you cannot leave your team while it is deployed to the field. Please complete your assignment or return to base first.");
+    // Safety guard: A team leader cannot leave their team.
+    if (isLeader) {
+      addToast("As the Team Leader, you cannot leave your team. Please designate a new leader first.", 'error');
       return;
     }
 
@@ -417,21 +423,17 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
     if (!team?.team_id) return;
     
     try {
-      const { data, error } = await supabase
-        .from('teams')
-        .update({ 
-          last_par_check: new Date().toISOString(),
-          par_status: status 
-        })
-        .eq('team_id', team.team_id)
-        .select();
-
+      const { error } = await supabase.rpc('reset_par_for_my_team', {
+        p_team_id: team.team_id,
+        p_par_status: status
+      });
+ 
       if (error) throw error;
-      if (!data || data.length === 0) throw new Error('PAR update blocked: You must be a member of the team to perform this action.');
       
       refreshAllData();
     } catch (err) { // Error is handled by the hook's setError
       console.error('Error sending PAR:', err);
+      addToast(err.message || 'Failed to send PAR response.', 'error');
     }
   };
 
@@ -628,6 +630,9 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
               {narratives.incidentNotes && <p><strong>Incident Narrative:</strong> {narratives.incidentNotes}</p>}
               {narratives.opObjective && <p><strong>OP Objective:</strong> {narratives.opObjective}</p>}
               {narratives.saNarrative && <p><strong>Situational Awareness:</strong> {narratives.saNarrative}</p>}
+              {sartopoUrl && (
+                <p><strong>SARTopo Map:</strong> <a href={sartopoUrl} target="_blank" rel="noopener noreferrer">View Operational Map</a></p>
+              )}
             </div>
           )}
         </div>

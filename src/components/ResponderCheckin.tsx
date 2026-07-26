@@ -286,8 +286,8 @@ const ResponderCheckin: React.FC<ResponderCheckinProps> = ({
       setShowConfirmation(false);
       setConfirmedResponder(null);
 
-      // Clear success message after 4 seconds
-      setTimeout(() => setSuccessMessage(null), 4000);
+      // Clear success message after 3 seconds
+      setTimeout(() => setSuccessMessage(null), 3000);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Check-in failed';
       setInternalError(errorMessage);
