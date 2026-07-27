@@ -70,6 +70,8 @@ CREATE TABLE operational_periods (
   situation_narrative TEXT,
   situational_awareness_narrative TEXT,
   par_check_interval INTEGER DEFAULT 60,
+  sarstream_enabled BOOLEAN DEFAULT FALSE,
+  sarstream_data JSONB,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT unique_op_number_per_incident UNIQUE (incident_id, op_number)
@@ -353,19 +355,18 @@ FROM incidents i;-- Authorization: Check if the current user has operational sta
 -- potentially absent JWT claims, which is critical when creating a new incident
 -- where no incident-specific context exists yet.
 CREATE OR REPLACE FUNCTION check_is_operational_staff()
-RETURNS BOOLEAN AS $$
-DECLARE
-    user_role TEXT;
-BEGIN
-    -- Get the role from the users table based on the logged-in user's email.
-    SELECT access_level INTO user_role
-    FROM public.users
-    WHERE email = auth.email()
-    LIMIT 1;
-
-    RETURN (user_role IN ('staff', 'admin'));
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+RETURNS BOOLEAN AS $func$
+  SELECT EXISTS (
+    -- Allow if the user has an explicit staff/admin session via Auth metadata or custom claims
+    SELECT 1 WHERE (auth.jwt() ->> 'access_level') IN ('staff', 'admin')
+    UNION ALL
+    -- Use auth.uid to join against auth.users for a reliable system user check
+    SELECT 1 FROM users WHERE email = (SELECT email FROM auth.users WHERE id = auth.uid()) AND access_level IN ('staff', 'admin')
+    UNION ALL
+    -- Check against the specific responder record for this incident
+    SELECT 1 FROM responders WHERE auth_uid = auth.uid() AND access_level IN ('staff', 'admin')
+  );
+$func$ LANGUAGE sql STABLE SECURITY DEFINER;
 
 -- Function to update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -423,7 +424,7 @@ END;
 $func$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Status Synchronization: Responder Access and State
-CREATE OR REPLACE FUNCTION sync_responder_access_level()
+CREATE OR REPLACE FUNCTION sync_responder_on_membership_change()
 RETURNS TRIGGER AS $func$
 DECLARE
     _responder_id UUID;
@@ -683,19 +684,6 @@ BEGIN
         SET detached_datetime = CURRENT_TIMESTAMP
         WHERE team_id = NEW.team_id AND detached_datetime IS NULL;
     END IF;
-
-    _target_assignment_status := CASE
-        WHEN NEW.status = 'Assigned' THEN 'Assigned'::assignment_status
-        WHEN NEW.status = 'Deployed' THEN 'Deployed'::assignment_status
-        ELSE NULL
-    END;
-
-    IF _target_assignment_status IS NOT NULL AND (TG_OP = 'INSERT' OR OLD.status IS DISTINCT FROM NEW.status) THEN
-        UPDATE assignments
-        SET status = _target_assignment_status
-        WHERE team_id = NEW.team_id AND status IS DISTINCT FROM _target_assignment_status;
-    END IF;
-
     RETURN NEW;
 END;
 $func$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -741,6 +729,22 @@ BEGIN
         ON CONFLICT (team_id, responder_id) DO UPDATE SET role = EXCLUDED.role;
     END IF;
     RETURN NULL;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Function to prevent a team leader from being removed from their team
+CREATE OR REPLACE FUNCTION prevent_leader_leaving_team()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Check if the responder being removed is the leader of the team
+    IF EXISTS (
+        SELECT 1 FROM teams
+        WHERE teams.team_id = OLD.team_id
+          AND teams.leader_responder_id = OLD.responder_id
+    ) THEN
+        RAISE EXCEPTION 'A team leader cannot leave their team. Please designate a new leader first.';
+    END IF;
+    RETURN OLD;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
@@ -853,6 +857,16 @@ CREATE TRIGGER sync_access_level_on_team_responders AFTER INSERT OR UPDATE OR DE
 
 -- Lifecycle Cleanup
 CREATE TRIGGER trigger_incident_cleanup_on_end AFTER UPDATE OF end_datetime ON incidents FOR EACH ROW EXECUTE FUNCTION cleanup_resources_on_incident_end();
+
+-- Logging
+CREATE TRIGGER trigger_log_team_membership
+AFTER INSERT OR DELETE ON team_responders FOR EACH ROW EXECUTE FUNCTION trigger_log_team_membership_change();
+
+CREATE TRIGGER trigger_log_vehicle_assignment 
+AFTER INSERT OR UPDATE OF team_id ON vehicles FOR EACH ROW EXECUTE FUNCTION trigger_log_vehicle_team_change();
+
+CREATE TRIGGER trigger_log_assignment_changes 
+AFTER INSERT OR UPDATE OF team_id, status ON assignments FOR EACH ROW EXECUTE FUNCTION trigger_log_assignment_team_change();
 
 -- Membership Validation
 CREATE TRIGGER trigger_check_responder_membership
@@ -1106,6 +1120,12 @@ DECLARE
     _team_id UUID;
     _v_text TEXT;
 BEGIN
+  -- Guard: Prevent check-in if no incident is selected. This is a server-side
+  -- enforcement of the business rule that a responder record must be associated
+  -- with a valid, active incident.
+  IF p_incident_id IS NULL OR p_incident_id = '' THEN
+    RAISE EXCEPTION 'An incident must be selected to complete the check-in process.';
+  END IF;
   -- Resolve elevated status persistence
   IF p_access_level = 'responder' THEN
     SELECT access_level INTO p_access_level 

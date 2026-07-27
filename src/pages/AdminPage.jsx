@@ -58,7 +58,7 @@ const AdminPage = () => {
   const [loading, setLoading] = useState(false);
 
   // Centralize team actions using the dedicated hook
-  const { updateTeam } = useTeamActions({
+  const { updateTeam, createTeam } = useTeamActions({
     supabaseClient: supabase,
     incidentId,
     teams: allTeams,
@@ -423,6 +423,7 @@ const AdminPage = () => {
       // Ensure vehicles are specifically fetched to resolve the reported 
       // timing issue where they appear missing on initial page load.
       fetchTable('vehicles');
+      fetchTable('responders');
     }
   }, [isAdmin, incidentId, refreshDashboardData, fetchTable]);
 
@@ -483,30 +484,51 @@ const AdminPage = () => {
     setLoading(true);
 
     try {
-      const targetIncidentId = formData.incident_id || incidentId;
-      if (!targetIncidentId) {
-        throw new Error("No active incident context. Please join an incident before adding responders.");
+      // If we have a responder_id, it's an update.
+      if (formData.responder_id) {
+        const { error: updateError } = await supabase
+          .from('responders')
+          .update({
+            name: formData.name,
+            agency: formData.agency,
+            identifier: formData.identifier,
+            cell_phone: formData.cell_phone,
+            responder_type: formData.responder_type,
+            special_skills: formData.special_skills,
+            vehicles: formData.vehicles,
+            access_level: formData.access_level,
+            status: formData.status
+          })
+          .eq('responder_id', formData.responder_id);
+
+        if (updateError) throw updateError;
+        addToast(`Responder ${formData.name} updated successfully.`, 'success');
+
+      } else { // Otherwise, it's a new responder creation.
+        const targetIncidentId = formData.incident_id || incidentId;
+        if (!targetIncidentId) {
+          throw new Error("No active incident context. Please join an incident before adding responders.");
+        }
+
+        const { error: rpcError } = await supabase.rpc('checkin_responder_securely', {
+          p_incident_id: targetIncidentId,
+          p_auth_uid: formData.auth_uid || null,
+          p_name: formData.name,
+          p_agency: formData.agency,
+          p_identifier: formData.identifier,
+          p_cell_phone: formData.cell_phone,
+          p_responder_type: formData.responder_type || 'SAR',
+          p_special_skills: formData.special_skills,
+          p_vehicles: formData.vehicles,
+          p_access_level: formData.access_level,
+          p_status: 'Staged',
+          p_device_id: `admin_created_${uuidv4()}`
+        });
+
+        if (rpcError) throw rpcError;
+        addToast(`Responder ${formData.name} created successfully.`, 'success');
       }
-
-      // Requirement: Use the secure check-in RPC to handle responder check-in and status rules automatically
-      const { data: responderData, error: rpcError } = await supabase.rpc('checkin_responder_securely', {
-        p_incident_id: targetIncidentId,
-        p_auth_uid: formData.auth_uid || null,
-        p_name: formData.name,
-        p_agency: formData.agency,
-        p_identifier: formData.identifier,
-        p_cell_phone: formData.cell_phone,
-        p_responder_type: formData.responder_type || 'SAR',
-        p_special_skills: formData.special_skills,
-        p_vehicles: formData.vehicles,
-        p_access_level: formData.access_level,
-        p_status: formData.responder_id ? (formData.status || 'Staged') : 'Staged',
-        p_device_id: formData.device_id || `admin_created_${uuidv4()}`
-      });
-
-      if (rpcError) throw rpcError;
       
-      addToast(`Responder ${formData.name} saved successfully.`, 'success');
       await refreshDashboardData();
 
       if (stayOpen) {
@@ -562,28 +584,41 @@ const AdminPage = () => {
   };
 
   const handleSaveTeam = async (formData, stayOpen = false) => {
-    console.log('[AdminPage] handleSaveTeam: Received form data from modal:', formData);
     setLoading(true);
     try {
-      if (!formData.team_id) {
-        addToast('Team creation is not supported from the Admin page. Please use the Planning dashboard.', 'error');
-        return;
+      if (formData.team_id) {
+        const teamUpdates = {
+          team_name_number: formData.team_name_number,
+          type: formData.type,
+          status: formData.status,
+          leader_responder_id: formData.leader_responder_id,
+          equipment: formData.equipment,
+          responder_ids: formData.responder_ids || []
+        };
+        await updateTeam(formData.team_id, teamUpdates, formData.responder_roles, formData.vehicle_ids);
+        addToast('Team updated successfully.', 'success');
+      } else {
+        if (!createTeam) throw new Error("Team creation service not available.");
+        await createTeam(formData, formData.responder_roles, formData.vehicle_ids);
+        addToast('Team created successfully.', 'success');
       }
 
-      const teamUpdates = {
-        team_name_number: formData.team_name_number,
-        type: formData.type,
-        status: formData.status,
-        leader_responder_id: formData.leader_responder_id,
-        equipment: formData.equipment,
-        responder_ids: formData.responder_ids || []
-      };
-      
-      // Use the centralized hook for persistence
-      await updateTeam(formData.team_id, teamUpdates, formData.responder_roles, formData.vehicle_ids);
-      addToast('Team updated successfully.', 'success');
-      if (!stayOpen) setShowTeamModal(false);
       await refreshDashboardData();
+
+      if (stayOpen) {
+        const activeIncident = allIncidents.find(i => i.incident_id === incidentId);
+        const latestOp = activeIncident?.operational_periods?.[0];
+        setEditingTeam({
+          op_period_id: latestOp?.op_period_id,
+          team_name_number: '',
+          type: 'Ground',
+          status: 'Staged',
+        });
+        setShowTeamModal(true);
+      } else {
+        setShowTeamModal(false);
+        setEditingTeam(null);
+      }
     } catch (err) {
       addToast(err.message || 'Failed to save team.', 'error');
     } finally {
@@ -1174,7 +1209,7 @@ const AdminPage = () => {
         handleDeleteTeam={handleDeleteTeam}
         handleEditTeam={openEditTeamForm}
         handleNewTeam={() => {
-          setEditingTeam(null);
+          setEditingTeam(null); // Let the modal handle defaults for new teams
           setShowTeamModal(true);
         }}
       />

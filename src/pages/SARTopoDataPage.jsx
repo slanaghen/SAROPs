@@ -19,7 +19,7 @@ import '../styles/ActionButtons.css';
 
 const SARTopoDataPage = () => {
   const { incidentId, isActive, incidentData, responderName, user } = useIncident();
-  const [sartopoId, setSartopoId] = useState('CVJP9L4');
+  const [sartopoId, setSartopoId] = useState('');
   const [features, setFeatures] = useState(null);
   const [loading, setLoading] = useState(false);
   const [lastFetchTime, setLastFetchTime] = useState(0);

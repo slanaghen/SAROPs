@@ -37,7 +37,7 @@ const getDefaultIncidentNumber = () => {
 const defaultIncident = {
   name: 'Missing Person Search',
   number: getDefaultIncidentNumber(),
-  sartopo_id: 'CVJP9L4',
+  sartopo_id: '',
   start_datetime: getCurrentLocalDatetime(),
   end_datetime: '',
   notes: '',
@@ -427,9 +427,12 @@ const IncidentEditPage = () => {
           addToast('Please provide an Incident Name before activating SARStream.', 'error');
           return;
         }
+        console.log(`[IncidentEditPage] Invoking 'sarstream-proxy' function with label: "${incident.name}"`);
         const { data, error } = await supabase.functions.invoke('sarstream-proxy', {
           body: { label: incident.name },
         });
+
+        console.log('[IncidentEditPage] Response from "sarstream-proxy":', { data, error });
         if (error) throw error;
         streamData = data;
       }

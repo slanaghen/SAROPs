@@ -24,11 +24,7 @@ serve(async (req) => {
         'Content-Type': 'application/json',
         'X-API-Key': sarstreamApiKey,
       },
-      body: JSON.stringify({
-        requester: 'SAROps',
-        ttl_minutes: 480, // Default 8-hour operational period
-        label: label,
-      }),
+      body: JSON.stringify({ requester: 'SAROps', ttl_minutes: 480, label: label }),
     });
 
     if (!response.ok) {

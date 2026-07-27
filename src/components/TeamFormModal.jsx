@@ -51,9 +51,15 @@ const TeamFormModal = ({
 
   useEffect(() => {
     if (isOpen) {
-      setTeamForm(getInitialState(initialData));
+      const baseData = initialData || {};
+      // If creating a new team (no team_id), ensure op_period_id is sourced from context.
+      // This makes the modal self-sufficient for creation.
+      if (!baseData.team_id && incidentData?.opPeriodId) {
+        baseData.op_period_id = incidentData.opPeriodId;
+      }
+      setTeamForm(getInitialState(baseData));
     }
-  }, [initialData?.team_id, isOpen]);
+  }, [initialData, isOpen, incidentData?.opPeriodId]);
 
   // Only staged responders (unassigned) or responders already on this team should be available.
   // This prevents assigning a responder to multiple teams simultaneously.
@@ -246,16 +252,6 @@ const TeamFormModal = ({
     };
     console.log('[TeamFormModal] handleSave: Final payload being sent to parent component:', payload);
     onSave(payload, stayOpen);
-
-    // If we are staying open to add another, reset the form state to a clean slate
-    // for a new team, but preserve the last-used team type for convenience.
-    if (stayOpen) {
-      setTeamForm(getInitialState({
-        op_period_id: incidentData?.opPeriodId,
-        type: teamForm.type,
-        status: 'Staged'
-      }));
-    }
   };
 
   const leaderRole = isStaffTeam ? 'Incident Commander' : 'Team Leader';
