@@ -74,7 +74,7 @@ END;
 $func$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Status Synchronization: Responder Access and State
-CREATE OR REPLACE FUNCTION sync_responder_access_level()
+CREATE OR REPLACE FUNCTION sync_responder_on_membership_change()
 RETURNS TRIGGER AS $func$
 DECLARE
     _responder_id UUID;
@@ -334,19 +334,6 @@ BEGIN
         SET detached_datetime = CURRENT_TIMESTAMP
         WHERE team_id = NEW.team_id AND detached_datetime IS NULL;
     END IF;
-
-    _target_assignment_status := CASE
-        WHEN NEW.status = 'Assigned' THEN 'Assigned'::assignment_status
-        WHEN NEW.status = 'Deployed' THEN 'Deployed'::assignment_status
-        ELSE NULL
-    END;
-
-    IF _target_assignment_status IS NOT NULL AND (TG_OP = 'INSERT' OR OLD.status IS DISTINCT FROM NEW.status) THEN
-        UPDATE assignments
-        SET status = _target_assignment_status
-        WHERE team_id = NEW.team_id AND status IS DISTINCT FROM _target_assignment_status;
-    END IF;
-
     RETURN NEW;
 END;
 $func$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -392,6 +379,22 @@ BEGIN
         ON CONFLICT (team_id, responder_id) DO UPDATE SET role = EXCLUDED.role;
     END IF;
     RETURN NULL;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Function to prevent a team leader from being removed from their team
+CREATE OR REPLACE FUNCTION prevent_leader_leaving_team()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Check if the responder being removed is the leader of the team
+    IF EXISTS (
+        SELECT 1 FROM teams
+        WHERE teams.team_id = OLD.team_id
+          AND teams.leader_responder_id = OLD.responder_id
+    ) THEN
+        RAISE EXCEPTION 'A team leader cannot leave their team. Please designate a new leader first.';
+    END IF;
+    RETURN OLD;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 

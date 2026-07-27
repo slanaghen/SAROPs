@@ -89,7 +89,7 @@ CREATE TABLE users (
   responder_type responder_type,
   special_skills TEXT,
   vehicles TEXT,
-  display_density display_density DEFAULT 'comfortable',
+  display_density display_density DEFAULT 'compact',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -126,7 +126,7 @@ CREATE TABLE teams (
   sartopo_color_hex TEXT NOT NULL,
   type team_type NOT NULL,
   status team_status NOT NULL DEFAULT 'Staged',
-  leader_responder_id UUID REFERENCES responders(responder_id) ON DELETE SET NULL,
+  leader_responder_id UUID NOT NULL REFERENCES responders(responder_id) ON DELETE RESTRICT,
   equipment JSONB DEFAULT '[]'::jsonb,
   last_par_check TIMESTAMP WITH TIME ZONE,
   par_status TEXT,
@@ -746,6 +746,22 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
+-- Function to prevent a team leader from being removed from their team
+CREATE OR REPLACE FUNCTION prevent_leader_leaving_team()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Check if the responder being removed is the leader of the team
+    IF EXISTS (
+        SELECT 1 FROM teams
+        WHERE teams.team_id = OLD.team_id
+          AND teams.leader_responder_id = OLD.responder_id
+    ) THEN
+        RAISE EXCEPTION 'A team leader cannot leave their team. Please designate a new leader first.';
+    END IF;
+    RETURN OLD;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
 -- Logging: Team Membership
 CREATE OR REPLACE FUNCTION trigger_log_team_membership_change()
 RETURNS TRIGGER AS $func$
@@ -878,6 +894,10 @@ BEFORE INSERT OR UPDATE OF leader_responder_id ON teams FOR EACH ROW EXECUTE FUN
 
 CREATE TRIGGER trigger_ensure_leader_is_member
 AFTER INSERT OR UPDATE OF leader_responder_id ON teams FOR EACH ROW EXECUTE FUNCTION ensure_leader_is_member();-- Enable RLS on all tables
+
+CREATE TRIGGER trigger_prevent_leader_leaving_team
+BEFORE DELETE ON team_responders
+FOR EACH ROW EXECUTE FUNCTION prevent_leader_leaving_team();
 ALTER TABLE incidents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE responders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE operational_periods ENABLE ROW LEVEL SECURITY;

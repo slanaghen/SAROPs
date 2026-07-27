@@ -16,8 +16,7 @@ CREATE TRIGGER trigger_sync_team_status_from_assignment AFTER INSERT OR UPDATE O
 -- Status Synchronization
 CREATE TRIGGER trigger_sync_vehicle_status_on_team_link BEFORE UPDATE OF team_id ON vehicles FOR EACH ROW EXECUTE FUNCTION sync_vehicle_status_on_team_link();
 CREATE TRIGGER sync_team_status_on_team_update AFTER INSERT OR UPDATE OF status ON teams FOR EACH ROW EXECUTE FUNCTION sync_team_members_on_status_change();
-CREATE TRIGGER sync_responder_status_on_responder_update AFTER INSERT OR UPDATE OF auth_uid, incident_id ON responders FOR EACH ROW EXECUTE FUNCTION sync_responder_access_level();
-CREATE TRIGGER sync_access_level_on_team_responders AFTER INSERT OR UPDATE OR DELETE ON team_responders FOR EACH ROW EXECUTE FUNCTION sync_responder_access_level();
+CREATE TRIGGER sync_responder_on_membership_change AFTER INSERT OR UPDATE OR DELETE ON team_responders FOR EACH ROW EXECUTE FUNCTION sync_responder_on_membership_change();
 
 -- Lifecycle Cleanup
 CREATE TRIGGER trigger_incident_cleanup_on_end AFTER UPDATE OF end_datetime ON incidents FOR EACH ROW EXECUTE FUNCTION cleanup_resources_on_incident_end();
@@ -44,3 +43,7 @@ BEFORE INSERT OR UPDATE OF leader_responder_id ON teams FOR EACH ROW EXECUTE FUN
 
 CREATE TRIGGER trigger_ensure_leader_is_member
 AFTER INSERT OR UPDATE OF leader_responder_id ON teams FOR EACH ROW EXECUTE FUNCTION ensure_leader_is_member();
+
+CREATE TRIGGER trigger_prevent_leader_leaving_team
+BEFORE DELETE ON team_responders
+FOR EACH ROW EXECUTE FUNCTION prevent_leader_leaving_team();

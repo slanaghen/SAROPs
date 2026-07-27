@@ -5,7 +5,10 @@ import { useIncident } from './context/IncidentContext';
 import useResponderTeamAndAssignment from './hooks/useResponderTeamAndAssignment';
 import { useRealTimeNotifications } from './hooks/useRealTimeNotifications';
 import { useToast } from './context/ToastContext';
+import BaseModal from './components/BaseModal';
 import logo from './assets/logo.png';
+import redSpeakerIcon from './assets/red-speaker.jpg';
+import emailIcon from './assets/email-red-icon.png';
 import './styles.css';
 
 function App() {
@@ -14,6 +17,7 @@ function App() {
   const [displayDensity, setDisplayDensity] = useState('comfortable');
   const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
   const [operationalPeriod, setOperationalPeriod] = useState(null);
+  const [showNotificationModal, setShowNotificationModal] = useState(false);
   const { addToast } = useToast();
   const [menuOpen, setMenuOpen] = useState(false);
   const navigate = useNavigate();
@@ -311,7 +315,7 @@ function App() {
   ]);
 
   // Centralized Notifications
-  const { permission: notificationPermission } = useRealTimeNotifications(isActive, responderStatus, currentTeamStatus, currentAssignmentStatus);
+  const { permission: notificationPermission, requestPermission } = useRealTimeNotifications(isActive, responderStatus, currentTeamStatus, currentAssignmentStatus);
 
   // Navigation Guard: Centralized access control for all application routes.
   useEffect(() => {
@@ -437,24 +441,31 @@ function App() {
             </span>
           )}
           {isActive && notificationPermission === 'denied' && (
-            <div 
-              className="connection-dot offline" 
-              title="System notifications are blocked. Visual alerts disabled; audio only. Check browser settings." 
+            <img
+              src={redSpeakerIcon}
+              alt="Notifications Blocked"
+              onClick={() => setShowNotificationModal(true)}
+              title="System notifications are blocked. Click to manage settings."
               style={{ 
-                display: 'flex', alignItems: 'center', justifyContent: 'center', 
-                fontSize: '9px', color: 'white', cursor: 'help', width: '12px', height: '12px', fontWeight: 900 
+                width: '16px', height: '16px',
+                marginLeft: '8px', cursor: 'pointer',
+                filter: 'drop-shadow(0 0 2px rgba(239, 68, 68, 0.5))' // Add a subtle glow
               }}
-            >!</div>
+            >
+              {/* The image itself is the icon, no text needed */}
+            </img>
           )}
           <div className={`connection-dot ${offline ? 'offline' : 'online'}`} title={offline ? 'Offline' : 'Online'}></div>
           {hasUnreadMessages && (
-            <div 
+            <img
+              src={emailIcon}
+              alt="Unread Messages"
               className="unread-indicator" 
               title="New unread message received"
               onClick={() => navigate('/responder')}
               style={{
-                width: '10px', height: '10px', backgroundColor: '#ef4444', borderRadius: '50%',
-                marginLeft: '8px', cursor: 'pointer', border: '2px solid white', boxShadow: '0 0 4px rgba(239, 68, 68, 0.5)'
+                width: '16px', height: '16px',
+                marginLeft: '8px', cursor: 'pointer'
               }}
             />
           )}
@@ -494,6 +505,43 @@ function App() {
         </div>
       </div>
       <Outlet />
+
+      {showNotificationModal && (
+        <BaseModal
+          isOpen={showNotificationModal}
+          onClose={() => setShowNotificationModal(false)}
+          title="Notification Settings"
+        >
+          <p style={{ marginTop: 0, color: '#475569' }}>
+            Enable browser notifications to receive real-time alerts for important events like new messages and PAR checks.
+          </p>
+          
+          <div className="form-field" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+            <label className="form-label" htmlFor="notif-toggle" style={{ marginBottom: 0 }}>Browser Notifications</label>
+            <div className="toggle-switch">
+              <input
+                type="checkbox"
+                id="notif-toggle"
+                checked={notificationPermission === 'granted'}
+                onChange={async () => {
+                  if (notificationPermission === 'default' && requestPermission) {
+                    await requestPermission();
+                    setShowNotificationModal(false); // Close modal after user interacts with browser prompt
+                  }
+                }}
+                disabled={notificationPermission === 'denied'}
+              />
+              <label htmlFor="notif-toggle"></label>
+            </div>
+          </div>
+
+          {notificationPermission === 'denied' && (
+            <p className="form-hint" style={{ color: '#dc2626', fontSize: '12px', marginTop: '8px' }}>
+              Notifications are blocked by your browser. You must change this in your browser's site settings to enable them.
+            </p>
+          )}
+        </BaseModal>
+      )}
     </div>
   );
 }

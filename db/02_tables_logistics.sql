@@ -12,7 +12,7 @@ CREATE TABLE users (
   responder_type responder_type,
   special_skills TEXT,
   vehicles TEXT,
-  display_density display_density DEFAULT 'comfortable',
+  display_density display_density DEFAULT 'compact',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -49,7 +49,7 @@ CREATE TABLE teams (
   sartopo_color_hex TEXT NOT NULL,
   type team_type NOT NULL,
   status team_status NOT NULL DEFAULT 'Staged',
-  leader_responder_id UUID REFERENCES responders(responder_id) ON DELETE SET NULL,
+  leader_responder_id UUID NOT NULL REFERENCES responders(responder_id) ON DELETE RESTRICT,
   equipment JSONB DEFAULT '[]'::jsonb,
   last_par_check TIMESTAMP WITH TIME ZONE,
   par_status TEXT,
