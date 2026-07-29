@@ -131,12 +131,8 @@ export const deleteIncident = async ({
   if (!window.confirm(message)) return;
 
   try {
-<<<<<<< HEAD
-=======
     // Log the intent to delete before the record and its associated logs are purged
     await recordAction?.(`Admin initiated permanent deletion of incident "${incidentName}" (ID: ${incidentId}).`);
-
->>>>>>> dev2
     // Delete the incident record.
     // This will automatically cascade through operational_periods, teams,
     // assignments, action_logs, and clues due to PostgreSQL foreign key constraints.
@@ -146,11 +142,6 @@ export const deleteIncident = async ({
       .eq('incident_id', incidentId);
 
     if (deleteError) throw deleteError;
-<<<<<<< HEAD
-
-    await recordAction?.(`Admin deleted incident "${incidentName}" (ID: ${incidentId}).`);
-=======
->>>>>>> dev2
     // Update context if we deleted the current active session
     if (incidentId === currentIncidentId) {
       logout();

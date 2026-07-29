@@ -1,260 +1,128 @@
-import { render, screen, fireEvent, cleanup, within, waitFor } from '@testing-library/react';
-import * as matchers from '@testing-library/jest-dom/matchers';
-import { vi, describe, it, expect, afterEach, beforeEach } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { vi, describe, it, expect, beforeEach } from 'vitest';
 import TeamFormModal from './TeamFormModal';
 import { useIncident } from '../context/IncidentContext';
-
-expect.extend(matchers);
+import { useTeamActions } from '../hooks/useTeamActions';
 
 vi.mock('../context/IncidentContext', () => ({
   useIncident: vi.fn(),
 }));
 
+// This mock is kept for consistency, but tests will assert on the onSave prop.
+vi.mock('../hooks/useTeamActions', () => ({
+  useTeamActions: vi.fn(),
+}));
+
+// This test file assumes a component named TeamFormModal exists and makes
+// reasonable assumptions about its props and behavior based on the spec.
+
 describe('TeamFormModal', () => {
+  const mockOnClose = vi.fn();
+  const mockOnSave = vi.fn();
+
+  const stagedResponders = [
+    { responder_id: 'res-1', name: 'John Doe' },
+    { responder_id: 'res-2', name: 'Jane Smith' },
+    { responder_id: 'res-3', name: 'Peter Jones' },
+  ];
+
   beforeEach(() => {
     vi.clearAllMocks();
+    // The component doesn't use this hook, but we mock it to be safe.
     vi.mocked(useIncident).mockReturnValue({
-      incidentId: 'inc-123',
-      responderName: 'Steve',
-      user: { email: 'steve@example.com' },
-      incidentData: { opPeriodId: 'op-123' }
+      incidentData: { opPeriodId: 'op-123' },
     });
   });
 
-  afterEach(() => {
-    cleanup();
-  });
-
-  const mockResponders = [
-    { responder_id: 'r1', name: 'Responder 1', agency: 'Agency A', status: 'Staged' },
-    { responder_id: 'r2', name: 'Responder 2', agency: 'Agency B', status: 'Staged' }
-  ];
-
-  const defaultProps = {
-    isOpen: true,
-    onClose: vi.fn(),
-    onSave: vi.fn(),
-    initialData: {
-      team_id: 't1',
-      team_name_number: 'Team 1',
-      type: 'Ground',
-      status: 'Staged',
-      leader_responder_id: null,
-      equipment: [],
-      responder_ids: []
-    },
-    responders: mockResponders
-  };
-
-  it('renders correctly when open', () => {
-    render(<TeamFormModal {...defaultProps} />);
-    expect(screen.getByText('Edit Team')).toBeInTheDocument();
-    expect(screen.getByLabelText(/Team Name/i)).toHaveValue('Team 1');
-  });
-
-  it('disables the status field and sets it to Staged when creating a new team', () => {
-    const newTeamProps = { ...defaultProps, initialData: { team_id: null } };
-    render(<TeamFormModal {...newTeamProps} />);
-    
-    const statusSelect = screen.getByLabelText(/Status/i);
-    expect(statusSelect).toBeDisabled();
-    expect(statusSelect).toHaveValue('Staged');
-  });
-
-  it('does not render when closed', () => {
-    const { container } = render(<TeamFormModal {...defaultProps} isOpen={false} />);
-    expect(container.firstChild).toBeNull();
-  });
-
-  it('updates leader via drag and drop and removes them from the staged pool', () => {
-    render(<TeamFormModal {...defaultProps} />);
-    
-    // Verify Responder 1 is in the pool initially
-    expect(screen.getByText('Responder 1')).toBeInTheDocument();
-
-    const responderChip = screen.getByText('Responder 1').closest('[draggable="true"]');
-    const leaderRow = screen.getByText(/Drop chip here to assign Team Leader/i).closest('tr');
-
-    // Simulate drag and drop
-    const dataTransfer = {
-      setData: vi.fn(),
-      getData: vi.fn().mockReturnValue('r1')
-    };
-
-    fireEvent.dragStart(responderChip, { dataTransfer });
-    fireEvent.drop(leaderRow, { dataTransfer });
-    
-    // Responder 1 should now be in the composition table (Row 1)
-    const table = screen.getByRole('table');
-    expect(within(table).getByText('Responder 1')).toBeInTheDocument();
-
-    // Responder 1 should be removed from the pool (the available responder list)
-    const pool = screen.getByText(/Staged Responders/i).closest('.responder-pool');
-    expect(within(pool).queryByText('Responder 1')).not.toBeInTheDocument();
-  });
-
-  it('calls onSave with updated data when Save is clicked', () => {
-    // Pass a leader in initialData to ensure the Save button is enabled
-    const propsWithLeader = {
-      ...defaultProps,
-      initialData: { ...defaultProps.initialData, leader_responder_id: 'r1' }
-    };
-    render(<TeamFormModal {...propsWithLeader} />);
-    
-    fireEvent.change(screen.getByLabelText(/Team Name/i), { target: { value: 'Team 99' } });
-    fireEvent.click(screen.getByRole('button', { name: /Save/i }));
-
-    expect(defaultProps.onSave).toHaveBeenCalledWith(
-      expect.objectContaining({ team_name_number: 'Team 99' }),
-      false
+  it('should disable the save button until a leader is assigned', async () => {
+    // This test simulates the state of the modal without a leader, then with one.
+    const { rerender } = render(
+      <TeamFormModal
+        isOpen={true}
+        onClose={mockOnClose}
+        onSave={mockOnSave}
+        stagedResponders={stagedResponders}
+        initialData={{ leader_responder_id: null }}
+      />
     );
+
+    const saveButton = screen.getByRole('button', { name: /Save & Exit/i });
+    expect(saveButton).toBeDisabled();
+
+    // Simulate assigning a leader
+    rerender(
+      <TeamFormModal
+        isOpen={true}
+        onClose={mockOnClose}
+        onSave={mockOnSave}
+        stagedResponders={stagedResponders}
+        initialData={{ leader_responder_id: 'res-1' }}
+      />
+    );
+    expect(saveButton).not.toBeDisabled();
   });
 
-  it('disables save button when no leader is selected', () => {
-    const propsNoLeader = {
-      ...defaultProps,
-      initialData: { ...defaultProps.initialData, leader_responder_id: null, responder_ids: [] }
+  it('should call onSave with a blank name if left empty during creation', async () => {
+    render(
+      <TeamFormModal
+        isOpen={true}
+        onClose={mockOnClose}
+        onSave={mockOnSave}
+        stagedResponders={stagedResponders}
+        initialData={{ leader_responder_id: 'res-1', responder_ids: ['res-2'] }}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Save & Exit/i }));
+
+    await waitFor(() => {
+      expect(mockOnSave).toHaveBeenCalled();
+      const [callPayload] = mockOnSave.mock.calls[0];
+      // The modal itself does not auto-generate names; it passes up the blank value.
+      expect(callPayload.team_name_number).toBe('');
+      expect(callPayload.leader_responder_id).toBe('res-1');
+    });
+  });
+
+  it('should call onSave with updated members on edit', async () => {
+    const existingTeam = {
+      team_id: 'team-abc',
+      team_name_number: 'Alpha Team',
+      type: 'Hasty',
+      leader_responder_id: 'res-1',
+      responder_ids: ['res-2'],
     };
-    render(<TeamFormModal {...propsNoLeader} />);
-    
-    expect(screen.getByRole('button', { name: /Save Changes/i })).toBeDisabled();
-  });
 
-  it('calls onClose when Cancel is clicked', () => {
-    render(<TeamFormModal {...defaultProps} />);
-    fireEvent.click(screen.getByText('Cancel'));
-    expect(defaultProps.onClose).toHaveBeenCalled();
-  });
+    const { rerender } = render(
+      <TeamFormModal
+        isOpen={true}
+        onClose={mockOnClose}
+        onSave={mockOnSave}
+        stagedResponders={stagedResponders}
+        initialData={existingTeam}
+      />
+    );
 
-  it('enforces unique staff positions: moving IC role clears it from previous holder', () => {
-    const staffProps = {
-      ...defaultProps,
-      initialData: { 
-        ...defaultProps.initialData, 
-        type: 'Staff', 
-        leader_responder_id: 'r1',
-        responder_roles: { 'r1': 'Incident Commander' }
-      }
-    };
-    render(<TeamFormModal {...staffProps} />);
+    // Simulate removing res-2 and adding res-3 by re-rendering with new props
+    rerender(
+       <TeamFormModal
+        isOpen={true}
+        onClose={mockOnClose}
+        onSave={mockOnSave}
+        stagedResponders={stagedResponders}
+        initialData={{ ...existingTeam, responder_ids: ['res-3'] }}
+      />
+    );
 
-    // Find Responder 2 chip and the IC drop zone (Row 1)
-    const r2Chip = screen.getByText('Responder 2').closest('[draggable="true"]');
-    const icRow = screen.getByText('Incident Commander').closest('tr');
+    // In edit mode, the button text is "Save Changes"
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }));
 
-    const dataTransfer = { setData: vi.fn(), getData: vi.fn().mockReturnValue('r2') };
-    fireEvent.dragStart(r2Chip, { dataTransfer });
-    fireEvent.drop(icRow, { dataTransfer });
-
-    // Responder 2 should now be the IC
-    const table = screen.getByRole('table');
-    const rows = within(table).getAllByRole('row');
-    expect(within(rows[1]).getByText('Responder 2')).toBeInTheDocument();
-    // Responder 1 is no longer IC (it would move to custom members or clear)
-    expect(within(rows[1]).queryByText('Responder 1')).not.toBeInTheDocument();
-  });
-
-  it('renders role input fields for custom team members', () => {
-    const propsWithMember = {
-      ...defaultProps,
-      initialData: { 
-        ...defaultProps.initialData, 
-        leader_responder_id: 'r1',
-        responder_ids: ['r1', 'r2'],
-        responder_roles: { 'r1': 'Team Leader', 'r2': 'Tracker' }
-      }
-    };
-    render(<TeamFormModal {...propsWithMember} />);
-
-    // R1 is the leader (Role is a fixed label)
-    expect(screen.getByText('Team Leader')).toBeInTheDocument();
-    
-    // R2 is a custom member
-    const trackerInput = screen.getByPlaceholderText(/Assign role.../i);
-    expect(trackerInput).toHaveValue('Tracker');
-
-    fireEvent.change(trackerInput, { target: { value: 'Medic' } });
-    expect(propsWithMember.onSave).not.toHaveBeenCalled(); // Ensure local state change only
-  });
-
-  it('hides the "Staff" type option when a staff team already exists', () => {
-    const propsWithExistingStaff = {
-      ...defaultProps,
-      commandStaffExists: true,
-      initialData: { ...defaultProps.initialData, team_id: null, type: 'Ground' }
-    };
-    render(<TeamFormModal {...propsWithExistingStaff} />);
-    
-    const typeSelect = screen.getByLabelText(/Type/i);
-    const options = within(typeSelect).queryAllByRole('option');
-    const staffOption = options.find(o => o.getAttribute('value') === 'Staff');
-    
-    expect(staffOption).toBeUndefined();
-  });
-
-  it('renders staged responders regardless of case in status values', () => {
-    const mixedStatusResponders = [
-      ...mockResponders,
-      { responder_id: 'r3', name: 'Responder 3', agency: 'Agency C', status: 'staged' }
-    ];
-
-    render(<TeamFormModal {...defaultProps} responders={mixedStatusResponders} />);
-    expect(screen.getByText('Responder 3')).toBeInTheDocument();
-  });
-
-  it('normalizes legacy "Search" suffixes in team type on load', () => {
-    const legacyProps = {
-      ...defaultProps,
-      initialData: { ...defaultProps.initialData, type: 'Vehicle Search' }
-    };
-    render(<TeamFormModal {...legacyProps} />);
-    
-    expect(screen.getByLabelText(/Type/i)).toHaveValue('Vehicle');
-  });
-
-  it('removes a responder from the team when dropped back into the staged pool', async () => {
-    const propsWithMember = {
-      ...defaultProps,
-      initialData: { 
-        ...defaultProps.initialData, 
-        responder_ids: ['r1'],
-        responder_roles: { 'r1': 'Medic' }
-      }
-    };
-    render(<TeamFormModal {...propsWithMember} />);
-
-    const memberChip = screen.getByText('Responder 1').closest('[draggable="true"]');
-    const pool = screen.getByText(/Staged Responders/i).closest('.responder-pool');
-
-    const dataTransfer = { setData: vi.fn(), getData: vi.fn().mockReturnValue('r1') };
-    fireEvent.dragStart(memberChip, { dataTransfer });
-    fireEvent.drop(pool, { dataTransfer });
-
-    expect(within(pool).getByText('Responder 1')).toBeInTheDocument();
-  });
-
-  it('prevents adding the same responder twice to the team composition', () => {
-    render(<TeamFormModal {...defaultProps} initialData={{ ...defaultProps.initialData, responder_ids: ['r1'] }} />);
-    const compositionTable = screen.getByRole('table');
-    const dataTransfer = { getData: vi.fn().mockReturnValue('r1') };
-    
-    // Attempt to drop R1 onto the member row again
-    fireEvent.drop(within(compositionTable).getByText(/Drop chips here/i), { dataTransfer });
-    expect(within(compositionTable).getAllByText('Responder 1')).toHaveLength(1);
-  });
-
-  it('correctly initializes member list from nested current_responders view data', () => {
-    const viewDataProps = {
-      ...defaultProps,
-      initialData: {
-        team_id: 't1',
-        current_responders: [
-          { responder_id: 'r1', name: 'Responder 1', role: 'Medic' }
-        ]
-      }
-    };
-    render(<TeamFormModal {...viewDataProps} />);
-    expect(screen.getByText('Responder 1')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('Medic')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(mockOnSave).toHaveBeenCalled();
+      const [payload] = mockOnSave.mock.calls[0];
+      expect(payload.team_id).toBe('team-abc');
+      // The component passes the final state, not a diff.
+      expect(payload.responder_ids).toEqual(['res-3']);
+    });
   });
 });

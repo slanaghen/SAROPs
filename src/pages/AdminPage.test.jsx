@@ -932,6 +932,45 @@ describe('AdminPage Authentication Gate', () => {
     });
   });
 
+  it('prompts for confirmation and calls clear_data RPC to clear operational data', async () => {
+    const mockClearIncident = vi.fn();
+    const mockSetResponderId = vi.fn();
+    const mockSetResponderStatus = vi.fn();
+    vi.mocked(useIncident).mockReturnValue({
+      isAdmin: true,
+      clearIncident: mockClearIncident,
+      setResponderId: mockSetResponderId,
+      setResponderStatus: mockSetResponderStatus,
+      operationsRefreshInterval: 30000,
+      responderRefreshInterval: 30000,
+      sartopoRefreshInterval: 30000,
+    });
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const mockRefreshAll = vi.fn();
+    vi.mocked(useAdminData).mockReturnValue({
+      users: [], incidents: [], responders: [], vehicles: [], teams: [], assignments: [],
+      loading: false, refresh: vi.fn(), refreshAll: mockRefreshAll
+    });
+    supabase.rpc.mockResolvedValueOnce({ error: null });
+
+    render(<BrowserRouter><AdminPage /></BrowserRouter>);
+    
+    const clearBtn = await screen.findByRole('button', { name: /Clear Data/i });
+    fireEvent.click(clearBtn);
+
+    expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('clear all operational data'));
+    await waitFor(() => {
+      expect(supabase.rpc).toHaveBeenCalledWith('clear_data');
+      expect(mockClearIncident).toHaveBeenCalled();
+      expect(mockSetResponderId).toHaveBeenCalledWith(null);
+      expect(mockSetResponderStatus).toHaveBeenCalledWith('CheckedOut');
+      expect(mockAddToast).toHaveBeenCalledWith('Operational data cleared successfully.', 'success');
+      expect(mockRefreshAll).toHaveBeenCalled();
+    });
+    
+    confirmSpy.mockRestore();
+  });
+
   it('displays an error message if incident activation RPC fails', async () => {
     vi.mocked(useIncident).mockReturnValue({
       isAdmin: true,

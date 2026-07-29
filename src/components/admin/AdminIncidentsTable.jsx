@@ -134,12 +134,14 @@ const AdminIncidentsTable = ({
                             </button>
                           )}
                           <button onClick={() => handleEditIncident(inc)} className="action-btn action-btn-secondary">Edit</button>
-                          <button
-                            onClick={() => handleDeleteIncident(inc.incident_id, inc.name)}
-                            className="action-btn action-btn-danger"
-                          >
-                            Delete
-                          </button>
+                          {!isActive && (
+                            <button
+                              onClick={() => handleDeleteIncident(inc.incident_id, inc.name)}
+                              className="action-btn action-btn-danger"
+                            >
+                              Delete
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
