@@ -1386,10 +1386,15 @@ GRANT EXECUTE ON FUNCTION reinitialize_database TO authenticated;-- /db/12_new_l
 -- This logic is now replaced by an aggregate status calculation.
 DROP TRIGGER IF EXISTS trigger_sync_team_status_from_assignment ON public.assignments;
 
--- 2. A team may be linked to any number of assignments, including deployed
--- assignments. Remove the legacy restriction that allowed only one deployed
--- assignment per team.
+-- 2. A team may be linked to any number of assignments (e.g. a queue of
+-- Planned/Assigned tasks), but at most one of those assignments may be
+-- Deployed at a time -- a team can only be actively executing one task.
+-- This is a partial unique index (not a plain UNIQUE on team_id) so many
+-- non-Deployed assignments can still share a team_id freely.
 DROP INDEX IF EXISTS public.one_deployed_assignment_per_team;
+CREATE UNIQUE INDEX one_deployed_assignment_per_team
+ON public.assignments (team_id)
+WHERE status = 'Deployed' AND team_id IS NOT NULL;
 
 -- 3. Create a function to calculate and update a team's aggregate status based on its assignments.
 CREATE OR REPLACE FUNCTION public.update_team_status_from_assignments(_team_id UUID)

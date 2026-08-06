@@ -101,4 +101,65 @@ describe('OperationsDashboardPage', () => {
       expect(mockAssignTeamToAssignment).toHaveBeenCalledWith('team-staged-1', 'asn-planned-1');
     });
   });
+
+  it('groups multiple assignments linked to the same team into a single row', async () => {
+    vi.mocked(usePlanningDashboard).mockReturnValue({
+      teams: [{ team_id: 'team-1', team_name_number: 'Team Alpha', type: 'Ground', status: 'Assigned' }],
+      assignments: [
+        { assignment_id: 'asn-1', title: 'Hasty Search', status: 'Assigned', team_id: 'team-1' },
+        { assignment_id: 'asn-2', title: 'Grid Search', status: 'Assigned', team_id: 'team-1' },
+      ],
+      responders: [], vehicles: [], opPeriod: { par_check_interval: 60 }, loading: false, error: null,
+      fetchDashboardData: vi.fn(), assignTeamToAssignment: mockAssignTeamToAssignment,
+      stats: {
+        teams: { staged: 0, assigned: 1, deployed: 0, total: 1 },
+        assignments: { planned: 0, assigned: 2, deployed: 0, complete: 0, incomplete: 0, total: 2 },
+        responders: { staged: 0, attached: 0, assigned: 0, deployed: 0, total: 0 },
+      },
+      setError: vi.fn(), setLoading: vi.fn(), updateResourceStatus: vi.fn(), unassignTeam: vi.fn(),
+      createTeam: vi.fn(), createAssignment: vi.fn(), deleteAssignment: vi.fn(), disbandTeam: vi.fn(),
+      updateTeam: vi.fn(), updateAssignment: vi.fn(), attachResponderToTeam: vi.fn(), detachResponderFromTeam: vi.fn(),
+    });
+
+    render(<OperationsDashboardPage />);
+
+    // One row for the team, not two duplicate rows for its two assignments.
+    await screen.findByTestId('team-team-1');
+    expect(screen.queryByTestId('asn-asn-1')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('asn-asn-2')).not.toBeInTheDocument();
+    expect(screen.getByText('Hasty Search, Grid Search')).toBeInTheDocument();
+  });
+
+  it('allows dropping an additional assignment onto a team that already has one', async () => {
+    vi.mocked(usePlanningDashboard).mockReturnValue({
+      teams: [{ team_id: 'team-1', team_name_number: 'Team Alpha', type: 'Ground', status: 'Assigned' }],
+      assignments: [
+        { assignment_id: 'asn-1', title: 'Hasty Search', status: 'Assigned', team_id: 'team-1' },
+        { assignment_id: 'asn-2', title: 'Grid Search', status: 'Planned', team_id: null },
+      ],
+      responders: [], vehicles: [], opPeriod: { par_check_interval: 60 }, loading: false, error: null,
+      fetchDashboardData: vi.fn(), assignTeamToAssignment: mockAssignTeamToAssignment,
+      stats: {
+        teams: { staged: 0, assigned: 1, deployed: 0, total: 1 },
+        assignments: { planned: 1, assigned: 1, deployed: 0, complete: 0, incomplete: 0, total: 2 },
+        responders: { staged: 0, attached: 0, assigned: 0, deployed: 0, total: 0 },
+      },
+      setError: vi.fn(), setLoading: vi.fn(), updateResourceStatus: vi.fn(), unassignTeam: vi.fn(),
+      createTeam: vi.fn(), createAssignment: vi.fn(), deleteAssignment: vi.fn(), disbandTeam: vi.fn(),
+      updateTeam: vi.fn(), updateAssignment: vi.fn(), attachResponderToTeam: vi.fn(), detachResponderFromTeam: vi.fn(),
+    });
+
+    render(<OperationsDashboardPage />);
+
+    const teamRow = await screen.findByTestId('team-team-1');
+    const orphanAssignmentCell = await screen.findByText('Grid Search');
+
+    const dataTransfer = { setData: vi.fn(), effectAllowed: '' };
+    fireEvent.dragStart(orphanAssignmentCell, { dataTransfer });
+    fireEvent.drop(teamRow);
+
+    await waitFor(() => {
+      expect(mockAssignTeamToAssignment).toHaveBeenCalledWith('team-1', 'asn-2');
+    });
+  });
 });

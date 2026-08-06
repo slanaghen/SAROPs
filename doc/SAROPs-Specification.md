@@ -73,7 +73,7 @@ A Team is a functional unit assigned to a specific **Operational Period**.
 | :--- | :--- | :--- |
 | `team_id` | UUID | Primary Key. |
 | `op_period_id` | UUID | Foreign Key to `operational_periods`. |
-| `team_name_number` | TEXT | The user-defined or auto-generated name (e.g., "Ground 1"). |
+| `team_name_number` | TEXT | The user-defined or auto-generated name (e.g., "101"). |
 | `type` | `team_type` ENUM | The functional type (e.g., Ground, Hasty, Staff). |
 | `status` | `team_status` ENUM | The current operational status of the team. |
 | `leader_responder_id`| UUID | Foreign Key to the designated leader in the `responders` table. |
@@ -83,7 +83,7 @@ A Team is a functional unit assigned to a specific **Operational Period**.
 - **UI**: Managed via the reusable `TeamFormModal.jsx` component.
 - **Logic**:
     - A **Team Leader** is mandatory.
-    - If the team name is blank, it is auto-generated (e.g., "Ground 1", "Ground 2").
+    - If the team name is blank, it is auto-generated as `{Operational Period #}{Incrementing Number}` with the number zero-padded to two digits (e.g., "101", "102" for the 1st and 2nd teams created in Operational Period 1). The incrementing number is a single sequence shared across all team types within the operational period, not scoped per type.
     - The `useTeamActions.js` hook orchestrates database operations.
     - The `ensure_leader_is_member` database trigger automatically adds the leader to the `team_responders` junction table.
 

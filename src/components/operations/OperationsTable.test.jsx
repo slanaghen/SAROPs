@@ -5,19 +5,20 @@ import OperationsTable from './OperationsTable';
 describe('OperationsTable', () => {
   const mockRows = [
     {
-      id: 'asn-a1',
-      assignmentId: 'a1',
+      id: 'team-t1',
+      assignments: [
+        { assignment_id: 'a1', title: 'Alpha Assignment', priority: 'High', resource_type: 'Ground', frequency_primary: 'TAC 1', status: 'Deployed', origin: 'SAROps' }
+      ],
       assignmentName: 'Alpha Assignment',
       assignmentPriority: 'High',
       assignmentType: 'Ground',
       tacChannel: 'TAC 1',
-      hasBoth: true,
+      assignmentStatus: 'Deployed',
       teamId: 't1',
       teamName: 'Team 1',
       teamType: 'Ground',
       teamLeader: 'Steve',
       leaderIdentifier: 'K9-1',
-      assignmentStatus: 'Deployed',
       teamStatus: 'Deployed',
       timeSincePar: '5m ago',
       isParOverdue: false
@@ -135,6 +136,46 @@ describe('OperationsTable', () => {
     // Test Unassign action
     fireEvent.change(actions, { target: { value: 'unassign' } });
     expect(defaultProps.onUnassignTeam).toHaveBeenCalledWith('a1', 't1', 'Alpha Assignment', 'Team 1');
+  });
+
+  it('renders a stack of independently clickable chips when a team has multiple assignments', () => {
+    const stackedRow = {
+      ...mockRows[0],
+      assignments: [
+        { assignment_id: 'a1', title: 'Alpha Assignment', priority: 'High', resource_type: 'Ground', frequency_primary: 'TAC 1', status: 'Deployed', origin: 'SAROps' },
+        { assignment_id: 'a2', title: 'Bravo Assignment', priority: 'Low', resource_type: 'Ground', frequency_primary: 'TAC 2', status: 'Planned', origin: 'SAROps' },
+      ],
+    };
+    render(<OperationsTable {...defaultProps} rows={[stackedRow]} />);
+
+    const alphaChip = screen.getByText('Alpha Assignment');
+    const bravoChip = screen.getByText('Bravo Assignment');
+    expect(alphaChip).toBeInTheDocument();
+    expect(bravoChip).toBeInTheDocument();
+
+    fireEvent.click(alphaChip);
+    expect(defaultProps.onEditAssignment).toHaveBeenCalledWith('a1');
+
+    fireEvent.click(bravoChip);
+    expect(defaultProps.onEditAssignment).toHaveBeenCalledWith('a2');
+  });
+
+  it('disables the Deployed option for a sibling assignment when one on the same team is already Deployed', () => {
+    const stackedRow = {
+      ...mockRows[0],
+      assignments: [
+        { assignment_id: 'a1', title: 'Alpha Assignment', priority: 'High', resource_type: 'Ground', frequency_primary: 'TAC 1', status: 'Deployed', origin: 'SAROps' },
+        { assignment_id: 'a2', title: 'Bravo Assignment', priority: 'Low', resource_type: 'Ground', frequency_primary: 'TAC 2', status: 'Planned', origin: 'SAROps' },
+      ],
+    };
+    render(<OperationsTable {...defaultProps} rows={[stackedRow]} />);
+
+    const planningSelect = screen.getByDisplayValue('Planned');
+    expect(within(planningSelect).getByRole('option', { name: 'Deployed' })).toBeDisabled();
+
+    // The already-Deployed assignment's own option doesn't conflict with itself.
+    const deployedSelect = screen.getByDisplayValue('Deployed');
+    expect(within(deployedSelect).getByRole('option', { name: 'Deployed' })).not.toBeDisabled();
   });
 
   it('shows empty state message when no rows are provided', () => {

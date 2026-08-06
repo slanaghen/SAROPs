@@ -117,65 +117,106 @@ const OperationsTable = ({
           {rows.length === 0 ? (
             <tr><td colSpan={parInterval > 0 ? 12 : 11} className="empty-row">No matching records found.</td></tr>
           ) : rows.map(row => {
-            const isHighPriorityPending = row.assignmentPriority === 'High' && row.assignmentStatus === 'Assigned';
-            
+            // A team is a valid target for an incoming assignment chip whether it
+            // already has assignments or not; dragging a team onto another row
+            // that already has a team is rejected upstream by the DnD hook's
+            // type-mismatch check (same tag => same type => no-op), so no extra
+            // per-row gating is needed here anymore.
+            const targetType = row.teamId ? 'team' : 'assignment';
+            const isHighPriorityPending = row.assignments.some(a => a.priority === 'High' && a.status === 'Assigned');
+
             const rowClass = [
-              (row.assignmentStatus === 'Deployed' && row.hasBoth) ? 'row-deployed' : '',
-              (row.assignmentStatus === 'Assigned' && row.hasBoth) ? 'row-assigned' : '',
-              (row.assignmentStatus === 'Completed' && row.hasBoth) ? 'row-complete' : '',
-              (!row.isParOverdue && isHighPriorityPending) ? 'row-glow-priority' : ''
+              (row.assignmentStatus === 'Deployed' && row.teamId) ? 'row-deployed' : '',
+              (row.assignmentStatus === 'Assigned' && row.teamId) ? 'row-assigned' : '',
+              (row.assignmentStatus === 'Completed' && row.teamId) ? 'row-completed' : '',
+              (!row.isParOverdue && isHighPriorityPending) ? 'row-glow-priority' : '',
+              (dropTarget?.id === row.id) ? 'row-drop-target' : ''
             ].filter(Boolean).join(' ');
 
             return (
               <tr key={row.id} className={rowClass}
-                onDragOver={!row.hasBoth ? (e) => onDragOver(e, row.id, row.id.startsWith('team-') ? 'team' : 'assignment') : undefined}
-                onDragEnter={!row.hasBoth ? (e) => onDragEnter(e, row.id, row.id.startsWith('team-') ? 'team' : 'assignment') : undefined}
-                onDragLeave={!row.hasBoth ? onDragLeave : undefined}
-                onDrop={!row.hasBoth ? (e) => onDrop(e, row.id, row.id.startsWith('team-') ? 'team' : 'assignment') : undefined}
+                onDragOver={(e) => onDragOver(e, row.id, targetType)}
+                onDragEnter={(e) => onDragEnter(e, row.id, targetType)}
+                onDragLeave={onDragLeave}
+                onDrop={(e) => onDrop(e, row.id, targetType)}
               >
-              <td 
-                style={{ textAlign: 'center' }}
-              >
-                {row.assignmentName ? (
-                  <div 
-                    className={`chip assignment-chip ${draggedItem?.id === row.id && draggedItem?.type === 'assignment' ? 'dragging' : ''} ${dropTarget?.id === row.id && dropTarget?.type === 'assignment' ? 'drop-target' : ''} ${row.hasBoth ? 'locked' : ''} ${row.assignmentName === 'Command Staff' ? 'staff-chip' : ''} ${row.assignmentOrigin === 'SARTopo' ? 'sartopo-chip' : ''}`}
-                    draggable={!row.hasBoth}
-                    onDragStart={!row.hasBoth ? (e) => onDragStart(e, row.id, 'assignment') : undefined}
-                    onDragEnd={onDragEnd}
-                    onClick={() => row.assignmentId && onEditAssignment(row.assignmentId)}
-                  >
-                    {row.assignmentName}
+              <td style={{ textAlign: 'center' }}>
+                {row.assignments.length > 0 ? (
+                  <div className="chip-stack">
+                    {row.assignments.map(asn => (
+                      <div
+                        key={asn.assignment_id}
+                        className={`chip assignment-chip ${draggedItem?.id === row.id && draggedItem?.type === 'assignment' ? 'dragging' : ''} ${dropTarget?.id === row.id && dropTarget?.type === 'assignment' ? 'drop-target' : ''} ${row.teamId ? 'locked' : ''} ${asn.title === 'Command Staff' ? 'staff-chip' : ''} ${asn.origin === 'SARTopo' ? 'sartopo-chip' : ''}`}
+                        draggable={!row.teamId}
+                        onDragStart={!row.teamId ? (e) => onDragStart(e, row.id, 'assignment') : undefined}
+                        onDragEnd={onDragEnd}
+                        onClick={() => onEditAssignment(asn.assignment_id)}
+                      >
+                        {asn.title}
+                      </div>
+                    ))}
                   </div>
                 ) : '—'}
               </td>
-              <td style={{ textAlign: 'center' }}>{row.assignmentType || '—'}</td>
-              <td style={{ textAlign: 'center' }}>{row.assignmentPriority || '—'}</td>
-              <td style={{ textAlign: 'center' }}>{row.tacChannel || '—'}</td>
               <td style={{ textAlign: 'center' }}>
-                {row.assignmentId ? (
-                  row.hasBoth ? (
-                    <select 
-                      value={row.assignmentStatus} 
-                      onChange={(e) => onStatusUpdate(row.assignmentId, row.teamId, e.target.value)}
-                      className={`status-indicator ${(row.assignmentStatus || '').toLowerCase()} status-select-inline`}
-                    >
-                      <option value="Planned">Planned</option>
-                      <option value="Assigned">Assigned</option>
-                      <option value="Deployed">Deployed</option>
-                      <option value="Completed">Completed</option>
-                      <option value="Incomplete">Incomplete</option>
-                    </select>
-                  ) : <span className={`status-indicator ${row.assignmentStatus?.toLowerCase() || ''}`}>{row.assignmentStatus || '—'}</span>
+                {row.assignments.length > 0 ? (
+                  <div className="chip-stack">
+                    {row.assignments.map(asn => <div key={asn.assignment_id}>{asn.resource_type || '—'}</div>)}
+                  </div>
+                ) : '—'}
+              </td>
+              <td style={{ textAlign: 'center' }}>
+                {row.assignments.length > 0 ? (
+                  <div className="chip-stack">
+                    {row.assignments.map(asn => <div key={asn.assignment_id}>{asn.priority || '—'}</div>)}
+                  </div>
+                ) : '—'}
+              </td>
+              <td style={{ textAlign: 'center' }}>
+                {row.assignments.length > 0 ? (
+                  <div className="chip-stack">
+                    {row.assignments.map(asn => <div key={asn.assignment_id}>{asn.frequency_primary || '—'}</div>)}
+                  </div>
+                ) : '—'}
+              </td>
+              <td style={{ textAlign: 'center' }}>
+                {row.assignments.length > 0 ? (
+                  <div className="chip-stack">
+                    {row.assignments.map(asn => {
+                      // A team may only have one Deployed assignment at a time
+                      // (enforced by a DB partial unique index) -- proactively
+                      // disable the option rather than let the save fail.
+                      const teamHasOtherDeployed = row.assignments.some(
+                        other => other.assignment_id !== asn.assignment_id && other.status === 'Deployed'
+                      );
+                      return row.teamId ? (
+                        <select
+                          key={asn.assignment_id}
+                          value={asn.status}
+                          onChange={(e) => onStatusUpdate(asn.assignment_id, row.teamId, e.target.value)}
+                          className={`status-indicator ${(asn.status || '').toLowerCase()} status-select-inline`}
+                        >
+                          <option value="Planned">Planned</option>
+                          <option value="Assigned">Assigned</option>
+                          <option value="Deployed" disabled={teamHasOtherDeployed}>Deployed</option>
+                          <option value="Completed">Completed</option>
+                          <option value="Incomplete">Incomplete</option>
+                        </select>
+                      ) : (
+                        <span key={asn.assignment_id} className={`status-indicator ${asn.status?.toLowerCase() || ''}`}>{asn.status || '—'}</span>
+                      );
+                    })}
+                  </div>
                 ) : null}
               </td>
               <td 
                 style={{ textAlign: 'center' }}
               >
                 {row.teamName ? (
-                  <div 
-                    className={`chip team-chip ${draggedItem?.id === row.id && draggedItem?.type === 'team' ? 'dragging' : ''} ${dropTarget?.id === row.id && dropTarget?.type === 'team' ? 'drop-target' : ''} ${row.hasBoth ? 'locked' : ''} ${row.teamType === 'Staff' ? 'staff-chip' : ''}`}
-                    draggable={!row.hasBoth}
-                    onDragStart={!row.hasBoth ? (e) => onDragStart(e, row.id, 'team') : undefined}
+                  <div
+                    className={`chip team-chip ${draggedItem?.id === row.id && draggedItem?.type === 'team' ? 'dragging' : ''} ${dropTarget?.id === row.id && dropTarget?.type === 'team' ? 'drop-target' : ''} ${row.teamType === 'Staff' ? 'staff-chip' : ''}`}
+                    draggable
+                    onDragStart={(e) => onDragStart(e, row.id, 'team')}
                     onDragEnd={onDragEnd}
                     onClick={() => row.teamId && onEditTeam(row.teamId)}
                   >
@@ -217,46 +258,43 @@ const OperationsTable = ({
                 </td>
               )}
               <td style={{ textAlign: 'center' }}>
+                {/* Edit/Delete/Unassign only have an unambiguous single target when
+                    there's exactly one assignment on the row; once a team is carrying
+                    several, use each chip's own onClick to edit a specific one instead. */}
                 <select className="status-update-select" value="" onChange={(e) => {
                   const act = e.target.value;
+                  const soleAssignment = row.assignments.length === 1 ? row.assignments[0] : null;
                   if (act === 'edit-team' && row.teamId) {
                     console.log(`[OperationsTable] Edit action triggered for teamId: ${row.teamId}`);
                     onEditTeam(row.teamId);
                   }
-                  else if (act === 'edit-assignment' && row.assignmentId) onEditAssignment(row.assignmentId);
+                  else if (act === 'edit-assignment' && soleAssignment) onEditAssignment(soleAssignment.assignment_id);
                   else if (act === 'reset-par') onResetPar(row.teamId, row.teamName);
-                  else if (act === 'unassign') onUnassignTeam(row.assignmentId, row.teamId, row.assignmentName, row.teamName);
+                  else if (act === 'unassign' && soleAssignment) onUnassignTeam(soleAssignment.assignment_id, row.teamId, soleAssignment.title, row.teamName);
                   else if (act === 'assign-resource') onAssignResource(row);
-                  else if (act === 'edit') row.teamId ? onEditTeam(row.teamId) : onEditAssignment(row.assignmentId);
-                  else if (act === 'new-team') onNewTeam(row.assignmentId);
+                  else if (act === 'edit') row.teamId ? onEditTeam(row.teamId) : (soleAssignment && onEditAssignment(soleAssignment.assignment_id));
+                  else if (act === 'new-team' && soleAssignment) onNewTeam(soleAssignment.assignment_id);
                   else if (act === 'new-assignment') onNewAssignment(row.teamId);
                   else if (act === 'detach') onDisbandTeam(row.teamId, row.teamName);
-                  else if (act === 'delete') onDeleteAssignment(row.assignmentId, row.assignmentName);
+                  else if (act === 'delete' && soleAssignment) onDeleteAssignment(soleAssignment.assignment_id, soleAssignment.title);
                 }}>
                   <option value="" disabled>Actions...</option>
-                  {row.hasBoth ? (
+                  {row.teamId ? (
                     <>
                       <option value="edit-team">Edit Team</option>
-                      <option value="edit-assignment">Edit Assignment</option>
-                      <option value="unassign">Unassign Team</option>
+                      {row.assignments.length === 1 && <option value="edit-assignment">Edit Assignment</option>}
+                      <option value="assign-resource">Assign Assignment</option>
+                      {row.assignments.length === 1 && <option value="unassign">Unassign Team</option>}
+                      <option value="new-assignment">New Assignment</option>
                       {parInterval > 0 && <option value="reset-par">Reset PAR</option>}
+                      <option value="detach" disabled={row.teamStatus === 'Deployed'}>Disband Team</option>
                     </>
                   ) : (
                     <>
                       <option value="edit">Edit</option>
-                      <option value="assign-resource">{row.assignmentId ? 'Assign Team' : 'Assign Assignment'}</option>
-                      {row.teamId ? (
-                        <>
-                          <option value="new-assignment">New Assignment</option>
-                          {parInterval > 0 && <option value="reset-par">Reset PAR</option>}
-                          <option value="detach" disabled={row.teamStatus === 'Deployed'}>Disband Team</option>
-                        </>
-                      ) : (
-                        <>
-                          <option value="new-team">New Team</option>
-                          <option value="delete">Delete Assignment</option>
-                        </>
-                      )}
+                      <option value="assign-resource">Assign Team</option>
+                      <option value="new-team">New Team</option>
+                      <option value="delete">Delete Assignment</option>
                     </>
                   )}
                 </select>

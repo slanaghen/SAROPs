@@ -46,6 +46,31 @@ export const formatTimeSince = (timestamp, now = Date.now()) => {
 
   const hours = Math.floor(diffMinutes / 60);
   const minutes = diffMinutes % 60;
-  
+
   return `${hours}h ${minutes}m ago`;
+};
+
+/**
+ * Auto-generates a team name when the user leaves it blank:
+ * {Operational Period #}{Incrementing Number}, the number zero-padded to two
+ * digits (e.g. "101", "102" for the 1st and 2nd teams created in OP 1). This
+ * is a single sequence per operational period, shared across all team types
+ * (not scoped per type).
+ *
+ * @param {number} opNumber - The current operational period's op_number.
+ * @param {Array} teams - Existing teams in the operational period, used both
+ *   to pick a starting offset and to guard against name collisions.
+ * @returns {string} - The generated team name.
+ */
+export const generateTeamName = (opNumber, teams = []) => {
+  const op = opNumber || 1;
+  let nextNum = (teams || []).length + 1;
+  let name = `${op}${String(nextNum).padStart(2, '0')}`;
+
+  // Local uniqueness check to avoid immediate collisions
+  while ((teams || []).some(t => t.team_name_number === name)) {
+    nextNum++;
+    name = `${op}${String(nextNum).padStart(2, '0')}`;
+  }
+  return name;
 };
