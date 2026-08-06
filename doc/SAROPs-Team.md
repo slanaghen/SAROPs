@@ -59,22 +59,20 @@ The process is similar to creation, using the same modal but populated with the 
 
 ## 3. Team Status Workflow
 
-The status of a team dictates its operational state and is tightly synchronized with the status of its assigned responders, vehicles, and assignment.
+The status of a team is an **aggregate** of the statuses of all assignments it is linked to. This ensures the team's operational state accurately reflects its highest level of commitment. The synchronization is managed by database triggers.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Staged: Team Created
-
-    Staged --> Assigned: Linked to Assignment
-    Assigned --> Staged: Unlinked from Assignment
-
-    Assigned --> Deployed: Assignment Deployed
-    Deployed --> Assigned: Assignment Recalled
-
-    Deployed --> Disbanded: Assignment Completed
-    Assigned --> Disbanded: Assignment Cancelled
+    [*] --> Staged: Team Created / No Assignments
+    Staged --> Assigned: One or more assignments are 'Assigned'
+    Assigned --> Staged: All assignments are 'Planned' or unassigned
+    Assigned --> Deployed: Any assignment becomes 'Deployed'
+    Deployed --> Assigned: The last 'Deployed' assignment is completed/recalled, but other 'Assigned' tasks remain.
+    Deployed --> Staged: The last 'Deployed' assignment is completed/recalled, and no other 'Assigned' tasks remain.
+    
     Staged --> Disbanded: Manually Disbanded
-
+    Assigned --> Disbanded: Manually Disbanded
+    Deployed --> Disbanded: Manually Disbanded
     Disbanded --> [*]
 ```
 

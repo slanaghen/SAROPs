@@ -28,8 +28,15 @@
   "devDependencies": {
     "@testing-library/react": "^14.3.1",
     "@vitejs/plugin-react": "^4.3.4",
+    "fake-indexeddb": "^5.0.2",
     "jsdom": "^29.1.1",
     "vite": "^6.0.0",
     "vitest": "^4.1.8"
+  },
+  "allowScripts": {
+    "fsevents@2.3.3": true,
+    "fsevents@2.3.2": true,
+    "esbuild@0.25.12": true,
+    "@anthropic-ai/claude-code@2.1.218": true
   }
 }

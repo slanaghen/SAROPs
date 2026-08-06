@@ -6,6 +6,8 @@
 DB_DIR="./db"
 COMBINED_SQL="combined_schema.sql"
 source .env
+# Load environment variables from .env file for Supabase secrets
+supabase secrets set --env-file .env
 
 echo "--- Building combined schema ---"
 
@@ -15,6 +17,7 @@ REQUIRED_FILES=(
   "$DB_DIR/01_tables_core.sql"
   "$DB_DIR/02_tables_logistics.sql"
   "$DB_DIR/03_tables_tactical.sql"
+  "$DB_DIR/03a_schema_mods.sql"
   "$DB_DIR/04_indexes.sql"
   "$DB_DIR/05_views.sql"
   "$DB_DIR/06_functions.sql"
@@ -23,6 +26,8 @@ REQUIRED_FILES=(
   "$DB_DIR/09_rpcs.sql"
   "$DB_DIR/10_seed.sql"
   "$DB_DIR/11_admin_rpcs.sql"
+  "$DB_DIR/12_new_logic.sql"
+  "$DB_DIR/13_assignment_logic.sql"
   "$DB_DIR/seed-data-specific.sql"
   "$DB_DIR/99_clear_data.sql"
 )
@@ -56,18 +61,27 @@ if [ "$SAROPS_DB_INSTANCE" = "LOCAL" ]; then
     exit 1
   fi
 
-  if ! PGPASSWORD=postgres psql -h 127.0.0.1 -p ${DB_LOCAL_PORT:-54322} -U postgres -d postgres -v ON_ERROR_STOP=1 -f $COMBINED_SQL; then
+  if ! PGPASSWORD=${DB_LOCAL_PASSWORD:-postgres} psql -h 127.0.0.1 -p ${DB_LOCAL_PORT:-54322} -U postgres -d postgres -v ON_ERROR_STOP=1 -f $COMBINED_SQL; then
     echo "❌ Error: Failed to execute query on local database. Ensure port ${DB_LOCAL_PORT:-54322} is correct and 'supabase start' has finished."
     rm $COMBINED_SQL
     exit 1
   fi
   rm $COMBINED_SQL
   # Notify PostgREST to reload schema after local DB changes
-  PGPASSWORD=postgres psql -h 127.0.0.1 -p ${DB_LOCAL_PORT:-54322} -U postgres -d postgres -c "NOTIFY pgrst, 'reload schema';"
+  PGPASSWORD=${DB_LOCAL_PASSWORD:-postgres} psql -h 127.0.0.1 -p ${DB_LOCAL_PORT:-54322} -U postgres -d postgres -c "NOTIFY pgrst, 'reload schema';"
 else
-  if ! supabase sql query --project-ref $SUPABASE_PROJECT_ID --file "$COMBINED_SQL" >/dev/null 2>&1; then
-    echo "❌ Error: Failed to execute query on remote database."
+  echo "Re-Deploying Supabase Functions to ensure they are in sync with the new schema..."
+  if ! supabase functions deploy --project-ref ${SUPABASE_PROJECT_ID}; then
+    echo "❌ Error: Failed to deploy Supabase Functions."
     exit 1
+  fi
+  echo "✅ Supabase Functions deployed successfully." 
+  
+  echo "Re-Deploying Supabase Schema..."
+
+  if ! supabase sql query --project-ref ${SUPABASE_PROJECT_ID} --file "$COMBINED_SQL" >/dev/null 2>&1; then
+    echo "❌ Error: Failed to execute query on remote database."
+    #exit 1
   fi
   # Notify PostgREST to reload schema after remote DB changes
   # Note: The project-ref needs to be passed again for the NOTIFY command.

@@ -1,6 +1,12 @@
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import AdminUsersTable from './AdminUsersTable';
+import { useIncident } from '../../context/IncidentContext';
+
+// Mock dependencies that might cause side effects
+vi.mock('../../context/IncidentContext', () => ({
+  useIncident: vi.fn(),
+}));
 
 describe('AdminUsersTable', () => {
   const mockHandleEditUser = vi.fn();
@@ -25,6 +31,10 @@ describe('AdminUsersTable', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Provide a default mock for useIncident to prevent timeouts from async operations
+    vi.mocked(useIncident).mockReturnValue({
+      user: { email: 'admin@test.com' },
+    });
   });
 
   it('renders user rows and their data correctly', () => {

@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { Incident, Responder, Team, ResponderStatus } from '../types/sarops-types';
-import ResponderCheckin from '../components/ResponderCheckin';
+import { Incident, Responder, Team, ResponderStatus } from '../../sarops-types';
+import ResponderCheckin from '../components/responder/ResponderCheckin';
 import { useResponderCheckin } from '../hooks/useResponderCheckin';
 import { useIncident } from '../context/IncidentContext';
 import '../styles/FormElements.css';
@@ -179,15 +179,19 @@ const ResponderCheckinPage: React.FC<ResponderCheckinPageProps> = ({
     window.addEventListener('focus', fetchActiveIncidents);
 
     // Set up real-time listener to ensure incidents that end are removed from the list immediately
-    const channel = supabase
-      .channel('public:incidents-checkin')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'incidents' }, () => {
-        fetchActiveIncidents();
-      })
-      .subscribe();
+    const channel = typeof supabase.channel === 'function'
+      ? supabase
+        .channel('public:incidents-checkin')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'incidents' }, () => {
+          fetchActiveIncidents();
+        })
+        .subscribe()
+      : null;
 
     return () => {
-      supabase.removeChannel(channel);
+      if (channel && typeof supabase.removeChannel === 'function') {
+        supabase.removeChannel(channel);
+      }
       window.removeEventListener('focus', fetchActiveIncidents);
     };
   }, [fetchActiveIncidents, location.pathname]);

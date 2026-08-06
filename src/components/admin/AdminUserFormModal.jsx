@@ -5,7 +5,7 @@ import { useToast } from '../../context/ToastContext';
 import '../../styles/ActionButtons.css';
 import '../../styles/FormElements.css';
 
-const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, error, success, isProfileSettings = false }) => {
+const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, isProfileSettings = false, isOperationalProfile = false }) => {
   const [formData, setFormData] = useState({
     email: '',
     username: '',
@@ -17,7 +17,7 @@ const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
     cell_phone: '',
     responder_type: 'SAR',
     special_skills: '',
-    display_density: 'comfortable'
+    display_density: 'compact'
   });
   const { addToast } = useToast();
 
@@ -36,7 +36,7 @@ const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
         cell_phone: initialData.cell_phone || '',
         responder_type: initialData.responder_type || 'SAR',
         special_skills: initialData.special_skills || '',
-        display_density: initialData.display_density || 'comfortable',
+        display_density: initialData.display_density || 'compact',
       });
     } else {
       // Reset form for new user
@@ -51,7 +51,7 @@ const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
         cell_phone: '',
         responder_type: 'SAR',
         special_skills: '',
-        display_density: 'comfortable',
+        display_density: 'compact',
       });
     }
   }, [isOpen, initialData, isEditing]);
@@ -107,24 +107,26 @@ const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
                 value={formData.username}
                 data-lpignore="true"
                 onChange={handleChange}
-                disabled={isEditing}
+                disabled={isEditing || isOperationalProfile}
               />
             </div>
-            <div className="form-field">
-              <label className="form-label" htmlFor="user_password">
-                Password {isEditing && <span style={{ fontSize: '10px', color: '#64748b', display: 'inline', fontWeight: 400 }}> (Leave blank to keep current)</span>}
-              </label>
-              <input
-                id="user_password"
-                type="password"
-                name="password"
-                className="form-input"
-                value={formData.password}
-                onChange={handleChange}
-                placeholder={isEditing ? '••••••••' : '•••••••• (required)'}
-                required={!isEditing}
-              />
-            </div>
+            {!isOperationalProfile && (
+              <div className="form-field">
+                <label className="form-label" htmlFor="user_password">
+                  Password {isEditing && <span style={{ fontSize: '10px', color: '#64748b', display: 'inline', fontWeight: 400 }}> (Leave blank to keep current)</span>}
+                </label>
+                <input
+                  id="user_password"
+                  type="password"
+                  name="password"
+                  className="form-input"
+                  value={formData.password}
+                  onChange={handleChange}
+                  placeholder={isEditing ? '••••••••' : '•••••••• (required)'}
+                  required={!isEditing}
+                />
+              </div>
+            )}
           </div>
 
           <div className="form-grid" style={{ marginBottom: '16px' }}>
@@ -156,7 +158,7 @@ const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
                 data-lpignore="true"
                 placeholder="admin@agency.gov"
                 required
-                disabled={isEditing}
+                disabled={isEditing || isOperationalProfile}
               />
             </div>
             <div className="form-field" /> {/* Alignment */}
@@ -188,12 +190,13 @@ const AdminUserFormModal = ({ isOpen, onClose, onSave, initialData, loading, err
           <div className="form-grid" style={{ marginBottom: '16px' }}>
             <div className="form-field">
               <label className="form-label" htmlFor="user_level">Access Level</label>
-              <select id="user_level" name="access_level" className="form-select" value={formData.access_level} onChange={handleChange} disabled={isProfileSettings}>
+              <select id="user_level" name="access_level" className="form-select" value={formData.access_level} onChange={handleChange} disabled={isProfileSettings || isOperationalProfile}>
                 <option value="responder">Responder</option>
                 <option value="staff">Staff</option>
                 <option value="admin">Admin</option>
               </select>
-              {isProfileSettings && <small className="form-hint" style={{ display: 'block', marginTop: '4px' }}>Contact an administrator to change permissions.</small>}
+              {isProfileSettings && !isOperationalProfile && <small className="form-hint" style={{ display: 'block', marginTop: '4px' }}>Contact an administrator to change permissions.</small>}
+              {isOperationalProfile && <small className="form-hint" style={{ display: 'block', marginTop: '4px' }}>Role is managed by incident command.</small>}
             </div>
             <div className="form-field">
               <label className="form-label">Display Density</label>

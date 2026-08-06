@@ -1,6 +1,5 @@
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import { sendMessage, sendBroadcastMessage } from './messageService';
-import { TEAM_TYPE } from '../utils/constants';
 
 describe('Message Service', () => {
   const mockSupabase = {
@@ -71,8 +70,8 @@ describe('Message Service', () => {
     const mockSetBroadcastMessage = vi.fn();
     const mockSetShowBroadcastModal = vi.fn();
     const teams = [
-      { team_id: 't-staff', type: TEAM_TYPE.STAFF },
-      { team_id: 't-ground', type: TEAM_TYPE.GROUND },
+      { team_id: 't-staff', type: 'Staff' },
+      { team_id: 't-ground', type: 'Ground' },
     ];
 
     it('should send a broadcast to the Staff team and perform cleanup', async () => {
@@ -101,7 +100,7 @@ describe('Message Service', () => {
     });
 
     it('should throw an error if no Staff team is found', async () => {
-      const noStaffTeams = [{ team_id: 't-ground', type: TEAM_TYPE.GROUND }];
+      const noStaffTeams = [{ team_id: 't-ground', type: 'Ground' }];
 
       await expect(sendBroadcastMessage({
         supabase: mockSupabase,

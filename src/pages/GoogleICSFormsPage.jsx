@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { useIncident } from '../context/IncidentContext';
 import { useToast } from '../context/ToastContext';
-import '../styles.css';
+import '../styles/styles.css';
 
 /**
  * GoogleICSFormsPage

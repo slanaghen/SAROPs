@@ -1,4 +1,3 @@
-import { signSartopoRequest } from '../utils/sartopoAuth';
 import { mapSartopoToAssignment } from '../utils/gisUtils';
 
 /**
@@ -33,40 +32,37 @@ export const getSartopoConfig = (sartopoId) => {
 };
 
 /**
- * Shared helper for building signed SARTopo URLs.
+ * Invokes the Supabase Edge Function to securely proxy a request to the SARTopo API.
+ * The Edge Function handles the signing, protecting the API secret.
  */
-export const buildSecureSartopoUrl = async (method, path, sartopoConfig, payload = null) => {
-  const credId = import.meta.env.VITE_SARTOPO_API_CREDENTIAL_ID || (typeof process !== 'undefined' ? process.env.VITE_SARTOPO_API_CREDENTIAL_ID : undefined);
-  const secret = import.meta.env.VITE_SARTOPO_API_CREDENTIAL_SECRET || (typeof process !== 'undefined' ? process.env.VITE_SARTOPO_API_CREDENTIAL_SECRET : undefined);
-  const authParams = new URLSearchParams();
-
-  if (!credId || !secret) {
-    throw new Error('SARTopo credentials not configured.');
-  }
-
-  const expires = Date.now() + (2 * 60 * 1000); // 2 minute window
-  console.log(`[SARTopo] Signed API request generated. Secret: ${secret}, Expires: ${expires}`);
-  const signature = await signSartopoRequest(method, path, expires, payload, secret);
-
-  authParams.set('id', credId);
-  authParams.set('expires', String(expires));
-  authParams.set('signature', signature);
-
-  // For GET requests, parameters go in the query string.
-  // For POST requests, parameters go in the form-encoded body (returned as authParams).
-  const useQuery = method.toUpperCase() !== 'POST';
-  const queryBase = new URLSearchParams(sartopoConfig.params);
-  if (useQuery) {
-    authParams.forEach((v, k) => queryBase.set(k, v));
-  }
-
-  const queryString = queryBase.toString() ? '?' + queryBase.toString() : '';
-  return { 
-    url: `/sartopo-api${path}${queryString}`,
-    authParams,
-    credId,
-    secret
+const invokeSartopoProxy = async (supabase, method, path, sartopoConfig, payload = null) => {
+  // The URLSearchParams object in sartopoConfig is not directly serializable to JSON.
+  // We must convert it to a string before sending it to the edge function.
+  const serializableConfig = {
+    ...sartopoConfig,
+    params: sartopoConfig?.params?.toString() || '',
   };
+
+  const { data, error } = await supabase.functions.invoke('sartopo-proxy', {
+    body: {
+      method,
+      path,
+      sartopoConfig: serializableConfig, // Pass the serializable version
+      payload,       // Pass payload for POST requests
+    },
+  });
+
+  if (error) {
+    throw new Error(`Edge Function Error: ${error.message}`);
+  }
+
+  // The edge function returns the JSON response from SARTopo directly.
+  // If the SARTopo API itself returned an error, it will be in the `data` payload.
+  if (data.error) {
+    throw new Error(`SARTopo API Error: ${data.error}`);
+  }
+
+  return data;
 };
 
 /**
@@ -78,62 +74,31 @@ export const downloadAndSyncSartopoData = async ({
   incidentId, 
   opPeriodId, 
   sartopoConfig, 
-  lastFetchTime = 0,
   userName = 'SARTopo Sync'
 }) => {
   if (!sartopoConfig.id || !opPeriodId || !incidentId) return null;
 
-  const path = `/api/v1/map/${sartopoConfig.id}/since/${lastFetchTime}`;
-  const { url, credId, secret } = await buildSecureSartopoUrl('GET', path, sartopoConfig);
-  
-  const response = await fetch(url);
-  if (credId && secret) {
-    console.log(`[SARTopo] Signed GET request ${path} completed. Status: ${response.status}`);
-  }
+  // Map data is intentionally not cached. Fetch a complete, current map state
+  // for every synchronization.
+  const path = `/api/v1/map/${sartopoConfig.id}/since/0`;
+  const data = await invokeSartopoProxy(supabase, 'GET', path, sartopoConfig);
 
-  if (!response.ok) {
-    const text = await response.text();
-    // If the response is HTML, SARTopo is likely returning an error page (404/403)
-    if (text.includes('<!DOCTYPE html>')) {
-      throw new Error(`SARTopo returned an error page (HTTP ${response.status}). Verify the Map ID is correct and ensure "API Access" or "Offline Access" is enabled in map settings.`);
-    }
-    throw new Error(`SARTopo returned ${response.status}: ${response.statusText}`);
-  }
-
-  const data = await response.json();
   const fetchedAt = Date.now();
   const fetchedFeatures = data?.result?.state?.features || data?.features || [];
 
-  // 1. Reconciliation Baseline - Merge new data with existing persisted state
-  let mergedSartopoMapData = data;
-  let baselineMirror = null;
-  const { data: incRes } = await supabase.from('incidents').select('sartopo_map_data').eq('incident_id', incidentId).maybeSingle();
-  if (incRes?.sartopo_map_data) {
-    baselineMirror = incRes.sartopo_map_data;
-    const baseFeatures = baselineMirror?.result?.state?.features || baselineMirror?.features || [];
-    const featMap = new Map(baseFeatures.map(f => [f.id, f]));
-    fetchedFeatures.forEach(f => { if (f.id) featMap.set(f.id, f); });
-    mergedSartopoMapData = { type: "FeatureCollection", features: Array.from(featMap.values()) };
-  }
-
-  // 2. Persist raw map data to database
-  await supabase.from('incidents').update({ sartopo_map_data: mergedSartopoMapData }).eq('incident_id', incidentId);
-
-  // 3. Reconcile assignments
+  // Reconcile assignments against the current complete map response.
   let syncedTitles = [];
   if (fetchedFeatures.length > 0) {
     const { data: existingAsns } = await supabase.from('assignments').select('*').eq('op_period_id', opPeriodId);
     const existingMap = new Map(existingAsns?.map(a => [a.sartopo_id, a]) || []);
     const existingTitleMap = new Map(existingAsns?.filter(a => a.title).map(a => [a.title.trim().toLowerCase(), a]) || []);
-    const baselineMap = new Map((baselineMirror?.result?.state?.features || baselineMirror?.features || []).map(f => [f.id, f]));
-
     const payloads = fetchedFeatures
       .filter(f => f.id && f.properties?.class === 'Assignment' && (f.properties.title || f.properties.name))
       .map(f => {
         const title = (f.properties.title || f.properties.name)?.trim().toLowerCase();
         const existing = existingMap.get(f.id) || (title ? existingTitleMap.get(title) : null);
         if (existing?.origin === 'SAROps' && !existing.sartopo_id) return null;
-        return mapSartopoToAssignment(f, opPeriodId, existing, baselineMap.get(f.id));
+        return mapSartopoToAssignment(f, opPeriodId, existing);
       }).filter(Boolean);
 
     if (payloads.length > 0) {
@@ -149,11 +114,41 @@ export const downloadAndSyncSartopoData = async ({
 
   return { 
     data, 
-    mergedMapData: mergedSartopoMapData, 
+    mergedMapData: data,
     fetchedAt, 
-    baselineMirror, 
     fetchedFeatures, 
     syncedTitles,
     syncCount: syncedTitles.length
   };
+};
+
+/**
+ * Creates a new SARTopo map via the secure proxy.
+ */
+export const createSartopoMap = async (supabase, mapTitle, sartopoConfig) => {
+  // The client no longer needs to know the account ID. The proxy will handle it.
+  // We send a generic path that the proxy will resolve.
+  const path = `/api/v1/acct/collaborative-map`;
+  const payload = {
+    title: mapTitle,
+    mode: "sar",
+    state: {
+      zoom: "13",
+      center: [-105.2705, 40.0150],
+      layers: ["mbt"]
+    },
+    sharing: "URL"
+  };
+
+  const data = await invokeSartopoProxy(supabase, 'POST', path, sartopoConfig, JSON.stringify(payload));
+  return data;
+};
+
+/**
+ * Uploads a GeoJSON feature to SARTopo via the secure proxy.
+ */
+export const uploadToSartopo = async (supabase, mapId, featureId, featurePayload, sartopoConfig) => {
+  const path = `/api/v1/map/${mapId}/Assignment/${featureId}`;
+  const data = await invokeSartopoProxy(supabase, 'POST', path, sartopoConfig, JSON.stringify(featurePayload));
+  return data;
 };

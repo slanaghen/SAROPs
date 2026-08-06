@@ -1,5 +1,6 @@
 import { vi, describe, it, expect, beforeEach } from 'vitest';
-import { prepareTeamForEditing } from './teamService';
+import { prepareTeamForEditing, disbandTeam } from './teamService';
+import { TEAM_STATUS } from '../constants/operationalConstants';
 
 describe('Team Service', () => {
   const mockSupabase = {
@@ -74,6 +75,34 @@ describe('Team Service', () => {
         responder_roles: {},
         vehicle_ids: [],
       });
+    });
+  });
+
+  describe('disbandTeam', () => {
+    const mockAddToast = vi.fn();
+    const mockRecordAction = vi.fn();
+    const mockRefreshDashboardData = vi.fn();
+
+    it('should update team status to Disbanded and trigger unassignment of assignments', async () => {
+      const mockEq = vi.fn().mockResolvedValue({ error: null });
+      const mockUpdate = vi.fn(() => ({ eq: mockEq }));
+      mockSupabase.from.mockReturnValue({ update: mockUpdate });
+
+      await disbandTeam({
+        supabase: mockSupabase,
+        teamId: 't-disband',
+        teamName: 'Disband Team',
+        teamType: 'Ground',
+        recordAction: mockRecordAction,
+        addToast: mockAddToast,
+        refreshDashboardData: mockRefreshDashboardData,
+      });
+
+      expect(mockUpdate).toHaveBeenCalledWith({ status: TEAM_STATUS.DISBANDED, last_par_check: null });
+      expect(mockEq).toHaveBeenCalledWith('team_id', 't-disband');
+      expect(mockRecordAction).toHaveBeenCalledWith(expect.stringContaining('Admin disbanded team "Disband Team"'));
+      expect(mockAddToast).toHaveBeenCalledWith('Team disbanded.', 'success');
+      expect(mockRefreshDashboardData).toHaveBeenCalled();
     });
   });
 });

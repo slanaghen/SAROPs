@@ -1,6 +1,11 @@
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import AdminRespondersTable from './AdminRespondersTable';
+import { useIncident } from '../../context/IncidentContext';
+
+vi.mock('../../context/IncidentContext', () => ({
+  useIncident: vi.fn(),
+}));
 
 describe('AdminRespondersTable', () => {
   const mockHandleCheckOutResponder = vi.fn();
@@ -27,6 +32,9 @@ describe('AdminRespondersTable', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(useIncident).mockReturnValue({
+      user: { email: 'admin@test.com' },
+    });
   });
 
   it('renders responder rows and their data correctly', () => {

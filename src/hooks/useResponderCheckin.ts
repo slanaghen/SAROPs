@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { SupabaseClient } from '@supabase/supabase-js';
-import { Responder } from '../types/sarops-types';
+import { Responder } from '../../sarops-types';
 
 /**
  * useResponderCheckin Hook

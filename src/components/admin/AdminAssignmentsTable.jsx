@@ -24,8 +24,15 @@ const AdminAssignmentsTable = ({
           aVal = (allIncidents.find(i => i.incident_id === (opA?.incident_id || a.incident_id))?.name || '').toString().toLowerCase();
           bVal = (allIncidents.find(i => i.incident_id === (opB?.incident_id || b.incident_id))?.name || '').toString().toLowerCase();
         } else if (sortConfig.key === 'team_name') {
-          aVal = (a.team_name || (a.team_id ? allTeams.find(t => t.team_id === a.team_id)?.team_name_number : '') || '').toString().toLowerCase();
-          bVal = (b.team_name || (b.team_id ? allTeams.find(t => t.team_id === b.team_id)?.team_name_number : '') || '').toString().toLowerCase();
+          const getTeamName = (assignment) => {
+            const isCompleted = assignment.status === 'Completed' || assignment.status === 'Incomplete';
+            if (isCompleted) {
+              return assignment.completed_team_snapshot?.team_name_number || '';
+            }
+            return assignment.team_name || (assignment.team_id ? allTeams.find(t => t.team_id === assignment.team_id)?.team_name_number : '') || '';
+          };
+          aVal = getTeamName(a).toString().toLowerCase();
+          bVal = getTeamName(b).toString().toLowerCase();
         } else {
           aVal = (a[sortConfig.key] || '').toString().toLowerCase();
           bVal = (b[sortConfig.key] || '').toString().toLowerCase();
@@ -101,9 +108,27 @@ const AdminAssignmentsTable = ({
                   const recordIncidentId = opPeriod?.incident_id || asn.incident_id;
                   const incident = allIncidents.find(inc => inc.incident_id === recordIncidentId);
 
-                  const teamName = asn.team_name || (asn.team_id 
-                    ? allTeams.find(t => t.team_id === asn.team_id)?.team_name_number 
-                    : null);
+                  const isCompleted = asn.status === 'Completed' || asn.status === 'Incomplete';
+                  
+                  const teamName = isCompleted
+                    ? asn.completed_team_snapshot?.team_name_number
+                    : (asn.team_name || (asn.team_id ? allTeams.find(t => t.team_id === asn.team_id)?.team_name_number : null));
+
+                  const getTooltipText = () => {
+                    if (!isCompleted || !asn.completed_team_snapshot) return '';
+                    const snapshot = asn.completed_team_snapshot;
+                    let tooltip = `Historical Team: ${snapshot.team_name_number || 'N/A'}\n`;
+                    tooltip += `Type: ${snapshot.type || 'N/A'}\n`;
+                    tooltip += `Status: ${snapshot.status || 'N/A'}\n`;
+                    tooltip += `Leader: ${snapshot.leader_name || 'Unassigned'}\n`;
+                    if (snapshot.current_responders && snapshot.current_responders.length > 0) {
+                      tooltip += `Members: ${snapshot.current_responders.map(r => r.name).join(', ')}\n`;
+                    }
+                    if (snapshot.current_vehicles && snapshot.current_vehicles.length > 0) {
+                      tooltip += `Vehicles: ${snapshot.current_vehicles.map(v => v.designation).join(', ')}\n`;
+                    }
+                    return tooltip.trim();
+                  };
 
                   return (
                     <tr key={asn.assignment_id || `asn-${index}`}>
@@ -116,7 +141,9 @@ const AdminAssignmentsTable = ({
                           <div style={{ fontSize: '12px' }}>{incident.name} <span style={{ color: '#64748b' }}>(#{incident.number})</span></div>
                         ) : '—'}
                       </td>
-                      <td style={{ color: '#000' }}>{teamName || '—'}</td>
+                      <td style={{ color: '#000' }} title={getTooltipText()}>
+                        {teamName || '—'} {isCompleted && '(Historical)'}
+                      </td>
                       <td style={{ color: '#000' }}>
                         <span className={`status-chip status-chip-${asn.status.toLowerCase()}`}>
                           {asn.status}

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import BaseModal from '../BaseModal';
-import { RESPONDER_STATUS_LIST } from '../operationalConstants';
+import { RESPONDER_STATUS_LIST } from '../../constants/operationalConstants';
 import { useToast } from '../../context/ToastContext';
 
 const VehicleFormModal = ({ isOpen, onClose, onSave, initialData, loading, error }) => {

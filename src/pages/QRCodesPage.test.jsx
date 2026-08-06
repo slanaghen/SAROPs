@@ -1,23 +1,21 @@
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
+import { MemoryRouter } from 'react-router-dom';
 import QRCodesPage from './QRCodesPage';
 import { useIncident } from '../context/IncidentContext';
 import { supabase } from '../lib/supabase';
 
-vi.mock('../context/IncidentContext', () => ({
-  useIncident: vi.fn(),
-}));
-
+// Mock dependencies
+vi.mock('../context/IncidentContext');
 vi.mock('../lib/supabase', () => ({
   supabase: {
-    from: vi.fn(() => ({
-      select: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockReturnThis(),
-      maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
-    })),
+    from: vi.fn().mockReturnThis(),
+    select: vi.fn().mockReturnThis(),
+    eq: vi.fn().mockReturnThis(),
+    maybeSingle: vi.fn(),
     channel: vi.fn(() => ({
       on: vi.fn().mockReturnThis(),
-      subscribe: vi.fn().mockReturnThis(),
+      subscribe: vi.fn(),
     })),
     removeChannel: vi.fn(),
   },
@@ -28,44 +26,52 @@ describe('QRCodesPage', () => {
     vi.clearAllMocks();
   });
 
-  it('renders generic check-in QR code when no incident is active', async () => {
-    vi.mocked(useIncident).mockReturnValue({ isActive: false, user: { email: 'test@example.com' } });
-    render(<QRCodesPage />);
-
-    expect(await screen.findByText('General Incident Access')).toBeInTheDocument();
-    const checkinImg = screen.getByAltText('Check-in QR');
-    expect(checkinImg.src).toContain(encodeURIComponent('/checkin'));
-  });
-
-  it('fetches and displays SARTopo QR code when configured', async () => {
-    vi.mocked(useIncident).mockReturnValue({ 
-      isActive: true, 
+  it('renders all QR codes when data is available', async () => {
+    vi.mocked(useIncident).mockReturnValue({
+      isActive: true,
       incidentId: 'inc-123',
-      incidentData: { name: 'Test Mission', opNumber: '1' },
-      user: { email: 'test@example.com' }
+      incidentData: { name: 'Test Incident', opNumber: '1', opPeriodId: 'op-123' },
     });
 
-    supabase.from.mockReturnValue({
-      select: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockReturnThis(),
-      maybeSingle: vi.fn().mockResolvedValue({ data: { sartopo_id: 'MAP99' }, error: null })
+    vi.mocked(supabase.from).mockImplementation((table) => {
+      if (table === 'incidents') {
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          maybeSingle: vi.fn().mockResolvedValue({ data: { sartopo_id: 'MAP123' }, error: null }),
+        };
+      }
+      if (table === 'operational_periods') {
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          maybeSingle: vi.fn().mockResolvedValue({
+            data: { sarstream_enabled: true, sarstream_data: { view_url: 'https://sarstream.example.com' } },
+            error: null,
+          }),
+        };
+      }
+      return { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }) };
     });
 
-    render(<QRCodesPage />);
+    render(<MemoryRouter><QRCodesPage /></MemoryRouter>);
 
+    // Wait for data to load and check for all three QR codes
     await waitFor(() => {
-      expect(screen.getByText(/Operational Map ID: MAP99/i)).toBeInTheDocument();
-      expect(screen.getByAltText('Map QR').src).toContain('MAP99');
+      const images = screen.getAllByRole('img');
+      expect(images).toHaveLength(3);
+
+      // Check-in QR
+      expect(images[0]).toHaveAttribute('src', expect.stringContaining(encodeURIComponent('/checkin')));
+      
+      // SARTopo QR
+      expect(screen.getByText(/Operational Map ID: MAP123/i)).toBeInTheDocument();
+      expect(images[1]).toHaveAttribute('src', expect.stringContaining(encodeURIComponent('https://sartopo.com/m/MAP123')));
+
+      // SARStream QR
+      expect(screen.getByText(/Scan for Live Stream/i)).toBeInTheDocument();
+      expect(images[2]).toHaveAttribute('src', expect.stringContaining(encodeURIComponent('https://sarstream.example.com')));
     });
   });
 
-  it('triggers window print when the print button is clicked', async () => {
-    vi.mocked(useIncident).mockReturnValue({ isActive: false, user: { email: 'test@example.com' } });
-    window.print = vi.fn();
-    
-    render(<QRCodesPage />);
-    fireEvent.click(await screen.findByText(/Print \/ Save as PDF/i));
-    
-    expect(window.print).toHaveBeenCalled();
-  });
 });

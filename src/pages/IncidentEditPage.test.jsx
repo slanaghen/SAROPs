@@ -24,12 +24,13 @@ vi.mock('../context/IncidentContext', () => ({
 vi.mock('../lib/supabase', () => ({
   supabase: {
     auth: {
-      getSession: vi.fn().mockResolvedValue({ data: { session: { user: { id: 'u1' } } } }),
+      getSession: vi.fn().mockResolvedValue({ data: { session: { user: { id: 'u1', email: 'admin@test.com' } } } }),
       signInAnonymously: vi.fn(),
       refreshSession: vi.fn().mockResolvedValue({ error: null })
     },
     from: vi.fn(() => globalThis.createSupabaseQueryMock([])),
     rpc: vi.fn(),
+    functions: { invoke: vi.fn() },
   },
 }));
 
@@ -48,7 +49,6 @@ describe('IncidentEditPage Functional Tests', () => {
     mockUseLocation.mockReturnValue({
       state: null, // Default to no state
     });
-    global.fetch = vi.fn();
   });
 
   afterEach(cleanup);
@@ -70,11 +70,9 @@ describe('IncidentEditPage Functional Tests', () => {
     // Requirement: Secure signing mandates valid Base64 credentials.
     vi.stubEnv('VITE_SARTOPO_API_CREDENTIAL_ID', 'ID_123');
     vi.stubEnv('VITE_SARTOPO_API_CREDENTIAL_SECRET', 'x7+lOzSEs6+q6m37cUV2S7a19ucAKUxEve60nzRYq6k=');
+    vi.stubEnv('VITE_SARTOPO_ENABLED', 'true');
 
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ id: 'NEW_MAP_123' })
-    });
+    vi.mocked(supabase.functions.invoke).mockResolvedValue({ data: { id: 'NEW_MAP_123' }, error: null });
 
     render(<BrowserRouter><IncidentEditPage /></BrowserRouter>);
     
@@ -88,14 +86,12 @@ describe('IncidentEditPage Functional Tests', () => {
     fireEvent.click(createBtn);
 
     await waitFor(() => {
-      expect(global.fetch).toHaveBeenCalledWith(
-        expect.stringContaining('/api/v1/acct/ID_123/CollaborativeMap'),
-        expect.objectContaining({ 
+      expect(supabase.functions.invoke).toHaveBeenCalledWith('sartopo-proxy', expect.objectContaining({
+        body: expect.objectContaining({
           method: 'POST',
-          headers: expect.objectContaining({ 'Content-Type': 'application/x-www-form-urlencoded' }),
-          body: expect.any(URLSearchParams)
+          path: '/api/v1/acct/collaborative-map'
         })
-      );
+      }));
       expect(screen.getByDisplayValue('NEW_MAP_123')).toBeInTheDocument();
     });
     vi.unstubAllEnvs();
@@ -109,11 +105,7 @@ describe('IncidentEditPage Functional Tests', () => {
       startIncident: vi.fn()
     });
 
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      headers: { get: () => 'application/json' },
-      json: async () => ({ features: [] })
-    });
+    vi.mocked(supabase.functions.invoke).mockResolvedValue({ data: { features: [] }, error: null });
 
     render(<BrowserRouter><IncidentEditPage /></BrowserRouter>);
     
@@ -121,7 +113,14 @@ describe('IncidentEditPage Functional Tests', () => {
     fireEvent.change(mapInput, { target: { value: 'SYNC123' } });
 
     await waitFor(() => {
-      expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('SYNC123/since/0'));
+      expect(supabase.functions.invoke).toHaveBeenCalledWith(
+        'sartopo-proxy',
+        expect.objectContaining({
+          body: expect.objectContaining({
+            path: '/api/v1/map/SYNC123/since/0'
+          })
+        })
+      );
     }, { timeout: 2000 });
   });
 
@@ -163,14 +162,17 @@ describe('IncidentEditPage Functional Tests', () => {
         case 'action_logs':
           return { insert: mockActionLogInsert };
         case 'users':
-          return { select: () => ({ eq: () => ({ single: mockUserSelect }) }) };
+          return { select: () => ({ eq: () => ({ maybeSingle: mockUserSelect }) }) };
         default:
           return globalThis.createSupabaseQueryMock([]);
       }
     });
+    // The rpc mock must return an object with a `maybeSingle` method.
     vi.mocked(supabase.rpc).mockImplementation((rpcName) => {
-      if (rpcName === 'checkin_responder_securely') return mockCheckinRpc;
-      return vi.fn().mockResolvedValue({ data: null, error: null });
+      if (rpcName === 'checkin_responder_securely') {
+        return { maybeSingle: mockCheckinRpc };
+      }
+      return { maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }) };
     });
 
     render(<BrowserRouter><IncidentEditPage /></BrowserRouter>);

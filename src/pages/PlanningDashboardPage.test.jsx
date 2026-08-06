@@ -17,7 +17,7 @@ vi.mock('../hooks/usePlanningDashboard', () => ({
 }));
 
 // Mock the child component to inspect props passed to it
-vi.mock('../components/PlanningDashboard', () => ({
+vi.mock('../components/planning/PlanningDashboard', () => ({
   default: vi.fn((props) => (
     <div data-testid="planning-dashboard-mock">
       <span data-testid="next-assignment-name">{props.defaultNewAssignmentName}</span>

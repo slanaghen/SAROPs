@@ -55,10 +55,16 @@ $func$ LANGUAGE sql STABLE SECURITY DEFINER;
 CREATE OR REPLACE FUNCTION is_member_of_assignment(_assignment_id UUID)
 RETURNS BOOLEAN AS $func$
   SELECT EXISTS (
+    -- Check live assignment membership
     SELECT 1 FROM assignments a
     JOIN team_responders tr ON a.team_id = tr.team_id
-    WHERE a.assignment_id = _assignment_id 
+    WHERE a.assignment_id = _assignment_id
       AND tr.responder_id = get_my_responder_id()
+  ) OR EXISTS (
+    -- Check historical assignment membership via snapshot
+    SELECT 1 FROM assignments a
+    WHERE a.assignment_id = _assignment_id
+      AND a.completed_team_snapshot -> 'current_responders' @> jsonb_build_array(jsonb_build_object('responder_id', get_my_responder_id()))
   );
 $func$ LANGUAGE sql STABLE SECURITY DEFINER;
 
@@ -162,10 +168,18 @@ CREATE POLICY "Allow authenticated to create assignments" ON assignments FOR INS
 
 -- Allow Team Members to update their assigned assignment status
 CREATE POLICY "Allow team members to update their assignment" ON assignments
-  FOR UPDATE TO authenticated
-  USING (is_member_of_assignment(assignment_id) OR check_is_operational_staff())
-  WITH CHECK (team_id IS NULL OR is_member_of_team(team_id) OR check_is_operational_staff());
+  FOR UPDATE TO authenticated USING (
+    is_member_of_assignment(assignment_id) OR check_is_operational_staff()
+  ) WITH CHECK (
+    team_id IS NULL OR is_member_of_team(team_id) OR check_is_operational_staff()
+  );
 
+-- Allow users to view completed assignments they were a part of via the snapshot
+CREATE POLICY "Allow members to view their completed assignments via snapshot" ON assignments
+  FOR SELECT TO authenticated
+  USING (
+    (completed_team_snapshot -> 'current_responders' @> jsonb_build_array(jsonb_build_object('responder_id', get_my_responder_id())))
+  );
 -- POLICIES: Messaging
 CREATE POLICY "View relevant messages" ON team_messages FOR SELECT TO authenticated 
   USING (team_id IN (SELECT team_id FROM team_responders WHERE responder_id = get_my_responder_id()) OR check_is_operational_staff());

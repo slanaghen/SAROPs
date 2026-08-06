@@ -2,6 +2,7 @@
 node_modules/
 
 # Build output
+combined_schema.sql
 dist/
 dist-ssr/
 *.local

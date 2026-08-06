@@ -1,11 +1,16 @@
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import AdminTeamsTable from './AdminTeamsTable';
+import { useIncident } from '../../context/IncidentContext';
 import { formatTimeSince } from '../../utils/operationalUtils';
 
 // Mock the utility function
 vi.mock('../../utils/operationalUtils', () => ({
   formatTimeSince: vi.fn((date) => 'formatted_time'),
+}));
+
+vi.mock('../../context/IncidentContext', () => ({
+  useIncident: vi.fn(),
 }));
 
 describe('AdminTeamsTable', () => {
@@ -20,7 +25,9 @@ describe('AdminTeamsTable', () => {
       team_name_number: 'Alpha Team',
       type: 'Ground',
       status: 'Deployed',
-      incident_id: 'i1',
+      operational_periods: {
+        incident_id: 'i1',
+      },
       last_par_check: new Date().toISOString(),
     },
     {
@@ -28,7 +35,9 @@ describe('AdminTeamsTable', () => {
       team_name_number: 'Zulu Team',
       type: 'UAS',
       status: 'Staged',
-      incident_id: 'i2',
+      operational_periods: {
+        incident_id: 'i2',
+      },
       last_par_check: null,
       created_at: new Date().toISOString(),
     },
@@ -58,6 +67,9 @@ describe('AdminTeamsTable', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(useIncident).mockReturnValue({
+      user: { email: 'admin@test.com' },
+    });
   });
 
   it('renders team rows with correct incident and assignment data', () => {

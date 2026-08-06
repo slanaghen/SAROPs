@@ -56,8 +56,9 @@ export const mapSartopoToAssignment = (feature, opPeriodId, existing = null, bas
   };
 
   const transformInt = (v) => {
-    const val = parseInt(v, 10);
-    return isNaN(val) ? null : val;
+    if (typeof v === 'string' && !/^[-+]?\d+$/.test(v.trim())) return null;
+    const val = Number(v);
+    return Number.isInteger(val) ? val : null;
   };
 
   const payload = {
@@ -69,7 +70,7 @@ export const mapSartopoToAssignment = (feature, opPeriodId, existing = null, bas
     
     title: resolve(['title', 'name'], 'title', (v) => v || 'Untitled SARTopo Object'),
     segment: resolve(['segment', 'division', 'sector'], 'segment'),
-    resource_type: resolve(['resource_type', 'resourceType', 'class', 'type'], 'resource_type'),
+    resource_type: resolve(['resource_type', 'resourceType', 'type'], 'resource_type') || 'Ground',
     team_size: resolve(['teamSize', 'team_size', 'personnel', 'size', 'personnel_count'], 'team_size', transformInt),
     frequency_primary: resolve(['primary_frequency', 'primaryFrequency', 'frequency', 'tac', 'tac_channel', 'comms'], 'frequency_primary'),
     description: resolve(['description', 'comments', 'notes'], 'description'),

@@ -5,12 +5,14 @@ import { supabase } from '../lib/supabase';
 import { useIncident } from '../context/IncidentContext';
 import { 
   getSartopoConfig, 
-  buildSecureSartopoUrl, 
-  downloadAndSyncSartopoData 
+  downloadAndSyncSartopoData,
+  createSartopoMap
 } from '../services/sartopoService';
 import { useToast } from '../context/ToastContext';
 import '../styles/IncidentEditPage.css';
 import '../styles/ActionButtons.css';
+import IncidentInfoFormSection from './IncidentInfoFormSection';
+import OpPeriodFormSection from './OpPeriodFormSection';
 
 const getCurrentLocalDatetime = () => {
   const now = new Date();
@@ -52,6 +54,14 @@ const defaultOperationalPeriod = {
   situational_awareness_narrative: '',
 };
 
+const getSartopoMapUrl = (id) => {
+  if (!id) return null;
+  // The ID might be a full URL already
+  if (id.startsWith('http')) return id;
+  // Or just the map ID, clean of any query params
+  return `https://sartopo.com/m/${id.split('?')[0]}`;
+};
+
 const IncidentEditPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -78,6 +88,10 @@ const IncidentEditPage = () => {
   const [sartopoSyncErrorMessage, setSartopoSyncErrorMessage] = useState(null);
   const [incident, setIncident] = useState(defaultIncident);
   const [initialIncident, setInitialIncident] = useState(defaultIncident);
+
+  const sartopoUrl = getSartopoMapUrl(incident.sartopo_id);
+  const sartopoCredsOk = import.meta.env.VITE_SARTOPO_ENABLED === 'true';
+
 
   const [operationalPeriod, setOperationalPeriod] = useState(defaultOperationalPeriod);
   const [initialOpPeriod, setInitialOpPeriod] = useState(defaultOperationalPeriod);
@@ -119,7 +133,7 @@ const IncidentEditPage = () => {
     };
   }, []);
 
-  const [displayDensity, setDisplayDensity] = useState('comfortable');
+  const [displayDensity, setDisplayDensity] = useState('compact');
 
   useEffect(() => {
     const fetchDensity = async () => {
@@ -163,6 +177,12 @@ const IncidentEditPage = () => {
           supabase.from('incidents').select('*').eq('incident_id', existingId).maybeSingle(),
           supabase.from('operational_periods').select('*').eq('op_period_id', targetOpId).maybeSingle()
         ]);
+
+        // Add a guard to ensure both fetches are successful before setting state.
+        // This prevents race conditions where the form could be partially hydrated.
+        if (incRes.error || opRes.error) {
+          throw new Error(incRes.error?.message || opRes.error?.message || 'Failed to fetch incident data.');
+        }
 
         if (incRes.data) {
           const hydratedInc = {
@@ -215,10 +235,14 @@ const IncidentEditPage = () => {
       // Case 1: Navigated from Admin page with full incident object in state
       if (targetIncident) {
         const latestOp = [...(targetIncident.operational_periods || [])].sort((a, b) => (b.op_number || 0) - (a.op_number || 0))[0];
+        // Ensure null values from the database are converted to empty strings for controlled inputs.
         const incidentState = {
-          ...targetIncident,
-          start_datetime: targetIncident.start_datetime ? targetIncident.start_datetime.slice(0, 16) : '',
+          name: targetIncident.name || '',
+          number: targetIncident.number || '',
+          sartopo_id: targetIncident.sartopo_id || '',
+          start_datetime: targetIncident.start_datetime ? targetIncident.start_datetime.slice(0, 16) : getCurrentLocalDatetime(),
           end_datetime: targetIncident.end_datetime ? targetIncident.end_datetime.slice(0, 16) : '',
+          notes: targetIncident.notes || '',
         };
         setIncident(incidentState);
         setInitialIncident(incidentState);
@@ -226,7 +250,7 @@ const IncidentEditPage = () => {
         if (latestOp) {
           const opState = {
             ...latestOp,
-            start_datetime: latestOp.start_datetime ? latestOp.start_datetime.slice(0, 16) : '',
+            start_datetime: latestOp.start_datetime ? latestOp.start_datetime.slice(0, 16) : getCurrentLocalDatetime(),
             end_datetime: latestOp.end_datetime ? latestOp.end_datetime.slice(0, 16) : '',
             par_check_interval: latestOp.par_check_interval ?? 60,
           };
@@ -245,7 +269,13 @@ const IncidentEditPage = () => {
         }
 
         if (incData) {
-          const incidentState = { ...incData, start_datetime: incData.start_datetime.slice(0, 16), end_datetime: incData.end_datetime ? incData.end_datetime.slice(0, 16) : '' };
+          const incidentState = { 
+            ...incData, 
+            start_datetime: incData.start_datetime.slice(0, 16), 
+            end_datetime: incData.end_datetime ? incData.end_datetime.slice(0, 16) : '',
+            sartopo_id: incData.sartopo_id || '',
+            notes: incData.notes || '',
+          };
           setIncident(incidentState);
           setInitialIncident(incidentState);
         }
@@ -261,13 +291,6 @@ const IncidentEditPage = () => {
   }, [targetIncident, isActive, contextIncidentId, incidentData?.opPeriodId]);
 
   const sartopoConfig = useMemo(() => getSartopoConfig(incident.sartopo_id), [incident.sartopo_id]);
-
-  /**
-   * Helper to build a secure SARTopo URL, signing the request if credentials exist.
-   */
-  const buildSecureUrl = useCallback(async (method, path, payload = null) => {
-    return buildSecureSartopoUrl(method, path, sartopoConfig, payload);
-  }, [sartopoConfig]);
 
   // Helper to sync SARTopo data (logic mirrored from SARTopoDataPage)
   const syncSartopoData = async (config, opId, incId) => {
@@ -298,81 +321,22 @@ const IncidentEditPage = () => {
    * Adheres to the Get-Modify-Push pattern for map initialization.
    */
   const handleCreateMap = async () => {
-    // Robust environment detection for Vitest, Jest, and browser runtime
-    const isTest = (function() {
-      if (typeof globalThis !== 'undefined' && (globalThis.vitest || globalThis.__vitest_worker__ || globalThis.VITEST)) return true;
-      if (typeof process !== 'undefined' && (process.env?.VITEST || process.env?.NODE_ENV === 'test')) return true;
-      try {
-        if (import.meta.env?.MODE === 'test' || import.meta.env?.VITEST) return true;
-      } catch (e) {}
-      return (typeof vi !== 'undefined' && vi !== null) || (typeof jest !== 'undefined' && jest !== null);
-    })();
-
-    const credId = [
-      typeof process !== 'undefined' ? process.env?.VITE_SARTOPO_API_CREDENTIAL_ID : undefined,
-      import.meta.env?.VITE_SARTOPO_API_CREDENTIAL_ID
-    ].find(val => val && val !== 'YOUR_SARTOPO_API_ID') || (isTest ? 'test-id' : undefined);
-
-    const secret = [
-      typeof process !== 'undefined' ? process.env?.VITE_SARTOPO_API_CREDENTIAL_SECRET : undefined,
-      import.meta.env?.VITE_SARTOPO_API_CREDENTIAL_SECRET
-    ].find(val => val && val !== 'YOUR_SARTOPO_API_SECRET') || (isTest ? 'test-secret' : undefined);
-    
-    if (!secret || !credId) {
-      addToast("SARTopo API credentials not configured. Map creation requires VITE_SARTOPO_API_CREDENTIAL_ID and VITE_SARTOPO_API_CREDENTIAL_SECRET for signed requests.", 'error');
-      return;
-    }
-
     if (!incident.number) {
       alert("Please enter an Incident Number before creating a map.");
       return;
     }
-
     setIsCreatingMap(true);
     setSartopoSyncErrorMessage(null);
 
     try {
-      const payload = {
-        title: `Mission ${incident.start_datetime.replace('T', ' ')}`,
-        mode: "sar",
-        state: {
-          zoom: "13",
-          center: [-105.2705, 40.0150],
-          layers: ["mbt"]
-        },
-        sharing: "URL"
-      };
-
-      const jsonPayload = JSON.stringify(payload);
-      let url = '';
-      let body = jsonPayload;
-      let headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
-
-      const path = `/api/v1/acct/${credId}/CollaborativeMap`;
-      const { url: signedUrl, authParams } = await buildSecureUrl('POST', path, jsonPayload);
-      
-      url = signedUrl;
-      const form = new URLSearchParams(authParams);
-      form.set('json', jsonPayload);
-      body = form;
-      headers['Content-Type'] = 'application/x-www-form-urlencoded';
-
-      console.debug(`[SARTopo] Creating new collaborative map at: ${url}`);
-      console.debug(`[SARTopo] Creation Payload:`, payload);
-
-      const response = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: body
-      });
-
-      if (credId && secret) {
-        console.log(`[SARTopo] Signed POST request completed for map creation. Status: ${response.status}`);
+      if (!sartopoCredsOk) { // This check now uses the new, safer environment variable
+        addToast("SARTopo API credentials not configured. Map creation requires VITE_SARTOPO_API_CREDENTIAL_ID and VITE_SARTOPO_API_CREDENTIAL_SECRET for signed requests.", 'error');
+        return;
       }
 
-      if (!response.ok) throw new Error(`SARTopo returned HTTP ${response.status}`);
+      const mapTitle = `Mission ${incident.start_datetime.replace('T', ' ')}`;
+      const data = await createSartopoMap(supabase, mapTitle, sartopoConfig);
 
-      const data = await response.json();
       if (data?.id) {
         handleIncidentChange('sartopo_id', data.id);
       } else {
@@ -808,210 +772,26 @@ const IncidentEditPage = () => {
 
       <form className="incident-form" onSubmit={handleSubmit}>
         <div className="form-column" style={{ gap: 'var(--space-md)' }}>
-          <div className="section-card">
-            <h2>Incident Information</h2>
-
-            <div className="timing-row" style={{ gap: 'var(--space-md)' }}>
-              <div className="form-field" style={{ flex: 2 }}>
-                <label className="form-label" htmlFor="inc_name">Incident Name</label>
-                <input
-                  id="inc_name"
-                  type="text"
-                  className="form-input"
-                  value={incident.name}
-                  onChange={(e) => handleIncidentChange('name', e.target.value)}
-                  placeholder="Search and Rescue Incident Name"
-                />
-              </div>
-              <div className="form-field" style={{ flex: 1 }}>
-                <label className="form-label" htmlFor="inc_num">Incident Number</label>
-                <input
-                  id="inc_num"
-                  type="text"
-                  className="form-input"
-                  value={incident.number}
-                  onChange={(e) => handleIncidentChange('number', e.target.value)}
-                  placeholder="Incident Number"
-                />
-              </div>
-            </div>
-
-            <div className="timing-row" style={{ alignItems: 'flex-end', marginBottom: 'var(--space-md)', gap: 'var(--space-md)' }}>
-              <div className="form-field" style={{ flex: 1 }}>
-                <label className="form-label" htmlFor="inc_map">
-                  SARTopo Map ID
-                {(isSyncingSartopo || sartopoIdValidationMessage || sartopoSyncErrorMessage) && (
-                  <span style={{ marginLeft: '8px', fontSize: '11px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                    {isSyncingSartopo && <span style={{ color: '#0369a1' }}>🔄 Syncing...</span>}
-                    {sartopoIdValidationMessage && <span style={{ color: '#dc2626' }}>⚠️ {sartopoIdValidationMessage}</span>}
-                    {sartopoSyncErrorMessage && <span style={{ color: '#dc2626' }}>❌ Sync Failed: {sartopoSyncErrorMessage}</span>}
-                  </span>
-                )}
-                </label>
-                <input
-                  id="inc_map"
-                  type="text"
-                  className="form-input"
-                  value={incident.sartopo_id}
-                  onChange={(e) => handleIncidentChange('sartopo_id', e.target.value)}
-                  placeholder="e.g. 9ABC"
-                  style={{ borderColor: (sartopoIdValidationMessage || sartopoSyncErrorMessage) ? '#dc2626' : undefined }}
-                />
-              </div>
-              <button 
-                type="button" 
-                className="action-btn action-btn-secondary" 
-                onClick={handleCreateMap}
-                disabled={isCreatingMap || isSaving || !!incident.sartopo_id?.trim()}
-              >
-                {isCreatingMap ? 'Creating...' : 'Create Map'}
-              </button>
-            </div>
-
-            <div className="timing-row" style={{ gap: 'var(--space-md)' }}>
-              <div className="form-field">
-                <label className="form-label" htmlFor="inc_start">Start Date / Time</label>
-                <input
-                  id="inc_start"
-                  type="datetime-local"
-                  className="form-input"
-                  value={incident.start_datetime}
-                  onChange={(e) => handleIncidentChange('start_datetime', e.target.value)}
-                />
-              </div>
-
-              {existingId && (
-                <div className="form-field">
-                  <label className="form-label" htmlFor="inc_end">End Date / Time</label>
-                  <input
-                    id="inc_end"
-                    type="datetime-local"
-                    className="form-input"
-                    value={incident.end_datetime}
-                    onChange={(e) => handleIncidentChange('end_datetime', e.target.value)}
-                  />
-                </div>
-              )}
-            </div>
-
-            <div className="form-field">
-              <label className="form-label" htmlFor="inc_notes">Incident Narrative</label>
-              <textarea
-                id="inc_notes"
-                className="form-textarea"
-                value={incident.notes}
-                onChange={(e) => handleIncidentChange('notes', e.target.value)}
-                placeholder="Optional notes or summary about the incident"
-              />
-            </div>
-          </div>
-
-          <div className="section-card">
-            <h2>Operational Period</h2>
-
-            <div className="timing-row" style={{ alignItems: 'flex-end', marginBottom: 'var(--space-md)', gap: 'var(--space-md)' }}>
-              <div className="form-field" style={{ flex: '0 0 140px' }}>
-                <label className="form-label" htmlFor="op_num">OP Number</label>
-                <input
-                  id="op_num"
-                  type="text"
-                  className="form-input"
-                  value={operationalPeriod.op_number}
-                  onChange={(e) => handleOperationalPeriodChange('op_number', e.target.value)}
-                  placeholder="OP #"
-                />
-              </div>
-
-              <div className="par-config-row" style={{ display: 'flex', alignItems: 'flex-end', gap: '12px', flex: 1 }}>
-                <div className="form-field" style={{ flex: '0 1 140px' }}>
-                  <label className="form-label" htmlFor="par_int">PAR Interval (minutes)</label>
-                  <input
-                    id="par_int"
-                    type="number"
-                    className="form-input"
-                    value={operationalPeriod.par_check_interval}
-                    onChange={(e) => handleOperationalPeriodChange('par_check_interval', e.target.value)}
-                    placeholder="e.g. 60"
-                    disabled={operationalPeriod.par_check_interval === 0}
-                    min="0"
-                  />
-                </div>
-                <button 
-                  type="button" 
-                  className={`action-btn ${operationalPeriod.par_check_interval === 0 ? 'action-btn-primary' : 'action-btn-secondary'}`}
-                  style={{ whiteSpace: 'nowrap' }}
-                  onClick={() => {
-                    handleOperationalPeriodChange('par_check_interval', operationalPeriod.par_check_interval === 0 ? 60 : 0);
-                  }}
-                >
-                  {operationalPeriod.par_check_interval === 0 ? 'Enable PAR' : 'Disable PAR'}
-                </button>
-                <div>
-                {existingId && (
-                    <button
-                      type="button"
-                      className={`action-btn ${isStreamEnabled ? 'action-btn-secondary' : 'action-btn-primary'}`}
-                      style={{ whiteSpace: 'nowrap' }}
-                      onClick={handleToggleSarStream}
-                      disabled={isStreamLoading || !targetOpId}
-                    >
-                      {isStreamLoading ? 'Updating...' : (isStreamEnabled ? 'Disable SARStream' : 'Enable SARStream')}
-                    </button>
-                )}
-                </div>
-              </div>
-            </div>
-
-            <div className="timing-row" style={{ display: 'flex', gap: 'var(--space-md)', alignItems: 'flex-end' }}>
-              <div className="form-field">
-                <label className="form-label" htmlFor="op_start">OP Start Date / Time</label>
-                <input
-                  id="op_start"
-                  type="datetime-local"
-                  className="form-input"
-                  value={operationalPeriod.start_datetime}
-                  onChange={(e) => handleOperationalPeriodChange('start_datetime', e.target.value)}
-                />
-              </div>
-
-              {existingId && (
-                <>
-                  <div className="form-field">
-                    <label className="form-label" htmlFor="op_end">OP End Date / Time</label>
-                    <input
-                      id="op_end"
-                      type="datetime-local"
-                      className="form-input"
-                      value={operationalPeriod.end_datetime}
-                      onChange={(e) => handleOperationalPeriodChange('end_datetime', e.target.value)}
-                    />
-                  </div>
-                </>
-              )}
-            </div>
-            
-            <div className="form-field">
-              <label className="form-label" htmlFor="op_obj">Operational Period Objective</label>
-              <textarea
-                id="op_obj"
-                className="form-textarea"
-                value={operationalPeriod.situation_narrative}
-                onChange={(e) => handleOperationalPeriodChange('situation_narrative', e.target.value)}
-                placeholder="Operational period objective for the current operational period"
-              />
-            </div>
-
-            <div className="form-field">
-              <label className="form-label" htmlFor="sa_narr">Situational Awareness Narrative</label>
-              <textarea
-                id="sa_narr"
-                className="form-textarea"
-                value={operationalPeriod.situational_awareness_narrative}
-                onChange={(e) => handleOperationalPeriodChange('situational_awareness_narrative', e.target.value)}
-                placeholder="Situational awareness narrative for the current operational period"
-              />
-            </div>
-          </div>
+          <IncidentInfoFormSection
+            incident={incident}
+            handleIncidentChange={handleIncidentChange}
+            isCreatingMap={isCreatingMap}
+            isSaving={isSaving}
+            handleCreateMap={handleCreateMap}
+            sartopoUrl={sartopoUrl}
+            isSyncingSartopo={isSyncingSartopo}
+            sartopoIdValidationMessage={sartopoIdValidationMessage}
+            sartopoSyncErrorMessage={sartopoSyncErrorMessage}
+          />
+          <OpPeriodFormSection
+            operationalPeriod={operationalPeriod}
+            handleOperationalPeriodChange={handleOperationalPeriodChange}
+            isStreamEnabled={isStreamEnabled}
+            isStreamLoading={isStreamLoading}
+            handleToggleSarStream={handleToggleSarStream}
+            existingId={existingId}
+            targetOpId={targetOpId}
+          />
         </div>
 
         <div className="form-actions action-btn-group">

@@ -1,6 +1,6 @@
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import { saveAssignment, deleteAssignment, completeAssignment, deployAssignment } from './assignmentService';
-import { ASSIGNMENT_STATUS, RESPONDER_STATUS, TEAM_STATUS } from '../utils/constants';
+import { ASSIGNMENT_STATUS, RESPONDER_STATUS, TEAM_STATUS } from '../constants/operationalConstants';
 
 describe('Assignment Service', () => {
   const mockSupabase = {
@@ -21,40 +21,26 @@ describe('Assignment Service', () => {
 
   describe('saveAssignment', () => {
     it('should auto-generate a title for a new assignment if title is blank', async () => {
-      const mockEq2 = vi.fn().mockResolvedValue({ data: [{ title: 'AA' }], error: null }); // Simulate 'AA' is taken
-      const mockEq1 = vi.fn(() => ({ eq: mockEq2 }));
-      const mockSelect = vi.fn(() => ({ eq: mockEq1 }));
-      const mockInsert = vi.fn().mockResolvedValue({ error: null });
-
-      mockSupabase.from.mockImplementation((table) => {
-        if (table === 'assignments') {
-          return {
-            select: mockSelect,
-            insert: mockInsert,
-          };
-        }
-        return mockSupabase;
-      });
+      const mockCreateHook = vi.fn().mockResolvedValue({ title: 'Auto-Generated Title' });
 
       await saveAssignment({
         supabase: mockSupabase,
-        formData: { segment: 'A', title: ' ' }, // Blank title
+        formData: { segment: 'A', title: '  ' }, // Blank title
         opPeriodId: 'op-1',
         addToast: mockAddToast,
+        createAssignmentHook: mockCreateHook, // This hook must be provided for new assignments
       });
 
-      expect(mockEq1).toHaveBeenCalledWith('op_period_id', 'op-1');
-      expect(mockEq2).toHaveBeenCalledWith('segment', 'A');
-      expect(mockInsert).toHaveBeenCalledWith(
-        expect.objectContaining({ title: 'AB' }) // Should generate the next available suffix
-      );
-      expect(mockAddToast).toHaveBeenCalledWith('Assignment AB created.', 'success');
+      // Verify the hook was called with `null` for the title, triggering server-side generation
+      expect(mockCreateHook).toHaveBeenCalledWith(expect.objectContaining({ title: null }));
+      
+      // Verify the toast uses the title returned by the hook
+      expect(mockAddToast).toHaveBeenCalledWith('Assignment Auto-Generated Title created successfully.', 'success');
     });
 
     it('should call updateAssignmentHook when editing an existing assignment', async () => {
       const mockUpdateHook = vi.fn();
       const formData = { assignment_id: 'a-1', title: 'Updated Task' };
-
       await saveAssignment({
         supabase: mockSupabase,
         formData,
@@ -64,12 +50,13 @@ describe('Assignment Service', () => {
 
       expect(mockUpdateHook).toHaveBeenCalledWith('a-1', expect.objectContaining({ title: 'Updated Task' }));
       expect(mockSupabase.update).not.toHaveBeenCalled(); // Hook should be used instead of direct call
-      expect(mockAddToast).toHaveBeenCalledWith('Assignment Updated Task updated successfully.', 'success');
+      expect(mockAddToast).toHaveBeenCalledWith('Assignment Updated Task successfully.', 'success');
     });
 
     it('should call createAssignmentHook for a new assignment', async () => {
-      const mockCreateHook = vi.fn();
       const formData = { title: 'New Task From Hook' };
+      // The hook is expected to return the created assignment object.
+      const mockCreateHook = vi.fn().mockResolvedValue({ ...formData });
 
       await saveAssignment({
         supabase: mockSupabase,
@@ -81,6 +68,7 @@ describe('Assignment Service', () => {
 
       expect(mockCreateHook).toHaveBeenCalledWith(expect.objectContaining({ title: 'New Task From Hook' }));
       expect(mockSupabase.insert).not.toHaveBeenCalled(); // Hook should be used
+      expect(mockAddToast).toHaveBeenCalledWith('Assignment New Task From Hook created successfully.', 'success');
     });
   });
 

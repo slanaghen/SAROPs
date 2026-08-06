@@ -1,7 +1,7 @@
 import { render, screen, fireEvent, cleanup, within } from '@testing-library/react';
 import * as matchers from '@testing-library/jest-dom/matchers';
 import { vi, describe, it, expect, afterEach, beforeEach } from 'vitest';
-import TeamFormModal from '../components/TeamFormModal';
+import TeamFormModal from '../components/team/TeamFormModal';
 import { useIncident } from '../context/IncidentContext';
 import { supabase } from '../lib/supabase';
 

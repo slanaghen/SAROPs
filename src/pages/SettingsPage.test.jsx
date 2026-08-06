@@ -59,6 +59,22 @@ describe('SettingsPage Functional Tests', () => {
     // Provide a default mock for the user session via the IncidentContext
     vi.mocked(useIncident).mockReturnValue({
       user: { email: 'session@example.com' },
+      incidentId: 'inc-test-123', // Provide a default incidentId to allow profile fetching
+    });
+    vi.mocked(supabase.auth.getSession).mockResolvedValue({
+      data: { session: { user: { email: 'session@example.com' } } },
+      error: null,
+    });
+    // Default mock for supabase.from to return a user profile, so the component doesn't stay in loading state
+    vi.mocked(supabase.from).mockImplementation((table) => {
+      if (table === 'users') {
+        return globalThis.createSupabaseQueryMock({ email: 'session@example.com', name: 'Session User', display_density: 'compact' });
+      }
+      if (table === 'responders') {
+        // Default to finding an operational profile to match the default incidentId
+        return globalThis.createSupabaseQueryMock({ responder_id: 'res-123', name: 'Operational User' });
+      }
+      return globalThis.createSupabaseQueryMock(null);
     });
   });
 
@@ -83,11 +99,10 @@ describe('SettingsPage Functional Tests', () => {
 
   it('successfully updates profile via administrative RPC', async () => {
     const mockUser = { email: 'test@example.com', name: 'Old Name' };
-    // The component appears to fetch the session directly, ignoring the context value for the user.
-    // We must mock getSession to provide the correct user for this test.
-    vi.mocked(supabase.auth.getSession).mockResolvedValue({
-      data: { session: { user: { email: 'test@example.com' } } },
-      error: null,
+    // Override the default mock to provide the specific user for this test case
+    vi.mocked(useIncident).mockReturnValue({
+      user: { email: 'test@example.com' },
+      incidentId: 'inc-123',
     });
     vi.mocked(supabase.from).mockReturnValue({
       select: vi.fn().mockReturnThis(),

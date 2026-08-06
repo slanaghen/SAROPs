@@ -1,26 +1,26 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import os from 'os';
+import os from 'node:os';
 
-// Helper to get the local network IP address
-function getLocalIpAddress() {
+// Resolve this machine's LAN IPv4 address so the QR Codes page can build a
+// check-in URL that other devices on the network can actually reach —
+// http://localhost:5173 only resolves on the machine running the dev server.
+function getLocalIp() {
   const interfaces = os.networkInterfaces();
   for (const name of Object.keys(interfaces)) {
-    for (const iface of interfaces[name]) {
-      // Skip over internal (i.e. 127.0.0.1) and non-ipv4 addresses
-      if (iface.family !== 'IPv4' || iface.internal) {
-        continue;
+    for (const iface of interfaces[name] || []) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        return iface.address;
       }
-      return iface.address;
     }
   }
-  return 'localhost'; // Fallback
+  return null;
 }
 
 export default defineConfig({
   plugins: [react()],
   define: {
-    '__LOCAL_IP__': JSON.stringify(getLocalIpAddress()),
+    __LOCAL_IP__: JSON.stringify(getLocalIp()),
   },
   server: {
     host: true, // Expose server on the local network

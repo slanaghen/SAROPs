@@ -8,6 +8,17 @@ vi.mock('../../context/ToastContext', () => ({
   useToast: vi.fn(),
 }));
 
+// Mock BaseModal to isolate form logic
+vi.mock('../BaseModal', () => ({
+  default: ({ children, title, actions }) => (
+    <div>
+      <h1>{title}</h1>
+      <div>{children}</div>
+      <div>{actions}</div>
+    </div>
+  ),
+}));
+
 describe('VehicleFormModal', () => {
   const mockOnSave = vi.fn();
   const mockOnClose = vi.fn();
@@ -32,6 +43,7 @@ describe('VehicleFormModal', () => {
     expect(screen.getByRole('heading', { name: 'Add New Vehicle' })).toBeInTheDocument();
     expect(screen.getByLabelText(/Vehicle Designation/i)).toHaveValue('');
     expect(screen.getByLabelText(/Vehicle Designation/i)).toBeRequired();
+    expect(screen.getByLabelText(/Status/i)).toHaveValue('Staged');
   });
 
   it('renders in "Edit" mode and populates fields from initialData', () => {
@@ -39,15 +51,17 @@ describe('VehicleFormModal', () => {
       vehicle_id: 'v1',
       designation: 'SAR-1',
       type: 'Truck',
+      status: 'Deployed',
     };
     render(<VehicleFormModal {...defaultProps} initialData={initialData} />);
 
     expect(screen.getByRole('heading', { name: `Edit Vehicle: ${initialData.designation}` })).toBeInTheDocument();
     expect(screen.getByLabelText(/Vehicle Designation/i)).toHaveValue('SAR-1');
     expect(screen.getByLabelText(/Vehicle Type/i)).toHaveValue('Truck');
+    expect(screen.getByLabelText(/Status/i)).toHaveValue('Deployed');
   });
 
-  it('calls onSave with form data when "Save Vehicle" is clicked', async () => {
+  it('calls onSave with form data when "Save & Exit" is clicked', async () => {
     render(<VehicleFormModal {...defaultProps} initialData={null} />);
 
     fireEvent.change(screen.getByLabelText(/Vehicle Designation/i), { target: { value: 'CERT-1' } });

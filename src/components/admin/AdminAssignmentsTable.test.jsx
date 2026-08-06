@@ -9,7 +9,23 @@ describe('AdminAssignmentsTable', () => {
 
   const mockAssignments = [
     { assignment_id: 'a1', title: 'Task Alpha', resource_type: 'Ground', status: 'Planned', team_id: 't1', incident_id: 'i1' },
-    { assignment_id: 'a2', title: 'Task Zulu', resource_type: 'UAS', status: 'Deployed', team_id: 't2', incident_id: 'i2' },
+    { 
+      assignment_id: 'a2', 
+      title: 'Task Zulu', 
+      resource_type: 'UAS', 
+      status: 'Completed', 
+      team_id: null, // Should be null after snapshot
+      incident_id: 'i2',
+      completed_team_snapshot: { // Snapshot data
+        team_id: 't2',
+        team_name_number: 'Team Zulu',
+        type: 'UAS',
+        status: 'Reassigned', // As per spec
+        leader_name: 'Zulu Leader',
+        current_responders: [{ name: 'Zulu Member 1' }, { name: 'Zulu Member 2' }],
+        current_vehicles: [{ designation: 'Zulu Vehicle 1' }],
+      }
+    },
   ];
 
   const mockIncidents = [
@@ -40,13 +56,26 @@ describe('AdminAssignmentsTable', () => {
   it('renders assignment rows with correct incident and team names', () => {
     render(<AdminAssignmentsTable {...defaultProps} />);
     
+    // For the active assignment, find the team by its live team_id
     const row1 = screen.getByText('Task Alpha').closest('tr');
     expect(within(row1).getByText(/Incident One/)).toBeInTheDocument();
     expect(within(row1).getByText('Team Alpha')).toBeInTheDocument();
     
+    // For the completed assignment, find the team name from the snapshot
     const row2 = screen.getByText('Task Zulu').closest('tr');
     expect(within(row2).getByText(/Incident Two/)).toBeInTheDocument();
-    expect(within(row2).getByText('Team Zulu')).toBeInTheDocument();
+    expect(within(row2).getByText('Team Zulu (Historical)')).toBeInTheDocument();
+    
+    // Verify tooltip shows historical data from snapshot
+    const completedTeamCell = screen.getByText('Team Zulu (Historical)');
+    fireEvent.mouseOver(completedTeamCell);
+    const tooltip = `Historical Team: Team Zulu
+Type: UAS
+Status: Reassigned
+Leader: Zulu Leader
+Members: Zulu Member 1, Zulu Member 2
+Vehicles: Zulu Vehicle 1`;
+    expect(completedTeamCell).toHaveAttribute('title', tooltip);
   });
 
   it('sorts assignments by title by default (asc) and toggles direction', () => {
@@ -62,6 +91,25 @@ describe('AdminAssignmentsTable', () => {
     const rerenderedRows = screen.getAllByRole('row');
     expect(within(rerenderedRows[1]).getByText('Task Zulu')).toBeInTheDocument();
     expect(within(rerenderedRows[2]).getByText('Task Alpha')).toBeInTheDocument();
+  });
+
+  it('sorts by team name, considering historical snapshots', () => {
+    render(<AdminAssignmentsTable {...defaultProps} />);
+    const teamHeader = screen.getByRole('columnheader', { name: /Team/i });
+    
+    // Sort Ascending
+    fireEvent.click(teamHeader);
+    let rows = screen.getAllByRole('row');
+    // Team Alpha should be first
+    expect(within(rows[1]).getByText('Team Alpha')).toBeInTheDocument();
+    expect(within(rows[2]).getByText(/Team Zulu/)).toBeInTheDocument();
+
+    // Sort Descending
+    fireEvent.click(teamHeader);
+    rows = screen.getAllByRole('row');
+    // Team Zulu should be first
+    expect(within(rows[1]).getByText(/Team Zulu/)).toBeInTheDocument();
+    expect(within(rows[2]).getByText('Team Alpha')).toBeInTheDocument();
   });
 
   it('calls the correct handlers for action buttons', () => {

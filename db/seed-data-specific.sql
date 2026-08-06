@@ -24,6 +24,11 @@ BEGIN
         ON CONFLICT (incident_id) DO NOTHING;
     END IF;
 
+    -- Update the latest incident with the specified SARTopo ID
+    UPDATE incidents
+    SET sartopo_id = 'CVJP9L4', sartopo_sync_enabled = true
+    WHERE incident_id = latest_incident_id;
+
     SELECT op_period_id INTO latest_op_id
     FROM operational_periods
     WHERE incident_id = latest_incident_id
@@ -49,6 +54,7 @@ BEGIN
     END IF;
 
     -- Clean up previous seed data for this incident to ensure idempotency
+    DELETE FROM vehicles WHERE incident_id = latest_incident_id AND designation IN ('Rescue 1', 'Rescue 2', 'Rescue 3', 'Snow 1', 'UTV 1');
     DELETE FROM assignments WHERE op_period_id = latest_op_id AND title = 'Medical Standby';
     DELETE FROM responders WHERE incident_id = latest_incident_id AND (
         identifier LIKE 'ID-10%' OR identifier = 'K9-302' OR identifier = 'PILOT-14'
@@ -72,6 +78,16 @@ BEGIN
     --(latest_op_id, 'Summit Relay', 'Establish radio relay at Peak 10', 'Other', 'TAC 5', 'Planned', 'SAROps'),
     --(latest_op_id, 'LZ Preparation', 'Clear and mark helicopter landing zone Alpha', 'Helicopter', 'AIR-GUARD', 'Planned', 'SAROps'),
     (latest_op_id, 'Medical Standby', 'Medical and logistics support at Base', 'Medical', 'EMS-LINK', 'Planned', 'SAROps');
+
+    -- Add 5 vehicles
+    INSERT INTO vehicles (incident_id, designation, type, status, checkin_datetime)
+    VALUES
+        (latest_incident_id, 'Rescue 1', '4x4', 'Staged', incident_start_time),
+        (latest_incident_id, 'Rescue 2', 'Rescue', 'Staged', incident_start_time),
+        (latest_incident_id, 'Rescue 3', 'Rescue', 'Staged', incident_start_time),
+        (latest_incident_id, 'Snow 1', 'Snowmobile', 'Staged', incident_start_time),
+        (latest_incident_id, 'UTV 1', 'UTV', 'Staged', incident_start_time)
+    ON CONFLICT (incident_id, designation) DO NOTHING;
 
     -- 4. Create 31 responders (1 Dog, 1 UAS, 29 general)
     -- All associated with the most recently created incident and sharing the same auth_uid.
@@ -123,7 +139,7 @@ BEGIN
         ON CONFLICT (device_id) DO NOTHING;
     END LOOP;
 
-    RAISE NOTICE 'Success: Seeded 15 assignments and 31 responders for Incident % (OP %).', latest_incident_id, latest_op_id;
+    RAISE NOTICE 'Success: Seeded 15 assignments, 31 responders, and 5 vehicles for Incident % (OP %).', latest_incident_id, latest_op_id;
 END;
 $$;
 

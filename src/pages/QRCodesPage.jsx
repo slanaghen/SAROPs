@@ -6,9 +6,10 @@ import '../styles/ActionButtons.css';
 const QRCodesPage = () => {
   const { incidentId, incidentData, isActive, user } = useIncident();
   const [sartopoId, setSartopoId] = useState(null);
+  const [operationalPeriod, setOperationalPeriod] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const [displayDensity, setDisplayDensity] = useState('comfortable');
+  const [displayDensity, setDisplayDensity] = useState('compact');
 
   useEffect(() => {
     const fetchDensity = async () => {
@@ -42,23 +43,35 @@ const QRCodesPage = () => {
 
   const sartopoUrl = getSartopoUrl(sartopoId);
 
+  const showLiveFeed = operationalPeriod?.sarstream_enabled && (operationalPeriod?.sarstream_data?.url || operationalPeriod?.sarstream_data?.view_url);
+  const liveFeedUrl = operationalPeriod?.sarstream_data?.url || operationalPeriod?.sarstream_data?.view_url;
+
   useEffect(() => {
     if (!isActive || !incidentId) {
       setLoading(false);
       return;
     }
 
-    const fetchIncident = async () => {
+    const fetchIncidentData = async () => {
       setLoading(true);
-      const { data } = await supabase.from('incidents').select('sartopo_id').eq('incident_id', incidentId).maybeSingle();
-      if (data) setSartopoId(data.sartopo_id);
+      const { data: incData } = await supabase.from('incidents').select('sartopo_id').eq('incident_id', incidentId).maybeSingle();
+      if (incData) setSartopoId(incData.sartopo_id);
+
+      if (incidentData?.opPeriodId) {
+        const { data: opData } = await supabase
+          .from('operational_periods')
+          .select('sarstream_enabled, sarstream_data')
+          .eq('op_period_id', incidentData.opPeriodId)
+          .maybeSingle();
+        if (opData) setOperationalPeriod(opData);
+      }
       setLoading(false);
     };
 
-    fetchIncident();
+    fetchIncidentData();
 
     // Subscribe to real-time changes in case the map ID is updated in settings
-    const channel = supabase
+    const incidentChannel = supabase
       .channel(`incident-qr-sync-${incidentId}`)
       .on('postgres_changes', { 
         event: 'UPDATE', schema: 'public', table: 'incidents', filter: `incident_id=eq.${incidentId}` 
@@ -67,8 +80,19 @@ const QRCodesPage = () => {
       })
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
-  }, [incidentId, isActive]);
+    let opChannel;
+    if (incidentData?.opPeriodId) {
+      opChannel = supabase.channel(`op-period-qr-sync-${incidentData.opPeriodId}`)
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'operational_periods', filter: `op_period_id=eq.${incidentData.opPeriodId}` }, 
+          (payload) => setOperationalPeriod(payload.new)
+        ).subscribe();
+    }
+
+    return () => { 
+      supabase.removeChannel(incidentChannel); 
+      if (opChannel) supabase.removeChannel(opChannel);
+    };
+  }, [incidentId, isActive, incidentData?.opPeriodId]);
 
   if (loading) {
     return (
@@ -103,8 +127,10 @@ const QRCodesPage = () => {
 
       <div style={{ display: 'flex', gap: '40px', justifyContent: 'center', flexWrap: 'wrap' }}>
         <div className="qr-card" style={{ padding: 'var(--space-lg)' }}>
-          <h2 style={{ marginBottom: '20px' }}>Check-In Portal</h2>
-          <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+          <h2 style={{ marginBottom: '20px' }}>
+            <a href={checkinUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'none' }}>Check-In Portal</a>
+          </h2>
+          <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '12px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'center' }}>
             <img 
               src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(checkinUrl)}`} 
               alt="Check-in QR" 
@@ -113,16 +139,18 @@ const QRCodesPage = () => {
           </div>
           <p style={{ marginTop: '16px', fontSize: '14px', fontWeight: 600, color: '#1e293b' }}>Scan to Check-In</p>
           <p style={{ fontSize: '11px', color: '#94a3b8', wordBreak: 'break-all', maxWidth: '250px' }}>{checkinUrl}</p>
-          <button className="action-btn action-btn-primary action-btn-header no-print" style={{ marginTop: '12px' }} onClick={() => downloadQR(checkinUrl, 'SAROps-CheckIn-QR')}>
+          <button className="action-btn action-btn-primary action-btn-header no-print" style={{ marginTop: '12px', width: '150px' }} onClick={() => downloadQR(checkinUrl, 'SAROps-CheckIn-QR')}>
             Download PNG
           </button>
         </div>
 
         <div className="qr-card" style={{ padding: 'var(--space-lg)' }}>
-          <h2 style={{ marginBottom: '20px' }}>SARTopo Map</h2>
+          <h2 style={{ marginBottom: '20px' }}>
+            <a href={sartopoUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'none' }}>SARTopo Map</a>
+          </h2>
           {sartopoId ? (
             <>
-              <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+              <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '12px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'center' }}>
                 <img 
                   src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(sartopoUrl)}`} 
                   alt="Map QR" 
@@ -131,7 +159,7 @@ const QRCodesPage = () => {
               </div>
               <p style={{ marginTop: '16px', fontSize: '14px', fontWeight: 600, color: '#1e293b' }}>Operational Map ID: {sartopoId}</p>
               <p style={{ fontSize: '11px', color: '#94a3b8', wordBreak: 'break-all', maxWidth: '250px' }}>{sartopoUrl}</p>
-              <button className="action-btn action-btn-primary no-print" style={{ marginTop: '12px' }} onClick={() => downloadQR(sartopoUrl, 'SAROps-Map-QR')}>
+              <button className="action-btn action-btn-primary no-print" style={{ marginTop: '12px', width: '150px' }} onClick={() => downloadQR(sartopoUrl, 'SAROps-Map-QR')}>
                 Download PNG
               </button>
             </>
@@ -145,6 +173,43 @@ const QRCodesPage = () => {
                   {!isActive 
                     ? 'Select or start an incident to generate a map QR code.' 
                     : 'Set a SARTopo ID in the Incident settings to generate this QR code.'}
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="qr-card" style={{ padding: 'var(--space-lg)' }}>
+          <h2 style={{ marginBottom: '20px' }}>
+            {showLiveFeed ? (
+              <a href={liveFeedUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'none' }}>Live Video Feed</a>
+            ) : (
+              'Live Video Feed'
+            )}
+          </h2>
+          {showLiveFeed ? (
+            <>
+              <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '12px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'center' }}>
+                <img 
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(liveFeedUrl)}`} 
+                  alt="SARStream QR" 
+                  style={{ display: 'block', width: '250px', height: '250px' }}
+                />
+              </div>
+              <p style={{ marginTop: '16px', fontSize: '14px', fontWeight: 600, color: '#1e293b' }}>Scan for Live Stream</p>
+              <p style={{ fontSize: '11px', color: '#94a3b8', wordBreak: 'break-all', maxWidth: '250px' }}>{liveFeedUrl}</p>
+              <button className="action-btn action-btn-primary no-print" style={{ marginTop: '12px', width: '150px' }} onClick={() => downloadQR(liveFeedUrl, 'SAROps-Stream-QR')}>
+                Download PNG
+              </button>
+            </>
+          ) : (
+            <div style={{ width: '290px', height: '290px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px dashed #cbd5e1', borderRadius: '12px', padding: '20px', textAlign: 'center', color: '#64748b' }}>
+              <div>
+                <p style={{ fontWeight: 600, marginBottom: '8px' }}>
+                  {!isActive ? 'No Incident Active' : 'Live Feed Not Enabled'}
+                </p>
+                <p style={{ fontSize: '13px' }}>
+                  {!isActive ? 'Select or start an incident to generate a stream QR code.' : 'Enable SARStream in the Incident settings to generate this QR code.'}
                 </p>
               </div>
             </div>

@@ -30,12 +30,12 @@ describe('Responder Service Unit Tests', () => {
 
   it('updateResponderStatus should call update with correct access level', async () => {
     const mockSupabase = createMockSupabase([{ responder_id: 'r1' }]);
-    await updateResponderStatus(mockSupabase, 'r1', 'Assigned', 'command staff');
+    await updateResponderStatus(mockSupabase, 'r1', 'Assigned', 'staff');
 
     expect(mockSupabase.from).toHaveBeenCalledWith('responders');
     expect(mockSupabase.update).toHaveBeenCalledWith({ 
       status: 'Assigned', 
-      access_level: 'command staff' 
+      access_level: 'staff' 
     });
   });
 

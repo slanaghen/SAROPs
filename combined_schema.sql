@@ -236,7 +236,13 @@ CREATE TABLE team_messages (
   sender_name TEXT NOT NULL,
   message_text TEXT NOT NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);-- Secondary Indexes for Operational Periods
+);-- /db/03a_schema_mods.sql
+-- This file contains schema modifications (ALTER TABLE) that are applied
+-- after the initial tables are created but before functions and RLS policies
+-- that may depend on these new columns.
+
+-- Add the column to store a historical snapshot of a team when an assignment is completed.
+ALTER TABLE public.assignments ADD COLUMN IF NOT EXISTS completed_team_snapshot JSONB;-- Secondary Indexes for Operational Periods
 CREATE INDEX idx_operational_periods_start_datetime ON operational_periods(start_datetime);
 
 -- Secondary Indexes for Teams
@@ -380,6 +386,10 @@ $func$ LANGUAGE plpgsql;
 -- ICS Automation: Staffing
 CREATE OR REPLACE FUNCTION create_staff_team_for_op()
 RETURNS TRIGGER AS $func$
+-- This function creates the 'Staff' team and a corresponding 'Command Staff'
+-- assignment for each new operational period. It does NOT pre-populate roles
+-- like 'Planning Section Chief' or 'Mapper'. Those roles are text labels assigned
+-- to responders when they are manually added to the Staff team.
 DECLARE
     _team_id UUID;
 BEGIN
@@ -936,10 +946,16 @@ $func$ LANGUAGE sql STABLE SECURITY DEFINER;
 CREATE OR REPLACE FUNCTION is_member_of_assignment(_assignment_id UUID)
 RETURNS BOOLEAN AS $func$
   SELECT EXISTS (
+    -- Check live assignment membership
     SELECT 1 FROM assignments a
     JOIN team_responders tr ON a.team_id = tr.team_id
-    WHERE a.assignment_id = _assignment_id 
+    WHERE a.assignment_id = _assignment_id
       AND tr.responder_id = get_my_responder_id()
+  ) OR EXISTS (
+    -- Check historical assignment membership via snapshot
+    SELECT 1 FROM assignments a
+    WHERE a.assignment_id = _assignment_id
+      AND a.completed_team_snapshot -> 'current_responders' @> jsonb_build_array(jsonb_build_object('responder_id', get_my_responder_id()))
   );
 $func$ LANGUAGE sql STABLE SECURITY DEFINER;
 
@@ -1043,10 +1059,18 @@ CREATE POLICY "Allow authenticated to create assignments" ON assignments FOR INS
 
 -- Allow Team Members to update their assigned assignment status
 CREATE POLICY "Allow team members to update their assignment" ON assignments
-  FOR UPDATE TO authenticated
-  USING (is_member_of_assignment(assignment_id) OR check_is_operational_staff())
-  WITH CHECK (team_id IS NULL OR is_member_of_team(team_id) OR check_is_operational_staff());
+  FOR UPDATE TO authenticated USING (
+    is_member_of_assignment(assignment_id) OR check_is_operational_staff()
+  ) WITH CHECK (
+    team_id IS NULL OR is_member_of_team(team_id) OR check_is_operational_staff()
+  );
 
+-- Allow users to view completed assignments they were a part of via the snapshot
+CREATE POLICY "Allow members to view their completed assignments via snapshot" ON assignments
+  FOR SELECT TO authenticated
+  USING (
+    (completed_team_snapshot -> 'current_responders' @> jsonb_build_array(jsonb_build_object('responder_id', get_my_responder_id())))
+  );
 -- POLICIES: Messaging
 CREATE POLICY "View relevant messages" ON team_messages FOR SELECT TO authenticated 
   USING (team_id IN (SELECT team_id FROM team_responders WHERE responder_id = get_my_responder_id()) OR check_is_operational_staff());
@@ -1149,7 +1173,8 @@ BEGIN
   ON CONFLICT (device_id) DO UPDATE SET
     incident_id = EXCLUDED.incident_id, name = EXCLUDED.name, agency = EXCLUDED.agency,
     identifier = EXCLUDED.identifier, cell_phone = EXCLUDED.cell_phone, 
-    auth_uid = EXCLUDED.auth_uid, checkin_datetime = EXCLUDED.checkin_datetime,
+    auth_uid = EXCLUDED.auth_uid, access_level = EXCLUDED.access_level, 
+    checkin_datetime = EXCLUDED.checkin_datetime,
     updated_at = CURRENT_TIMESTAMP
   RETURNING * INTO _responder_record;
 
@@ -1274,7 +1299,7 @@ INSERT INTO users (email, username, password, access_level, name, agency, identi
 VALUES (
   'admin@gmail.com', 
   'admin@gmail.com', 
-  crypt('grigware', gen_salt('bf')), 
+  crypt('password', gen_salt('bf')), 
   'admin', 
   'Steve Admin', 
   'SAROps', 
@@ -1287,7 +1312,7 @@ INSERT INTO users (email, username, password, access_level, name, agency, identi
 VALUES (
   'staff@gmail.com', 
   'staff@gmail.com', 
-  crypt('grigware', gen_salt('bf')), 
+  crypt('password', gen_salt('bf')), 
   'staff', 
   'Steve Staff', 
   'SAROps', 
@@ -1300,7 +1325,7 @@ INSERT INTO users (email, username, password, access_level, name, agency, identi
 VALUES (
   'responder@gmail.com', 
   'responder@gmail.com', 
-  crypt('grigware', gen_salt('bf')), 
+  crypt('password', gen_salt('bf')), 
   'responder', 
   'Steve Responder', 
   'SAROps', 
@@ -1329,7 +1354,249 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
-GRANT EXECUTE ON FUNCTION reinitialize_database TO authenticated;CREATE OR REPLACE FUNCTION public.seed_data_specific()
+GRANT EXECUTE ON FUNCTION reinitialize_database TO authenticated;-- /db/12_new_logic.sql
+-- This file implements the one-to-many relationship between Teams and Assignments.
+
+-- 1. Drop the old trigger that enforces a 1:1 status sync.
+-- This logic is now replaced by an aggregate status calculation.
+DROP TRIGGER IF EXISTS trigger_sync_team_status_from_assignment ON public.assignments;
+
+-- 2. A team may be linked to any number of assignments, including deployed
+-- assignments. Remove the legacy restriction that allowed only one deployed
+-- assignment per team.
+DROP INDEX IF EXISTS public.one_deployed_assignment_per_team;
+
+-- 3. Create a function to calculate and update a team's aggregate status based on its assignments.
+CREATE OR REPLACE FUNCTION public.update_team_status_from_assignments(_team_id UUID)
+RETURNS void AS $$
+DECLARE
+    _new_status public.team_status;
+BEGIN
+    IF _team_id IS NULL THEN
+        RETURN;
+    END IF;
+
+    SELECT
+        CASE
+            WHEN EXISTS (SELECT 1 FROM public.assignments WHERE team_id = _team_id AND status = 'Deployed') THEN 'Deployed'::public.team_status
+            WHEN EXISTS (SELECT 1 FROM public.assignments WHERE team_id = _team_id AND status = 'Assigned') THEN 'Assigned'::public.team_status
+            ELSE 'Staged'::public.team_status
+        END
+    INTO _new_status;
+
+    UPDATE public.teams
+    SET status = _new_status
+    WHERE team_id = _team_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 4. Create a trigger to call the status update function whenever an assignment changes.
+CREATE OR REPLACE FUNCTION public.handle_assignment_change_for_team_status()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- When an assignment is created, updated, or deleted, we need to recalculate
+    -- the status for both the old team (if it exists) and the new team (if it exists).
+    IF (TG_OP = 'DELETE') THEN
+        PERFORM public.update_team_status_from_assignments(OLD.team_id);
+    ELSIF (TG_OP = 'INSERT') THEN
+        PERFORM public.update_team_status_from_assignments(NEW.team_id);
+    ELSIF (TG_OP = 'UPDATE') THEN
+        -- If team assignment changed or status changed
+        IF OLD.team_id IS DISTINCT FROM NEW.team_id OR OLD.status IS DISTINCT FROM NEW.status THEN
+            PERFORM public.update_team_status_from_assignments(OLD.team_id);
+            PERFORM public.update_team_status_from_assignments(NEW.team_id);
+        END IF;
+    END IF;
+    RETURN NULL; -- The result is ignored since this is an AFTER trigger
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trigger_update_team_status_on_assignment_change
+AFTER INSERT OR UPDATE OR DELETE ON public.assignments
+FOR EACH ROW EXECUTE FUNCTION public.handle_assignment_change_for_team_status();
+
+-- 5. Create a trigger to unassign a team from all assignments when it is disbanded.
+CREATE OR REPLACE FUNCTION public.unassign_team_on_disband()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.status = 'Disbanded' AND OLD.status != 'Disbanded' THEN
+        UPDATE public.assignments
+        SET team_id = NULL
+        WHERE team_id = NEW.team_id;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trigger_unassign_on_disband
+AFTER UPDATE ON public.teams
+FOR EACH ROW EXECUTE FUNCTION public.unassign_team_on_disband();
+
+-- Drop the old signature (p_equipment was TEXT[]) to avoid "function name not
+-- unique" ambiguity now that it has been changed to JSONB to match teams.equipment.
+DROP FUNCTION IF EXISTS create_team_with_resources(UUID, TEXT, TEXT, public.team_type, UUID, TEXT[], TEXT, UUID[], JSONB, UUID[]);
+
+-- This function atomically creates a team and attaches its resources
+-- to prevent race conditions inherent in a client-side "read-modify-write" pattern.
+CREATE OR REPLACE FUNCTION create_team_with_resources(
+    p_op_period_id UUID,
+    p_incident_id TEXT,
+    p_team_name_number TEXT,
+    p_type public.team_type,
+    p_leader_responder_id UUID,
+    p_equipment JSONB,
+    p_sartopo_color_hex TEXT,
+    p_responder_ids UUID[],
+    p_responder_roles JSONB,
+    p_vehicle_ids UUID[]
+)
+RETURNS teams AS $$
+DECLARE
+    _new_team teams;
+    _existing_team_id UUID;
+    current_responder_id UUID;
+    new_role TEXT;
+BEGIN
+    -- 1. Uniqueness Check (within the entire incident)
+    SELECT t.team_id INTO _existing_team_id
+    FROM teams t
+    JOIN operational_periods op ON t.op_period_id = op.op_period_id
+    WHERE op.incident_id = p_incident_id AND t.team_name_number = p_team_name_number;
+
+    IF _existing_team_id IS NOT NULL THEN
+        RAISE EXCEPTION 'A team named "%" already exists in this incident.', p_team_name_number;
+    END IF;
+
+    -- 2. Insert the new team
+    INSERT INTO teams (op_period_id, team_name_number, type, leader_responder_id, equipment, sartopo_color_hex, status)
+    VALUES (p_op_period_id, p_team_name_number, p_type, p_leader_responder_id, p_equipment, p_sartopo_color_hex, 'Staged')
+    RETURNING * INTO _new_team;
+
+    -- 3. Attach vehicles
+    IF array_length(p_vehicle_ids, 1) > 0 THEN
+        UPDATE vehicles SET team_id = _new_team.team_id, status = 'Attached' WHERE vehicle_id = ANY(p_vehicle_ids);
+    END IF;
+
+    RETURN _new_team;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+GRANT EXECUTE ON FUNCTION create_team_with_resources(UUID, TEXT, TEXT, public.team_type, UUID, JSONB, TEXT, UUID[], JSONB, UUID[]) TO authenticated;
+
+-- This function reconciles a team's membership and vehicle assignments to match
+-- a desired list. It is called by teamService.js's updateTeam() whenever a team
+-- is edited (e.g. adding a new member).
+--
+-- NOTE: This function previously existed only as an ad-hoc addition directly on
+-- the remote database and was never checked into these schema files. Its DELETE
+-- treated p_responder_ids as the complete desired roster, but the client
+-- (TeamFormModal.jsx) always excludes the team leader/IC from that list, since
+-- the leader is tracked separately via teams.leader_responder_id. The result:
+-- every reconciliation deleted the leader's own team_responders row, which is
+-- why the Incident Commander disappeared from the ICS chart as soon as a second
+-- member was added. The fix is to always preserve the current leader's row,
+-- regardless of whether they appear in p_responder_ids.
+CREATE OR REPLACE FUNCTION reconcile_team_resources(
+    p_team_id UUID,
+    p_responder_ids UUID[],
+    p_responder_roles JSONB,
+    p_vehicle_ids UUID[]
+)
+RETURNS void AS $$
+DECLARE
+    current_responder_id UUID;
+    new_role TEXT;
+    _leader_id UUID;
+BEGIN
+    SELECT leader_responder_id INTO _leader_id FROM teams WHERE team_id = p_team_id;
+
+    -- 1. Reconcile Responders
+    -- Remove responders who are no longer on the team, but never the team leader/IC.
+    DELETE FROM team_responders
+    WHERE team_id = p_team_id
+      AND responder_id NOT IN (SELECT unnest(p_responder_ids))
+      AND responder_id IS DISTINCT FROM _leader_id;
+
+    -- Upsert current members to add new ones or update roles
+    FOREACH current_responder_id IN ARRAY p_responder_ids
+    LOOP
+        new_role := p_responder_roles->>current_responder_id::TEXT;
+        INSERT INTO team_responders (team_id, responder_id, role)
+        VALUES (p_team_id, current_responder_id, new_role)
+        ON CONFLICT (team_id, responder_id) DO UPDATE
+        SET role = EXCLUDED.role;
+    END LOOP;
+
+    -- 2. Reconcile Vehicles
+    -- Detach vehicles that are no longer assigned to this team
+    UPDATE vehicles SET team_id = NULL WHERE team_id = p_team_id AND vehicle_id NOT IN (SELECT unnest(p_vehicle_ids));
+    -- Attach new vehicles to this team
+    UPDATE vehicles SET team_id = p_team_id WHERE vehicle_id = ANY(p_vehicle_ids);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+REVOKE ALL ON FUNCTION reconcile_team_resources(UUID, UUID[], JSONB, UUID[]) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION reconcile_team_resources(UUID, UUID[], JSONB, UUID[]) TO authenticated;
+-- /db/13_assignment_logic.sql
+
+-- This function atomically creates an assignment, generating a sequential name
+-- if one is not provided. This prevents race conditions inherent in a
+-- client-side "read-modify-write" pattern for name generation.
+CREATE OR REPLACE FUNCTION create_assignment_atomic(
+    p_op_period_id UUID,
+    p_incident_id TEXT,
+    p_title TEXT,
+    p_segment TEXT,
+    p_resource_type TEXT,
+    p_team_size INT,
+    p_frequency_primary TEXT,
+    p_description TEXT,
+    p_priority TEXT,
+    p_transportation TEXT,
+    p_time_allocated TEXT,
+    p_hazards TEXT,
+    p_prepared_by TEXT
+)
+RETURNS assignments AS $$
+DECLARE
+    _final_title TEXT;
+    _used_suffixes TEXT[];
+    _next_suffix CHAR(1);
+    _new_assignment assignments;
+BEGIN
+    IF p_title IS NOT NULL AND p_title <> '' THEN
+        _final_title := p_title;
+        -- Uniqueness check
+        IF EXISTS (
+            SELECT 1 FROM assignments a
+            JOIN operational_periods op ON a.op_period_id = op.op_period_id
+            WHERE op.incident_id = p_incident_id AND a.title = _final_title
+        ) THEN
+            RAISE EXCEPTION 'An assignment named "%" already exists in this incident.', _final_title;
+        END IF;
+    ELSE
+        -- Logic to generate the next available name
+        SELECT array_agg(SUBSTRING(title FROM (LENGTH(p_segment) + 1) FOR 1))
+        INTO _used_suffixes
+        FROM assignments
+        WHERE op_period_id = p_op_period_id AND segment = p_segment AND title ~ ('^' || p_segment || '[A-Z]$');
+
+        _used_suffixes := COALESCE(_used_suffixes, '{}');
+
+        _next_suffix := (SELECT chr(s.i) FROM generate_series(65, 90) AS s(i) WHERE chr(s.i) <> ALL(_used_suffixes) ORDER BY s.i LIMIT 1);
+        _final_title := p_segment || COALESCE(_next_suffix, 'A');
+    END IF;
+
+    -- Insert the new assignment
+    INSERT INTO assignments (op_period_id, title, segment, resource_type, team_size, frequency_primary, description, priority, transportation, time_allocated, hazards, prepared_by, status, origin)
+    VALUES (p_op_period_id, _final_title, p_segment, p_resource_type, p_team_size, p_frequency_primary, p_description, p_priority, p_transportation, p_time_allocated, p_hazards, p_prepared_by, 'Planned', 'SAROps')
+    RETURNING * INTO _new_assignment;
+
+    RETURN _new_assignment;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+GRANT EXECUTE ON FUNCTION create_assignment_atomic(UUID, TEXT, TEXT, TEXT, TEXT, INT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated;CREATE OR REPLACE FUNCTION public.seed_data_specific()
 RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER -- Runs with elevated permissions to bypass RLS for development seeding
@@ -1354,6 +1621,11 @@ BEGIN
         VALUES (latest_incident_id, 'Development Seed Incident', latest_incident_id, incident_start_time)
         ON CONFLICT (incident_id) DO NOTHING;
     END IF;
+
+    -- Update the latest incident with the specified SARTopo ID
+    UPDATE incidents
+    SET sartopo_id = 'CVJP9L4', sartopo_sync_enabled = true
+    WHERE incident_id = latest_incident_id;
 
     SELECT op_period_id INTO latest_op_id
     FROM operational_periods
@@ -1380,6 +1652,7 @@ BEGIN
     END IF;
 
     -- Clean up previous seed data for this incident to ensure idempotency
+    DELETE FROM vehicles WHERE incident_id = latest_incident_id AND designation IN ('Rescue 1', 'Rescue 2', 'Rescue 3', 'Snow 1', 'UTV 1');
     DELETE FROM assignments WHERE op_period_id = latest_op_id AND title = 'Medical Standby';
     DELETE FROM responders WHERE incident_id = latest_incident_id AND (
         identifier LIKE 'ID-10%' OR identifier = 'K9-302' OR identifier = 'PILOT-14'
@@ -1403,6 +1676,16 @@ BEGIN
     --(latest_op_id, 'Summit Relay', 'Establish radio relay at Peak 10', 'Other', 'TAC 5', 'Planned', 'SAROps'),
     --(latest_op_id, 'LZ Preparation', 'Clear and mark helicopter landing zone Alpha', 'Helicopter', 'AIR-GUARD', 'Planned', 'SAROps'),
     (latest_op_id, 'Medical Standby', 'Medical and logistics support at Base', 'Medical', 'EMS-LINK', 'Planned', 'SAROps');
+
+    -- Add 5 vehicles
+    INSERT INTO vehicles (incident_id, designation, type, status, checkin_datetime)
+    VALUES
+        (latest_incident_id, 'Rescue 1', '4x4', 'Staged', incident_start_time),
+        (latest_incident_id, 'Rescue 2', 'Rescue', 'Staged', incident_start_time),
+        (latest_incident_id, 'Rescue 3', 'Rescue', 'Staged', incident_start_time),
+        (latest_incident_id, 'Snow 1', 'Snowmobile', 'Staged', incident_start_time),
+        (latest_incident_id, 'UTV 1', 'UTV', 'Staged', incident_start_time)
+    ON CONFLICT (incident_id, designation) DO NOTHING;
 
     -- 4. Create 31 responders (1 Dog, 1 UAS, 29 general)
     -- All associated with the most recently created incident and sharing the same auth_uid.
@@ -1454,7 +1737,7 @@ BEGIN
         ON CONFLICT (device_id) DO NOTHING;
     END LOOP;
 
-    RAISE NOTICE 'Success: Seeded 15 assignments and 31 responders for Incident % (OP %).', latest_incident_id, latest_op_id;
+    RAISE NOTICE 'Success: Seeded 15 assignments, 31 responders, and 5 vehicles for Incident % (OP %).', latest_incident_id, latest_op_id;
 END;
 $$;
 

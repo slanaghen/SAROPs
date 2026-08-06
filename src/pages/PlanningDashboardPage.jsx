@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { supabase } from '../lib/supabase';
-import PlanningDashboard from '../components/PlanningDashboard';
+import PlanningDashboard from '../components/planning/PlanningDashboard';
 import { usePlanningDashboard } from '../hooks/usePlanningDashboard';
 import { useIncident } from '../context/IncidentContext';
 import { v4 as uuidv4 } from 'uuid';
@@ -21,7 +21,7 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
   const { incidentData, incidentId, responderName, user } = useIncident();
   const operationalPeriodId = propOpId || incidentData?.opPeriodId;
 
-  const [displayDensity, setDisplayDensity] = useState('comfortable');
+  const [displayDensity, setDisplayDensity] = useState('compact');
 
   useEffect(() => {
     const fetchDensity = async () => {

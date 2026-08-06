@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Clue } from '../types/sarops-types';
+import { Clue } from '../../sarops-types';
 import {
   saveClueOffline,
   updateClueOffline,

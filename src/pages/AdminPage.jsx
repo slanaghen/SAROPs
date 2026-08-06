@@ -9,20 +9,23 @@ import {
   OPERATIONS_REFRESH_INTERVAL,
   RESPONDER_REFRESH_INTERVAL,
   SARTOPO_REFRESH_INTERVAL
-} from '../components/operationalConstants';
+} from '../constants/operationalConstants';
 import AdminUserFormModal from '../components/admin/AdminUserFormModal';
 import { useTeamActions } from '../hooks/useTeamActions';
-import ResponderFormModal from '../components/ResponderFormModal';
-import TeamFormModal from '../components/TeamFormModal';
+import ResponderFormModal from '../components/responder/ResponderFormModal';
+import TeamFormModal from '../components/team/TeamFormModal';
 import AssignmentFormModal from '../components/AssignmentFormModal';
-import Login from '../pages/LoginPage';
+import Login from './LoginPage';
+import AdminActivationSection from './AdminActivationSection';
+import AdminSystemSettings from './AdminSystemSettings';
+import AdminDataManagement from './AdminDataManagement';
 import AdminUsersTable from '../components/admin/AdminUsersTable';
 import AdminRespondersTable from '../components/admin/AdminRespondersTable';
 import AdminTeamsTable from '../components/admin/AdminTeamsTable';
 import AdminAssignmentsTable from '../components/admin/AdminAssignmentsTable';
 import AdminIncidentsTable from '../components/admin/AdminIncidentsTable';
 import AdminVehiclesTable from '../components/admin/AdminVehiclesTable';
-import { prepareTeamForEditing } from '../services/teamService';
+import { prepareTeamForEditing, disbandTeam } from '../services/teamService';
 import VehicleFormModal from '../components/admin/VehicleFormModal';
 import { useToast } from '../context/ToastContext';
 import '../styles/ActionButtons.css';
@@ -229,6 +232,15 @@ const AdminPage = () => {
     if (isActive && responderId && responderStatus !== 'CheckedOut') {
       setLoading(true);
       try {
+        // A team leader cannot check out from an incident.
+        // They must first be replaced as leader.
+        const isTeamLeader = allTeams.some(team => team.leader_responder_id === responderId && team.status !== 'Disbanded');
+        if (isTeamLeader) {
+          addToast('You are a team leader. Please designate a new leader for your team before checking out.', 'error');
+          setLoading(false);
+          return;
+        }
+
         try {
           // 1. Clear leadership status to avoid foreign key constraints
           await supabase.from('teams').update({ leader_responder_id: null }).eq('leader_responder_id', responderId);
@@ -643,6 +655,13 @@ const AdminPage = () => {
   };
 
   const handleCheckOutResponder = async (id) => {
+    // Per SAROPs-Special-Cases.md, a team leader cannot be checked out directly.
+    // They must first be replaced as leader.
+    const isTeamLeader = allTeams.some(team => team.leader_responder_id === id && team.status !== 'Disbanded');
+    if (isTeamLeader) {
+      addToast('This responder is a team leader. Please designate a new leader for their team before checking them out.', 'error');
+      return;
+    }
     if (!window.confirm('Mark this responder as checked out?')) return;
 
     try {
@@ -674,36 +693,27 @@ const AdminPage = () => {
     }
   };
 
-  const handleDisbandTeam = async (id, name, type) => { // Added type
+  const handleDisbandTeam = async (id, name, type) => {
     const team = allTeams.find(t => t.team_id === id);
     if (team?.status === 'Deployed') {
       alert(`Cannot disband team "${name}" while it is Deployed.`);
       return;
     }
-
     if (!window.confirm(`Disband team "${name}"? Members will be released back to staging.`)) return;
 
+    setLoading(true);
     try {
-      setLoading(true);
-      // Update team status - Redundant responder status updates removed.
-      // The database trigger 'sync_team_status_on_team_update' automatically 
-      // handles releasing responders to "Staged" and closing history logs.
-      const { error: updateError } = await supabase
-        .from('teams')
-        .update({ 
-          status: 'Disbanded',
-          last_par_check: null // Clear PAR check when disbanded
-        })
-        .eq('team_id', id);
-
-      if (updateError) throw updateError;
-
-      await recordAction?.(`Admin disbanded team "${name}" (ID: ${id}, Type: ${type}). Fields modified: status="Disbanded", last_par_check=null. Automated trigger: All members released to "Staged".`);
-      
-      await refreshDashboardData();
-      addToast('Team disbanded.', 'success');
+      await disbandTeam({
+        supabase,
+        teamId: id,
+        teamName: name,
+        teamType: type,
+        recordAction,
+        addToast,
+        refreshDashboardData,
+      });
     } catch (err) {
-      addToast('Failed to disband team: ' + err.message, 'error');
+      // The service function will show a toast on error.
     } finally {
       setLoading(false);
     }
@@ -884,6 +894,17 @@ const AdminPage = () => {
     setLoading(true);
 
     try {
+      // Per the requirement, the Command Staff assignment has a special lifecycle
+      // and should not be manually marked as complete. This is handled by incident-end cleanup.
+      if (
+        editingAssignment?.title === 'Command Staff' &&
+        (formData.status === 'Completed' || formData.status === 'Incomplete')
+      ) {
+        addToast('The Command Staff assignment cannot be manually completed. It is closed when the incident ends.', 'error');
+        setLoading(false);
+        return;
+      }
+
       const payload = {
         title: formData.title,
         status: formData.status,
@@ -1018,7 +1039,7 @@ const AdminPage = () => {
   if (!isAdmin) return null;
 
   return (
-    <div className={`incident-edit-page density-${myProfile?.display_density || 'comfortable'}`}>
+    <div className={`incident-edit-page density-${myProfile?.display_density || 'compact'}`}>
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
           <h1>System Administration</h1>
@@ -1029,132 +1050,35 @@ const AdminPage = () => {
         </button>
       </div>
 
-      <div className="section-card" style={{ marginBottom: '24px' }}>
-        <h2>Incident Activation</h2>
-        {isActive && responderStatus !== 'CheckedOut' ? (
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f0f9ff', padding: 'var(--space-md)', borderRadius: '8px', border: '1px solid #bae6fd' }}>
-            <div>
-              <p style={{ margin: 0, fontWeight: 700, color: '#0369a1' }}>Current Active Session: {incidentData?.name || 'In Progress'}</p>
-              <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#0c4a6e' }}>
-                The top banner now reflects this incident. Use the menu to navigate to Operations, Planning, or Dashboards.
-              </p>
-            </div>
-            <div style={{ display: 'flex', gap: '12px' }}>
-              <button 
-                className="action-btn action-btn-secondary" 
-                style={{ borderColor: '#fecaca' }} 
-                onClick={handleLeaveIncident}
-                disabled={responderStatus !== 'Staged'}
-                title={responderStatus !== 'Staged' ? "You must return to 'Staged' status before checking out. Use the Operations dashboard to release yourself from your current team." : "End your operational session for this incident"}
-              >
-                Check out from Incident
-              </button>
-            </div>
-          </div>
-        ) : (
-          <>
-            <div style={{ marginBottom: '16px' }}>
-              <p className="subtitle" style={{ fontSize: '13px', margin: '0 0 4px' }}>
-                Select an active incident to check in as a responder and establish session context.
-              </p>
-              {allIncidents.filter(inc => !inc.end_datetime).length === 0 && !fetching && (
-                <p style={{ fontSize: '12px', color: '#dc2626', fontWeight: 600, margin: 0 }}>
-                  ⚠️ No active incidents found. Use the "New Incident" button in the management table below to start one.
-                </p>
-              )}
-            </div>
-            <div className="action-btn-group" style={{ flexWrap: 'wrap', alignItems: 'flex-end' }}>
-              <div className="form-field" style={{ flex: 1, minWidth: '250px' }}>
-                <label className="form-label" htmlFor="activate-incident-select">Select Incident</label>
-                <select 
-                  id="activate-incident-select"
-                  className="form-select"
-                  value={selectedActivationId} 
-                  onChange={(e) => setSelectedActivationId(e.target.value)}
-                >
-                  <option value="">— Select an active incident —</option>
-                  {allIncidents.filter(inc => !inc.end_datetime).map(inc => (
-                    <option key={inc.incident_id} value={inc.incident_id}>
-                      {inc.name} (#{inc.number})
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <button 
-                className="action-btn action-btn-primary" 
-                onClick={handleActivateSession} 
-                disabled={loading || fetching || !selectedActivationId}
-              >
-                {loading ? 'Joining...' : (fetching ? 'Loading Data...' : 'Check in to Incident')}
-              </button>
-            </div>
-          </>
-        )}
-      </div>
+      <AdminActivationSection
+        isActive={isActive}
+        incidentData={incidentData}
+        allIncidents={allIncidents}
+        loading={loading}
+        fetching={fetching}
+        selectedActivationId={selectedActivationId}
+        setSelectedActivationId={setSelectedActivationId}
+        handleLeaveIncident={handleLeaveIncident}
+        handleActivateSession={handleActivateSession}
+        responderStatus={responderStatus}
+      />
 
-      <div className="section-card" style={{ marginBottom: '24px' }}>
-        <h2>System Settings</h2>
-        <p className="subtitle" style={{ fontSize: '13px', margin: '0 0 16px' }}>Configure global refresh and polling intervals (in seconds).</p>
-        <div className="form-grid" style={{ gap: 'var(--space-md)', alignItems: 'flex-end' }}>
-          <div className="form-field" style={{ minWidth: '150px' }}>
-            <label className="form-label" htmlFor="ops-refresh-input">Operations Refresh</label>
-            <input 
-              id="ops-refresh-input"
-              type="number" 
-              className="form-input"
-              value={opRefresh} 
-              onChange={(e) => setOpRefresh(parseInt(e.target.value, 10) || 0)}
-              min="5"
-            />
-          </div>
-          <div className="form-field" style={{ minWidth: '150px' }}>
-            <label className="form-label" htmlFor="res-refresh-input">Responder Refresh</label>
-            <input 
-              id="res-refresh-input"
-              type="number" 
-              className="form-input"
-              value={resRefresh} 
-              onChange={(e) => setResRefresh(parseInt(e.target.value, 10) || 0)}
-              min="5"
-            />
-          </div>
-          <div className="form-field" style={{ minWidth: '150px' }}>
-            <label className="form-label" htmlFor="topo-refresh-input">SARTopo Refresh</label>
-            <input 
-              id="topo-refresh-input"
-              type="number" 
-              className="form-input"
-              value={sartopoRefresh} 
-              onChange={(e) => setSartopoRefresh(parseInt(e.target.value, 10) || 0)}
-              min="5"
-            />
-          </div>
-          <button className="action-btn action-btn-primary" onClick={handleApplySettings} disabled={!isSettingsDirty}>
-            Apply
-          </button>
-        </div>
-      </div>
+      <AdminSystemSettings
+        opRefresh={opRefresh}
+        setOpRefresh={setOpRefresh}
+        resRefresh={resRefresh}
+        setResRefresh={setResRefresh}
+        sartopoRefresh={sartopoRefresh}
+        setSartopoRefresh={setSartopoRefresh}
+        isSettingsDirty={isSettingsDirty}
+        handleApplySettings={handleApplySettings}
+      />
 
-      <div className="section-card" style={{ marginBottom: '24px' }}>
-        <h2>Data Management</h2>
-        <p className="subtitle" style={{ fontSize: '13px', margin: '0 0 16px' }}>Manage incident records, perform cascading deletions, and initialize test data.</p>
-        <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end' }}>
-          <button 
-            onClick={handleSeedData} 
-            className="action-btn action-btn-secondary" 
-            disabled={loading} 
-          >
-            {loading ? 'Seeding...' : 'Seed Data'}
-          </button>
-          <button 
-            onClick={handleClearData} 
-            className="action-btn action-btn-danger" 
-            disabled={loading} 
-          >
-            {loading ? 'Clearing...' : 'Clear Data'}
-          </button>
-        </div>
-      </div>
+      <AdminDataManagement
+        loading={loading}
+        handleSeedData={handleSeedData}
+        handleClearData={handleClearData}
+      />
 
       <AdminUsersTable
         users={users}

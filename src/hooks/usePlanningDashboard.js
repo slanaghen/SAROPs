@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo } from 'react';
 import { useIncident } from '../context/IncidentContext';
+import { createTeam as createTeamService, updateTeam as updateTeamService } from '../services/teamService';
 import { v4 as uuidv4 } from 'uuid';
 
 /**
@@ -186,104 +187,55 @@ export const usePlanningDashboard = (supabase, opPeriodId) => {
    * Tactical Mutations
    */
   const createTeam = async (teamData, responderRoles = {}, vehicleIds = []) => {
-    setError(null);
-    // Requirement: Enforce unique team names within the incident (across all operational periods)
-    const teamName = (teamData.team_name_number || '').trim();
-    if (!teamName) throw new Error("Team name is required.");
+    try {
+      setError(null);
+      const teamName = (teamData.team_name_number || '').trim();
 
-    const { responder_ids: responderIds = [], ...cleanData } = teamData;
+      const newTeam = await createTeamService(supabase, {
+        opPeriodId,
+        incidentId,
+        teamName,
+        type: teamData.type,
+        leaderId: teamData.leader_responder_id,
+        equipment: teamData.equipment,
+        sartopoColorHex: teamData.sartopo_color_hex,
+        responderIds: teamData.responder_ids,
+        responderRoles,
+        vehicleIds
+      });
 
-    const { data: existing, error: checkError } = await supabase
-      .from('teams')
-      .select('team_id, operational_periods!inner(incident_id)')
-      .eq('team_name_number', teamName)
-      .eq('operational_periods.incident_id', incidentId)
-      .maybeSingle();
+      // Logging remains on the client-side
+      const membersInfo = (teamData.responder_ids || []).map(id => {
+        const responder = responders?.find(r => r.responder_id === id);
+        return `${responder?.name || 'Unknown'}`;
+      }).join(', ');
 
-    if (checkError) throw checkError;
-    if (existing) {
-      throw new Error(`A team named "${teamName}" already exists in this incident. Team names must be unique.`);
+      const actionMessage = `Created team "${teamName}" (Type: ${teamData.type}).` +
+        (membersInfo ? ` Members: ${membersInfo}.` : '');
+      await supabase.from('action_logs').insert({ incident_id: incidentId, action: actionMessage, user_name: responderName || 'Operations' });
+
+      await fetchDashboardData();
+      return newTeam;
+    } catch (err) {
+      setError(err.message);
+      throw err;
     }
-
-    const { error: insError, data } = await supabase
-      .from('teams')
-      .insert({ ...cleanData, team_name_number: teamName, op_period_id: opPeriodId, status: 'Staged' })
-      .select()
-      .single();
-
-    if (insError) throw insError;
-
-    // Centralized Resource Attachment Logic
-    const attachmentPromises = [];
-
-    if (responderIds.length > 0) {
-      attachmentPromises.push(...responderIds.map(id => 
-        supabase.from('team_responders').insert({ team_id: data.team_id, responder_id: id, role: responderRoles[id] || '' })
-      ));
-    }
-
-    if (vehicleIds.length > 0) {
-      attachmentPromises.push(supabase.from('vehicles').update({ team_id: data.team_id }).in('vehicle_id', vehicleIds));
-    }
-
-    if (attachmentPromises.length > 0) {
-      const results = await Promise.all(attachmentPromises);
-      const firstError = results.find(r => r.error);
-      if (firstError) console.warn('[usePlanningDashboard] Partial failure during resource attachment:', firstError.error);
-    }
-
-    await supabase.from('action_logs').insert({
-      incident_id: incidentId,
-      action: `Created team "${teamName}". Composition: ${responderIds.length} members, ${vehicleIds.length} vehicles.`,
-      user_name: responderName || 'Operations'
-    });
-
-    await fetchDashboardData();
-    return data;
   };
 
   const updateTeam = async (teamId, teamData, responderRoles = {}, vehicleIds = []) => {
     setError(null);
     try {
       // Strip view-only metadata and reconciliation fields to prevent DB "column not found" errors
-      const { current_responders, current_vehicles, responder_ids: finalIds = [], ...cleanData } = teamData;
+      const { current_responders, current_vehicles, responder_ids: finalIds = [], ...coreTeamData } = teamData;
 
-      // 1. Update core team metadata
-      const { error: updError } = await supabase
-        .from('teams')
-        .update(cleanData)
-        .eq('team_id', teamId);
-      if (updError) throw updError;
+      await updateTeamService(supabase, {
+        teamId,
+        teamData: coreTeamData,
+        responderIds: finalIds,
+        responderRoles,
+        vehicleIds
+      });
 
-      // 2. Reconcile Memberships (Diffing is handled here to keep components clean)
-      const { data: currentMembers } = await supabase.from('team_responders').select('responder_id').eq('team_id', teamId);
-      const originalIds = currentMembers?.map(m => m.responder_id) || [];
-
-      const toAdd = finalIds.filter(id => !originalIds.includes(id));
-      const toRemove = originalIds.filter(id => !finalIds.includes(id));
-      const toUpdate = finalIds.filter(id => originalIds.includes(id));
-
-      const membershipPromises = [
-        ...toAdd.map(id => supabase.from('team_responders').insert({ team_id: teamId, responder_id: id, role: responderRoles[id] || '' })),
-        ...toUpdate.map(id => supabase.from('team_responders').update({ role: responderRoles[id] || '' }).eq('team_id', teamId).eq('responder_id', id)),
-        ...toRemove.map(id => supabase.from('team_responders').delete().eq('team_id', teamId).eq('responder_id', id))
-      ];
-
-      // 3. Reconcile Vehicles
-      const { data: currentVehicles } = await supabase.from('vehicles').select('vehicle_id').eq('team_id', teamId);
-      const originalVehIds = currentVehicles?.map(v => v.vehicle_id) || [];
-      const finalVehIds = vehicleIds;
-
-      const vehToAdd = finalVehIds.filter(id => !originalVehIds.includes(id));
-      const vehToRemove = originalVehIds.filter(id => !finalVehIds.includes(id));
-
-      const vehiclePromises = [
-        ...vehToAdd.map(id => supabase.from('vehicles').update({ team_id: teamId }).eq('vehicle_id', id)),
-        ...vehToRemove.map(id => supabase.from('vehicles').update({ team_id: null }).eq('vehicle_id', id))
-      ];
-
-      await Promise.all([...membershipPromises, ...vehiclePromises]);
-      
       await supabase.from('action_logs').insert({
         incident_id: incidentId,
         action: `Updated composition for team "${teamData.team_name_number}".`,
@@ -310,19 +262,33 @@ export const usePlanningDashboard = (supabase, opPeriodId) => {
       throw new Error(err);
     }
 
-    const { error: insError } = await supabase
-      .from('assignments')
-      .insert({ ...asnData, op_period_id: opPeriodId });
+    // Call the new atomic RPC function to handle creation and name generation
+    const { data: newAssignment, error } = await supabase.rpc('create_assignment_atomic', {
+        p_op_period_id: opPeriodId,
+        p_incident_id: incidentId,
+        p_title: asnData.title || null, // Pass null to trigger auto-generation
+        p_segment: asnData.segment || 'A',
+        p_resource_type: asnData.resource_type,
+        p_team_size: asnData.team_size,
+        p_frequency_primary: asnData.frequency_primary,
+        p_description: asnData.description,
+        p_priority: asnData.priority,
+        p_transportation: asnData.transportation,
+        p_time_allocated: asnData.time_allocated,
+        p_hazards: asnData.hazards,
+        p_prepared_by: asnData.prepared_by
+    });
 
-    if (insError) throw insError;
+    if (error) throw error;
 
     await supabase.from('action_logs').insert({
       incident_id: incidentId,
-      action: `Created assignment "${asnData.title || asnData.name}".`,
+      action: `Created assignment "${newAssignment.title}".`,
       user_name: responderName || 'Operations'
     });
 
     await fetchDashboardData();
+    return newAssignment;
   };
 
   const updateAssignment = async (asnId, asnData) => {

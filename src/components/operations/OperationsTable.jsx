@@ -1,0 +1,273 @@
+import React from 'react';
+
+const OperationsTable = ({ 
+  rows, 
+  sortConfig, 
+  requestSort, 
+  assignmentFilter,
+  onAssignmentFilterChange,
+  teamFilter,
+  onTeamFilterChange,
+  parInterval,
+  onStatusUpdate,
+  onResetPar,
+  onUnassignTeam,
+  onDisbandTeam,
+  onDeleteAssignment,
+  onEditTeam,
+  onEditAssignment,
+  openNewTeamForm,
+  openNewAssignmentForm,
+  onNewTeam,
+  onNewAssignment,
+  onAssignResource,
+  draggedItem,
+  dropTarget,
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+  onDragEnter,
+  onDragLeave,
+  onDrop
+}) => {
+  return (
+    <div className="operations-table-wrapper" style={{ width: '100%' }}>
+      <table className="operations-table" style={{ width: '100%', tableLayout: 'auto' }}>
+        <thead>
+          <tr className="group-header-row">
+            <th colSpan="5" style={{ textAlign: 'center', padding: '8px 12px', background: '#f8fafc', color: '#64748b', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px' }}>
+                Assignment
+                <input 
+                  type="text" 
+                  placeholder="Search..." 
+                  value={assignmentFilter}
+                  onChange={(e) => onAssignmentFilterChange(e.target.value)}
+                  data-lpignore="true"
+                  style={{ height: '24px', padding: '0 8px', fontSize: '11px', borderRadius: '4px', border: '1px solid #cbd5e1', width: '100px', textTransform: 'none' }}
+                  onClick={(e) => e.stopPropagation()}
+                />
+                <button className="btn btn-primary btn-sm" onClick={openNewAssignmentForm} style={{ height: '24px', fontSize: '10px', padding: '0 8px', minWidth: '0', width: 'auto', flex: 'none' }}>
+                  New
+                </button>
+              </div>
+            </th>
+            <th colSpan={parInterval > 0 ? 7 : 6} style={{ textAlign: 'center', padding: '8px 12px', background: '#f8fafc', borderLeft: '1px solid #e2e8f0', color: '#64748b', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px' }}>
+                Team
+                <input 
+                  type="text" 
+                  placeholder="Search..." 
+                  value={teamFilter}
+                  onChange={(e) => onTeamFilterChange(e.target.value)}
+                  data-lpignore="true"
+                  style={{ height: '24px', padding: '0 8px', fontSize: '11px', borderRadius: '4px', border: '1px solid #cbd5e1', width: '100px', textTransform: 'none' }}
+                  onClick={(e) => e.stopPropagation()}
+                />
+                <button className="btn btn-primary btn-sm" onClick={openNewTeamForm} style={{ height: '24px', fontSize: '10px', padding: '0 8px', minWidth: '0', width: 'auto', flex: 'none' }}>
+                  New
+                </button>
+              </div>
+            </th>
+            <th style={{ background: '#f8fafc' }}></th>
+          </tr>
+          <tr>
+            <th onClick={() => requestSort('assignmentName')} style={{ cursor: 'pointer', width: '16%' }}>
+              Name {sortConfig.key === 'assignmentName' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+            </th>
+            <th onClick={() => requestSort('assignmentType')} style={{ cursor: 'pointer', width: '10%' }}>
+              Type {sortConfig.key === 'assignmentType' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+            </th>
+            <th onClick={() => requestSort('assignmentPriority')} style={{ cursor: 'pointer', width: '8%' }}>
+              Priority {sortConfig.key === 'assignmentPriority' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+            </th>
+            <th onClick={() => requestSort('tacChannel')} style={{ cursor: 'pointer', width: '7%' }}>
+              TAC {sortConfig.key === 'tacChannel' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+            </th>
+            <th onClick={() => requestSort('assignmentStatus')} style={{ cursor: 'pointer', width: '11%' }}>
+              Status {sortConfig.key === 'assignmentStatus' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+            </th>
+            <th onClick={() => requestSort('teamName')} style={{ cursor: 'pointer', width: '11%', borderLeft: '1px solid #e2e8f0' }}>
+              Name {sortConfig.key === 'teamName' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+            </th>
+            <th onClick={() => requestSort('teamType')} style={{ cursor: 'pointer', width: '10%' }}>
+              Type {sortConfig.key === 'teamType' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+            </th>
+            <th onClick={() => requestSort('teamLeader')} style={{ cursor: 'pointer', width: '12%' }}>
+              Leader {sortConfig.key === 'teamLeader' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+            </th>
+            <th onClick={() => requestSort('leaderIdentifier')} style={{ cursor: 'pointer', width: '7%' }}>
+              ID {sortConfig.key === 'leaderIdentifier' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+            </th>
+            <th onClick={() => requestSort('teamSize')} style={{ cursor: 'pointer', width: '8%' }}>
+              Size {sortConfig.key === 'teamSize' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+            </th>
+            <th onClick={() => requestSort('teamStatus')} style={{ cursor: 'pointer', width: '10%' }}>
+              Status {sortConfig.key === 'teamStatus' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+            </th>
+            {parInterval > 0 && (
+              <th onClick={() => requestSort('timeSincePar')} style={{ cursor: 'pointer', width: '10%' }}>
+                Last PAR Check {sortConfig.key === 'timeSincePar' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : ''}
+              </th>
+            )}
+            <th style={{ width: '90px' }}>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 ? (
+            <tr><td colSpan={parInterval > 0 ? 12 : 11} className="empty-row">No matching records found.</td></tr>
+          ) : rows.map(row => {
+            const isHighPriorityPending = row.assignmentPriority === 'High' && row.assignmentStatus === 'Assigned';
+            
+            const rowClass = [
+              (row.assignmentStatus === 'Deployed' && row.hasBoth) ? 'row-deployed' : '',
+              (row.assignmentStatus === 'Assigned' && row.hasBoth) ? 'row-assigned' : '',
+              (row.assignmentStatus === 'Completed' && row.hasBoth) ? 'row-complete' : '',
+              (!row.isParOverdue && isHighPriorityPending) ? 'row-glow-priority' : ''
+            ].filter(Boolean).join(' ');
+
+            return (
+              <tr key={row.id} className={rowClass}
+                onDragOver={!row.hasBoth ? (e) => onDragOver(e, row.id, row.id.startsWith('team-') ? 'team' : 'assignment') : undefined}
+                onDragEnter={!row.hasBoth ? (e) => onDragEnter(e, row.id, row.id.startsWith('team-') ? 'team' : 'assignment') : undefined}
+                onDragLeave={!row.hasBoth ? onDragLeave : undefined}
+                onDrop={!row.hasBoth ? (e) => onDrop(e, row.id, row.id.startsWith('team-') ? 'team' : 'assignment') : undefined}
+              >
+              <td 
+                style={{ textAlign: 'center' }}
+              >
+                {row.assignmentName ? (
+                  <div 
+                    className={`chip assignment-chip ${draggedItem?.id === row.id && draggedItem?.type === 'assignment' ? 'dragging' : ''} ${dropTarget?.id === row.id && dropTarget?.type === 'assignment' ? 'drop-target' : ''} ${row.hasBoth ? 'locked' : ''} ${row.assignmentName === 'Command Staff' ? 'staff-chip' : ''} ${row.assignmentOrigin === 'SARTopo' ? 'sartopo-chip' : ''}`}
+                    draggable={!row.hasBoth}
+                    onDragStart={!row.hasBoth ? (e) => onDragStart(e, row.id, 'assignment') : undefined}
+                    onDragEnd={onDragEnd}
+                    onClick={() => row.assignmentId && onEditAssignment(row.assignmentId)}
+                  >
+                    {row.assignmentName}
+                  </div>
+                ) : '—'}
+              </td>
+              <td style={{ textAlign: 'center' }}>{row.assignmentType || '—'}</td>
+              <td style={{ textAlign: 'center' }}>{row.assignmentPriority || '—'}</td>
+              <td style={{ textAlign: 'center' }}>{row.tacChannel || '—'}</td>
+              <td style={{ textAlign: 'center' }}>
+                {row.assignmentId ? (
+                  row.hasBoth ? (
+                    <select 
+                      value={row.assignmentStatus} 
+                      onChange={(e) => onStatusUpdate(row.assignmentId, row.teamId, e.target.value)}
+                      className={`status-indicator ${(row.assignmentStatus || '').toLowerCase()} status-select-inline`}
+                    >
+                      <option value="Planned">Planned</option>
+                      <option value="Assigned">Assigned</option>
+                      <option value="Deployed">Deployed</option>
+                      <option value="Completed">Completed</option>
+                      <option value="Incomplete">Incomplete</option>
+                    </select>
+                  ) : <span className={`status-indicator ${row.assignmentStatus?.toLowerCase() || ''}`}>{row.assignmentStatus || '—'}</span>
+                ) : null}
+              </td>
+              <td 
+                style={{ textAlign: 'center' }}
+              >
+                {row.teamName ? (
+                  <div 
+                    className={`chip team-chip ${draggedItem?.id === row.id && draggedItem?.type === 'team' ? 'dragging' : ''} ${dropTarget?.id === row.id && dropTarget?.type === 'team' ? 'drop-target' : ''} ${row.hasBoth ? 'locked' : ''} ${row.teamType === 'Staff' ? 'staff-chip' : ''}`}
+                    draggable={!row.hasBoth}
+                    onDragStart={!row.hasBoth ? (e) => onDragStart(e, row.id, 'team') : undefined}
+                    onDragEnd={onDragEnd}
+                    onClick={() => row.teamId && onEditTeam(row.teamId)}
+                  >
+                    {row.teamName}
+                  </div>
+                ) : '—'}
+              </td>
+              <td style={{ textAlign: 'center' }}>{row.teamType || '—'}</td>
+              <td style={{ textAlign: 'center' }}>
+                <div style={{ fontWeight: 500 }}>{row.teamLeader || '—'}</div>
+              </td>
+              <td style={{ textAlign: 'center', fontFamily: 'monospace', fontSize: '12px' }}>{row.leaderIdentifier || '—'}</td>
+              <td style={{ textAlign: 'center' }}>{row.teamSize ?? '—'}</td>
+              <td style={{ textAlign: 'center' }}>
+                {row.teamId ? (
+                  <span className={`status-indicator ${row.teamStatus?.toLowerCase() || ''}`}>{row.teamStatus || '—'}</span>
+                ) : null}
+              </td>
+              {parInterval > 0 && (
+                <td style={{ textAlign: 'center' }}>
+                  {row.teamId && (row.isParOverdue ? (
+                    <span 
+                      className="status-indicator incomplete chip-overdue-gradient" 
+                      onClick={() => onResetPar(row.teamId, row.teamName)}
+                      title="Click to reset PAR"
+                      style={{ 
+                        gap: '4px',
+                        whiteSpace: 'nowrap',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      {row.timeSincePar}
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <polyline points="12 6 12 12 16 14"></polyline>
+                      </svg>
+                    </span>
+                  ) : <span style={{ fontSize: '12px', color: '#64748b' }}>{row.timeSincePar}</span>)}
+                </td>
+              )}
+              <td style={{ textAlign: 'center' }}>
+                <select className="status-update-select" value="" onChange={(e) => {
+                  const act = e.target.value;
+                  if (act === 'edit-team' && row.teamId) {
+                    console.log(`[OperationsTable] Edit action triggered for teamId: ${row.teamId}`);
+                    onEditTeam(row.teamId);
+                  }
+                  else if (act === 'edit-assignment' && row.assignmentId) onEditAssignment(row.assignmentId);
+                  else if (act === 'reset-par') onResetPar(row.teamId, row.teamName);
+                  else if (act === 'unassign') onUnassignTeam(row.assignmentId, row.teamId, row.assignmentName, row.teamName);
+                  else if (act === 'assign-resource') onAssignResource(row);
+                  else if (act === 'edit') row.teamId ? onEditTeam(row.teamId) : onEditAssignment(row.assignmentId);
+                  else if (act === 'new-team') onNewTeam(row.assignmentId);
+                  else if (act === 'new-assignment') onNewAssignment(row.teamId);
+                  else if (act === 'detach') onDisbandTeam(row.teamId, row.teamName);
+                  else if (act === 'delete') onDeleteAssignment(row.assignmentId, row.assignmentName);
+                }}>
+                  <option value="" disabled>Actions...</option>
+                  {row.hasBoth ? (
+                    <>
+                      <option value="edit-team">Edit Team</option>
+                      <option value="edit-assignment">Edit Assignment</option>
+                      <option value="unassign">Unassign Team</option>
+                      {parInterval > 0 && <option value="reset-par">Reset PAR</option>}
+                    </>
+                  ) : (
+                    <>
+                      <option value="edit">Edit</option>
+                      <option value="assign-resource">{row.assignmentId ? 'Assign Team' : 'Assign Assignment'}</option>
+                      {row.teamId ? (
+                        <>
+                          <option value="new-assignment">New Assignment</option>
+                          {parInterval > 0 && <option value="reset-par">Reset PAR</option>}
+                          <option value="detach" disabled={row.teamStatus === 'Deployed'}>Disband Team</option>
+                        </>
+                      ) : (
+                        <>
+                          <option value="new-team">New Team</option>
+                          <option value="delete">Delete Assignment</option>
+                        </>
+                      )}
+                    </>
+                  )}
+                </select>
+              </td>
+            </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
+export default OperationsTable;

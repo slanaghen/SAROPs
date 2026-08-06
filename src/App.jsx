@@ -6,18 +6,41 @@ import useResponderTeamAndAssignment from './hooks/useResponderTeamAndAssignment
 import { useRealTimeNotifications } from './hooks/useRealTimeNotifications';
 import { useToast } from './context/ToastContext';
 import logo from './assets/logo.png';
-import './styles.css';
+import './styles/styles.css';
 
 function App() {
   const [offline, setOffline] = useState(!navigator.onLine);
   const [user, setUser] = useState(null);
-  const [displayDensity, setDisplayDensity] = useState('comfortable');
+  const [displayDensity, setDisplayDensity] = useState('compact');
   const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
   const [operationalPeriod, setOperationalPeriod] = useState(null);
+  const [isIncidentContextHydrated, setIsIncidentContextHydrated] = useState(false); // New state to track context hydration
+  const [authResolved, setAuthResolved] = useState(false);
   const { addToast } = useToast();
   const [menuOpen, setMenuOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
+
+  const { 
+    isActive, 
+    isAdmin, 
+    incidentId,
+    incidentData, 
+    responderName, 
+    responderId,
+    responderStatus, 
+    setResponderStatus,
+    accessLevel, 
+    setAccessLevel,
+    currentTeamStatus,
+    setCurrentTeamStatus,
+    currentAssignmentStatus,
+    setCurrentAssignmentStatus,
+    logout,
+    startIncident,
+    setResponderId,
+    setResponderName,
+  } = useIncident();
 
   // Reactive Profile & Display Density Synchronization
   useEffect(() => {
@@ -55,7 +78,7 @@ function App() {
     if (user?.email) {
       syncProfile(user.email);
     } else {
-      setDisplayDensity('comfortable'); // Reset to default on logout
+      setDisplayDensity('compact'); // Reset to default on logout
     }
 
     return () => { if (channel) supabase.removeChannel(channel); };
@@ -65,12 +88,46 @@ function App() {
     // Listen for auth changes (login/logout)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
+      // Mark that the initial authentication check has completed.
+      setAuthResolved(true);
     });
 
     return () => {
       if (subscription) subscription.unsubscribe();
     };
-  }, []);
+  }, []); // Empty dependency array ensures this runs only once on mount
+
+  // Effect to restore session state from sessionStorage on initial load
+  useEffect(() => {
+    try {
+      const savedSession = sessionStorage.getItem('sarops_active_session');
+      if (savedSession) {
+        const { incident, responder } = JSON.parse(savedSession);
+        if (incident && incident.incidentId && !isActive) { // Prevent re-hydration if already active
+          console.log('[App] Restoring active session from sessionStorage:', incident);
+          startIncident(
+            incident.incidentId,
+            incident.incidentName,
+            incident.opNumber,
+            incident.opPeriodId,
+            incident.sartopoId,
+            incident.parInterval
+          );
+          if (responder && responder.responderId) {
+            setResponderId(responder.responderId);
+            setResponderName(responder.responderName);
+            setAccessLevel(responder.accessLevel || 'responder'); // Restore access level
+            setResponderStatus(responder.responderStatus);
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[App] Failed to parse or restore session from sessionStorage:', e);
+      sessionStorage.removeItem('sarops_active_session');
+    } finally {
+      setIsIncidentContextHydrated(true); // Mark hydration as complete
+    }
+  }, []); // Run only once on mount
 
   useEffect(() => {
     const handleOnline = () => setOffline(false);
@@ -85,29 +142,12 @@ function App() {
     };
   }, []);
 
-  const { 
-    isActive, 
-    isAdmin, 
-    incidentId,
-    incidentData, 
-    responderName, 
-    responderId,
-    responderStatus, 
-    setResponderStatus,
-    accessLevel, 
-    setAccessLevel,
-    currentTeamStatus,
-    setCurrentTeamStatus,
-    currentAssignmentStatus,
-    setCurrentAssignmentStatus,
-    logout
-  } = useIncident();
-
   // Centralized Real-time Session Sync
   // Uses the shared operational hook to ensure the banner and global context
   // are perfectly synchronized with the database state at all times.
   const { team, assignment, responderRecord, loading: hookLoading, refetch } = useResponderTeamAndAssignment(supabase, responderId);
 
+  const prevResponderId = useRef(responderId);
   // Re-synchronize session when window gains focus (e.g. returning to tab)
   useEffect(() => {
     const handleFocus = () => {
@@ -119,6 +159,29 @@ function App() {
     window.addEventListener('focus', handleFocus);
     return () => window.removeEventListener('focus', handleFocus);
   }, [isActive, responderId, refetch]);
+
+  // Effect to persist session state to sessionStorage whenever it changes
+  useEffect(() => {
+    if (isActive && incidentId) {
+      const sessionToSave = {
+        incident: {
+          incidentId: incidentId,
+          incidentName: incidentData?.name,
+          opNumber: incidentData?.opNumber,
+          opPeriodId: incidentData?.opPeriodId,
+          sartopoId: incidentData?.sartopoId,
+          parInterval: incidentData?.parInterval,
+        },
+        responder: {
+          responderId: responderId,
+          responderName: responderName,
+          accessLevel: accessLevel,
+          responderStatus: responderStatus,
+        }
+      };
+      sessionStorage.setItem('sarops_active_session', JSON.stringify(sessionToSave));
+    }
+  }, [isActive, incidentId, incidentData, responderId, responderName, accessLevel, responderStatus]);
 
   // Monitor for unread messages globally to alert the user via the banner
   useEffect(() => {
@@ -291,11 +354,14 @@ function App() {
           if (isActive && logout) logout();
         }
       }
-    } else if (!hookLoading && isActive && responderId) {
-      // If we are active but the record is missing (e.g. database was reinitialized), clear context
-      console.warn('[App] Active responder record not found in database. Clearing session.');
-      localStorage.removeItem('sarops_user_email');
-      if (logout) logout();
+    } else if (!hookLoading && isActive && responderId && responderId === prevResponderId.current) {
+      // If we are active but the record is missing (e.g. database was reinitialized), clear context.
+      // The check against prevResponderId prevents this from firing during the check-in race condition.
+      console.warn('[App] Active responder record not found in database. Clearing session.', { responderId, prevResponderId: prevResponderId.current });
+      if (logout) {
+        localStorage.removeItem('sarops_user_email');
+        logout();
+      }
     }
 
     if (team && team.status !== 'Disbanded') {
@@ -305,9 +371,12 @@ function App() {
       setCurrentTeamStatus(null);
       setCurrentAssignmentStatus(null);
     }
+
+    // Update the ref after the effect has run
+    prevResponderId.current = responderId;
   }, [
     isActive, responderId, responderRecord, team, assignment, hookLoading,
-    setResponderStatus, setAccessLevel, setCurrentTeamStatus, setCurrentAssignmentStatus
+    setResponderStatus, setAccessLevel, setCurrentTeamStatus, setCurrentAssignmentStatus, logout
   ]);
 
   // Centralized Notifications
@@ -315,6 +384,10 @@ function App() {
 
   // Navigation Guard: Centralized access control for all application routes.
   useEffect(() => {
+    // Do not run navigation guards until the initial auth state has been resolved
+    // AND the incident context has finished its initial loading/hydration.
+    if (!authResolved || !isIncidentContextHydrated) return;
+
     // Define paths accessible without any active session or special privileges.
     const publicPaths = ['/', '/checkin', '/login'];
     
@@ -324,6 +397,7 @@ function App() {
     const isStaffOrAdmin = accessLevel === 'staff' || accessLevel === 'admin';
     // A user has staff privileges if they are an admin system user OR have been elevated to staff for an incident.
     const hasStaffPrivileges = isAdmin || isStaffOrAdmin;
+    console.log(`[App Guard] Evaluating: isActive=${isActive}, isAdmin=${isAdmin}, accessLevel=${accessLevel}, path=${location.pathname}, authResolved=${authResolved}, isIncidentContextHydrated=${isIncidentContextHydrated}`);
 
     // Guard 1: The main gate for unauthenticated/unactivated users.
     // If the user is not in an active incident AND is not a system admin,
@@ -331,6 +405,7 @@ function App() {
     if (!isActive && !isAdmin) {
       if (!publicPaths.includes(location.pathname)) {
         console.warn(`[App Guard] Guest access denied for ${location.pathname}. Redirecting to /checkin.`);
+        console.trace('Redirect triggered by Guard 1');
         navigate('/checkin');
         return;
       }
@@ -343,6 +418,7 @@ function App() {
     if (isActive && !hasStaffPrivileges) {
       if (!responderAllowedPaths.includes(location.pathname)) {
         console.warn(`[App Guard] Responder access denied for staff page: ${location.pathname}. Redirecting to /responder.`);
+        console.trace('Redirect triggered by Guard 2');
         navigate('/responder');
         return;
       }
@@ -351,10 +427,11 @@ function App() {
     // Guard 3: Prevent non-admins from accessing the admin page.
     if (accessLevel !== 'admin' && location.pathname === '/admin') {
       // Enforce: Staff cannot access Admin
-      console.warn(`[App Guard] Staff attempted to access admin page.`);
+      console.warn(`[App Guard] Non-admin attempted to access admin page.`);
+      console.trace('Redirect triggered by Guard 3');
       navigate('/operations');
     }
-  }, [isActive, isAdmin, accessLevel, location.pathname, navigate]);
+  }, [isActive, isAdmin, accessLevel, location.pathname, navigate, authResolved, isIncidentContextHydrated]);
 
   // SARStream: Fetch operational period data to check for active stream
   useEffect(() => {
@@ -383,6 +460,16 @@ function App() {
     
     return () => supabase.removeChannel(channel);
   }, [incidentData?.opPeriodId]);
+
+  // Display a global loading spinner if authentication or incident context is still resolving
+  if (!authResolved || !isIncidentContextHydrated) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', flexDirection: 'column', gap: '16px', background: '#f8fafc' }}>
+        <div className="loading-spinner" style={{ fontSize: '48px' }}>⏳</div>
+        <p style={{ color: '#64748b', fontSize: '18px' }}>Loading application...</p>
+      </div>
+    );
+  }
 
   const showLiveFeed = operationalPeriod?.sarstream_enabled && (operationalPeriod?.sarstream_data?.url || operationalPeriod?.sarstream_data?.view_url);
   const liveFeedUrl = operationalPeriod?.sarstream_data?.url || operationalPeriod?.sarstream_data?.view_url;
@@ -468,7 +555,7 @@ function App() {
               {menuOpen && (
                 <div className="banner-dropdown">
                   {isActive && <Link to="/responder" onClick={() => setMenuOpen(false)}>My Dashboard</Link>}
-                  {showLiveFeed && <a href={liveFeedUrl} target="_blank" rel="noopener noreferrer" onClick={() => setMenuOpen(false)}>Live Feed</a>}
+                  {showLiveFeed && <a href={liveFeedUrl} target="_blank" rel="noopener noreferrer" onClick={() => setMenuOpen(false)}>SARStream Feed</a>}
                   {isActive && <Link to="/settings" onClick={() => setMenuOpen(false)}>Settings</Link>}
                   {(isAdmin || accessLevel === 'staff' || accessLevel === 'admin') && (
                     <>

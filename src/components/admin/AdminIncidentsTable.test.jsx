@@ -1,6 +1,11 @@
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import AdminIncidentsTable from './AdminIncidentsTable';
+import { useIncident } from '../../context/IncidentContext';
+
+vi.mock('../../context/IncidentContext', () => ({
+  useIncident: vi.fn(),
+}));
 
 describe('AdminIncidentsTable', () => {
   const mockHandleEndIncident = vi.fn();
@@ -15,7 +20,7 @@ describe('AdminIncidentsTable', () => {
       number: '2024-001',
       start_datetime: '2024-01-01T10:00:00Z',
       end_datetime: null,
-      operational_periods: [{ op_number: 2 }],
+      operational_periods: [{ op_number: 2, start_datetime: '2024-01-02T10:00:00Z' }],
     },
     {
       incident_id: 'inc-2',
@@ -23,7 +28,7 @@ describe('AdminIncidentsTable', () => {
       number: '2023-050',
       start_datetime: '2023-12-01T10:00:00Z',
       end_datetime: '2023-12-02T10:00:00Z',
-      operational_periods: [{ op_number: 1 }],
+      operational_periods: [{ op_number: 1, start_datetime: '2023-12-01T10:00:00Z' }],
     },
   ];
 
@@ -40,6 +45,9 @@ describe('AdminIncidentsTable', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(useIncident).mockReturnValue({
+      user: { email: 'admin@test.com' },
+    });
   });
 
   it('renders incident rows and highlights the current active session', () => {

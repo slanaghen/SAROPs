@@ -29,6 +29,10 @@ $func$ LANGUAGE plpgsql;
 -- ICS Automation: Staffing
 CREATE OR REPLACE FUNCTION create_staff_team_for_op()
 RETURNS TRIGGER AS $func$
+-- This function creates the 'Staff' team and a corresponding 'Command Staff'
+-- assignment for each new operational period. It does NOT pre-populate roles
+-- like 'Planning Section Chief' or 'Mapper'. Those roles are text labels assigned
+-- to responders when they are manually added to the Staff team.
 DECLARE
     _team_id UUID;
 BEGIN

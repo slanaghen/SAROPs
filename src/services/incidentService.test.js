@@ -1,6 +1,6 @@
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import { endIncidentAndCleanup, deleteIncident } from './incidentService';
-import { ASSIGNMENT_STATUS } from '../utils/constants';
+import { ASSIGNMENT_STATUS } from '../constants/operationalConstants';
 
 describe('Incident Service', () => {
   const mockSupabase = {
@@ -27,19 +27,26 @@ describe('Incident Service', () => {
 
   describe('endIncidentAndCleanup', () => {
     it('should end an incident with no active resources without confirmation', async () => {
+      const mockUpdateEq = vi.fn().mockResolvedValue({ error: null });
+      const mockUpdate = vi.fn(() => ({ eq: mockUpdateEq }));
+
       mockSupabase.from.mockImplementation((table) => {
         if (table === 'assignments' || table === 'responders') {
           return {
-            ...mockSupabase,
             select: vi.fn().mockReturnThis(),
             eq: vi.fn().mockReturnThis(),
             in: vi.fn().mockReturnThis(),
             is: vi.fn().mockResolvedValue({ data: [], error: null }),
           };
         }
-        return mockSupabase;
+        if (table === 'incidents') {
+          return { update: mockUpdate };
+        }
+        if (table === 'action_logs') {
+          return { insert: mockSupabase.insert };
+        }
+        return {};
       });
-      mockSupabase.update.mockResolvedValue({ error: null });
 
       await endIncidentAndCleanup({
         supabase: mockSupabase,
@@ -53,7 +60,8 @@ describe('Incident Service', () => {
       });
 
       expect(window.confirm).not.toHaveBeenCalled();
-      expect(mockSupabase.update).toHaveBeenCalledWith({ end_datetime: expect.any(String) });
+      expect(mockUpdate).toHaveBeenCalledWith({ end_datetime: expect.any(String) });
+      expect(mockUpdateEq).toHaveBeenCalledWith('incident_id', 'inc-1');
       expect(mockSupabase.insert).toHaveBeenCalledWith(expect.objectContaining({ action: expect.stringContaining('Incident ended') }));
       expect(mockEndIncident).toHaveBeenCalled();
       expect(mockAddToast).toHaveBeenCalledWith('Incident ended and resources cleaned up.', 'success');
@@ -61,10 +69,12 @@ describe('Incident Service', () => {
     });
 
     it('should prompt for confirmation when active resources exist', async () => {
+      const mockUpdateEq = vi.fn().mockResolvedValue({ error: null });
+      const mockUpdate = vi.fn(() => ({ eq: mockUpdateEq }));
+
       mockSupabase.from.mockImplementation((table) => {
         if (table === 'assignments') {
           return {
-            ...mockSupabase,
             select: vi.fn().mockReturnThis(),
             eq: vi.fn().mockReturnThis(),
             in: vi.fn().mockResolvedValue({ data: [{ status: ASSIGNMENT_STATUS.DEPLOYED }], error: null }),
@@ -72,15 +82,19 @@ describe('Incident Service', () => {
         }
         if (table === 'responders') {
           return {
-            ...mockSupabase,
             select: vi.fn().mockReturnThis(),
             eq: vi.fn().mockReturnThis(),
             is: vi.fn().mockResolvedValue({ data: [{ responder_id: 'r-1' }], error: null }),
           };
         }
-        return mockSupabase;
+        if (table === 'incidents') {
+          return { update: mockUpdate };
+        }
+        if (table === 'action_logs') {
+          return { insert: mockSupabase.insert };
+        }
+        return {};
       });
-      mockSupabase.update.mockResolvedValue({ error: null });
 
       await endIncidentAndCleanup({
         supabase: mockSupabase,
@@ -92,18 +106,28 @@ describe('Incident Service', () => {
       });
 
       expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('1 active assignments and 1 responders still checked in'));
-      expect(mockSupabase.update).toHaveBeenCalled();
+      expect(mockUpdate).toHaveBeenCalled();
     });
 
     it('should not proceed if user cancels confirmation', async () => {
       window.confirm.mockReturnValue(false);
-      mockSupabase.from.mockImplementation((table) => ({
-        ...mockSupabase,
-        select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        in: vi.fn().mockResolvedValue({ data: [{ status: ASSIGNMENT_STATUS.DEPLOYED }], error: null }),
-        is: vi.fn().mockResolvedValue({ data: [{ responder_id: 'r-1' }], error: null }),
-      }));
+      mockSupabase.from.mockImplementation((table) => {
+        if (table === 'assignments') {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            in: vi.fn().mockResolvedValue({ data: [{ status: ASSIGNMENT_STATUS.DEPLOYED }], error: null }),
+          };
+        }
+        if (table === 'responders') {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            is: vi.fn().mockResolvedValue({ data: [{ responder_id: 'r-1' }], error: null }),
+          };
+        }
+        return {};
+      });
 
       await endIncidentAndCleanup({
         supabase: mockSupabase,
@@ -114,14 +138,15 @@ describe('Incident Service', () => {
         navigate: mockNavigate,
       });
 
-      expect(mockSupabase.update).not.toHaveBeenCalled();
       expect(mockEndIncident).not.toHaveBeenCalled();
     });
   });
 
   describe('deleteIncident', () => {
     it('should delete an incident and call logout if it was the active session', async () => {
-      mockSupabase.delete.mockResolvedValue({ error: null });
+      const mockEq = vi.fn().mockResolvedValue({ error: null });
+      const mockDelete = vi.fn(() => ({ eq: mockEq }));
+      mockSupabase.from.mockReturnValue({ delete: mockDelete });
 
       await deleteIncident({
         supabase: mockSupabase,
@@ -135,8 +160,9 @@ describe('Incident Service', () => {
       });
 
       expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('Permanently delete this incident?'));
-      expect(mockSupabase.delete).toHaveBeenCalled();
-      expect(mockSupabase.eq).toHaveBeenCalledWith('incident_id', 'inc-1');
+      expect(mockSupabase.from).toHaveBeenCalledWith('incidents');
+      expect(mockDelete).toHaveBeenCalled();
+      expect(mockEq).toHaveBeenCalledWith('incident_id', 'inc-1');
       expect(mockRecordAction).toHaveBeenCalledWith(expect.stringContaining('Admin initiated permanent deletion'));
       expect(mockLogout).toHaveBeenCalled();
       expect(mockAddToast).toHaveBeenCalledWith('Incident and all associated data deleted.', 'success');
@@ -144,7 +170,12 @@ describe('Incident Service', () => {
     });
 
     it('should not call logout if deleting an inactive incident', async () => {
-      mockSupabase.delete.mockResolvedValue({ error: null });
+      const mockEq = vi.fn().mockResolvedValue({ error: null });
+      const mockDelete = vi.fn(() => ({ eq: mockEq }));
+      mockSupabase.from.mockImplementation((table) => {
+        if (table === 'incidents') return { delete: mockDelete };
+        return mockSupabase;
+      });
 
       await deleteIncident({
         supabase: mockSupabase,
@@ -156,6 +187,9 @@ describe('Incident Service', () => {
         currentIncidentId: 'inc-1', // A different active incident
       });
 
+      expect(mockSupabase.from).toHaveBeenCalledWith('incidents');
+      expect(mockDelete).toHaveBeenCalled();
+      expect(mockEq).toHaveBeenCalledWith('incident_id', 'inc-2');
       expect(mockLogout).not.toHaveBeenCalled();
     });
   });

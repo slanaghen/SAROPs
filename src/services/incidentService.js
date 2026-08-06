@@ -1,6 +1,6 @@
 // src/services/incidentService.js
 
-import { ASSIGNMENT_STATUS, RESPONDER_STATUS, TEAM_STATUS } from '../utils/constants';
+import { ASSIGNMENT_STATUS, RESPONDER_STATUS, TEAM_STATUS } from '../constants/operationalConstants';
 
 /**
  * Ends an incident, performing necessary cleanup of associated resources.

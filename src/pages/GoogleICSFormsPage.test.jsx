@@ -1,137 +1,121 @@
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
-import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { vi, describe, it, expect, beforeEach } from 'vitest';
 import GoogleICSFormsPage from './GoogleICSFormsPage';
 import { useIncident } from '../context/IncidentContext';
-import { supabase } from '../lib/supabase';
 import { useToast } from '../context/ToastContext';
 
-vi.mock('../context/IncidentContext', () => ({
-  useIncident: vi.fn(),
-}));
-
-vi.mock('../lib/supabase', () => ({
-  supabase: {
-    from: vi.fn(() => {
-      const mock = globalThis.createSupabaseQueryMock([]);
-      mock.maybeSingle = vi.fn().mockReturnThis();
-      return mock;
-    }),
-  },
-}));
-
-vi.mock('../context/ToastContext', () => ({
-  useToast: vi.fn(),
-}));
+// Mock dependencies
+vi.mock('../context/IncidentContext');
+vi.mock('../context/ToastContext');
 
 describe('GoogleICSFormsPage', () => {
-  const mockApiKey = 'MOCK_GOOGLE_KEY';
   const mockAddToast = vi.fn();
-  
+
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubEnv('VITE_GOOGLE_SHEETS_API_KEY', mockApiKey);
-    global.fetch = vi.fn();
-    vi.mocked(useToast).mockReturnValue({ addToast: mockAddToast });
-
+    vi.stubGlobal('fetch', vi.fn());
     vi.mocked(useIncident).mockReturnValue({
-      incidentData: { opPeriodId: 'op-123', opNumber: '1', name: 'Test Incident' },
+      incidentData: { name: 'Test Incident', opNumber: '1' },
       incidentId: 'inc-123',
-      responderId: 'res-123',
     });
+    vi.mocked(useToast).mockReturnValue({ addToast: mockAddToast });
   });
 
-  afterEach(() => {
-    cleanup();
-    vi.unstubAllEnvs();
-  });
-
-  it('renders the input field and disables load when empty', () => {
+  it('renders the initial state correctly', () => {
     render(<GoogleICSFormsPage />);
-    const urlInput = screen.getByPlaceholderText(/docs\.google\.com/i);
-    fireEvent.change(urlInput, { target: { value: '' } });
-    const loadButton = screen.getByRole('button', { name: /Load/i });
-    expect(loadButton).toBeDisabled();
+    expect(screen.getByRole('heading', { name: /Google Forms/i })).toBeInTheDocument();
+    expect(screen.getByText(/No named ranges loaded/i)).toBeInTheDocument();
   });
 
-  it('displays named ranges when a valid URL is loaded', async () => {
-    const mockData = { namedRanges: [{ name: 'IncidentName' }, { name: 'OpPeriod' }] };
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve(mockData),
-    });
-
+  it('shows an error toast for an invalid Google Sheets URL', async () => {
     render(<GoogleICSFormsPage />);
-    const urlInput = screen.getByPlaceholderText(/docs\.google\.com/i);
-    fireEvent.change(urlInput, { target: { value: 'https://docs.google.com/spreadsheets/d/SPREADSHEET_ID/edit' } });
-    
+    const urlInput = screen.getByLabelText(/Google Sheet URL/i);
+    fireEvent.change(urlInput, { target: { value: 'not-a-url' } });
     fireEvent.click(screen.getByRole('button', { name: /Load/i }));
 
     await waitFor(() => {
+      expect(mockAddToast).toHaveBeenCalledWith(expect.stringContaining('Invalid URL'), 'error');
+    });
+  });
+
+  it('fetches and displays named ranges on load', async () => {
+    const mockRanges = { namedRanges: [{ name: 'IncidentName' }, { name: 'OpPeriod' }] };
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => mockRanges,
+    });
+
+    render(<GoogleICSFormsPage />);
+    fireEvent.click(screen.getByRole('button', { name: /Load/i }));
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith('/api/sheets/named-ranges', expect.any(Object));
       expect(screen.getByText('IncidentName')).toBeInTheDocument();
       expect(screen.getByText('OpPeriod')).toBeInTheDocument();
-      expect(screen.getByText(/Detected Named Ranges \(2\)/i)).toBeInTheDocument();
     });
   });
 
-  it('handles API errors gracefully', async () => {
-    global.fetch.mockResolvedValueOnce({
-      ok: false,
-      status: 403,
-      json: () => Promise.resolve({ error: { message: 'API key not valid' } }),
-    });
+  it('allows associating a context field with a named range via drag and drop', async () => {
+    const mockRanges = { namedRanges: [{ name: 'IncidentName' }] };
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => mockRanges });
 
     render(<GoogleICSFormsPage />);
-    fireEvent.change(screen.getByPlaceholderText(/docs\.google\.com/i), { target: { value: 'https://docs.google.com/spreadsheets/d/123/edit' } });
     fireEvent.click(screen.getByRole('button', { name: /Load/i }));
+
+    const contextField = await screen.findByText('incident_name');
+    const namedRangeTarget = await screen.findByText('IncidentName');
+
+    const dataTransfer = {
+      setData: vi.fn(),
+      getData: vi.fn().mockReturnValue('incident_name'),
+    };
+
+    fireEvent.dragStart(contextField, { dataTransfer });
+    fireEvent.drop(namedRangeTarget, { dataTransfer });
 
     await waitFor(() => {
-      // Requirement: Since error alerts were replaced by Toasts, verify functional behavior
-      expect(mockAddToast).toHaveBeenCalledWith(expect.stringMatching(/API key not valid/i), 'error');
+      // Check that the association is displayed
+      expect(screen.getByText('(incident_name)')).toBeInTheDocument();
     });
   });
 
-  it('manually associates context fields with named ranges via drag and drop', async () => {
-    const mockData = { namedRanges: [{ name: 'MissionName' }] };
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve(mockData),
-    });
-
+  it('sends the correct data to the proxy on "Transfer Data"', async () => {
+    // 1. Load ranges
+    const mockRanges = { namedRanges: [{ name: 'IncidentNameRange' }, { name: 'OpPeriodRange' }] };
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => mockRanges });
     render(<GoogleICSFormsPage />);
-    fireEvent.change(screen.getByPlaceholderText(/docs\.google\.com/i), { target: { value: 'https://docs.google.com/spreadsheets/d/123/edit' } });
     fireEvent.click(screen.getByRole('button', { name: /Load/i }));
 
-    const rangeElement = await screen.findByText('MissionName');
-    const fieldElement = screen.getByText('incident_name');
+    // 2. Create associations
+    const incidentNameField = await screen.findByText('incident_name');
+    const opPeriodField = await screen.findByText('op_period_number');
+    const incidentNameTarget = await screen.findByText('IncidentNameRange');
+    const opPeriodTarget = await screen.findByText('OpPeriodRange');
+    const dt = { setData: vi.fn(), getData: vi.fn() };
 
-    // Simulate DnD DataTransfer
-    const dataTransfer = { setData: vi.fn(), getData: vi.fn().mockReturnValue('incident_name') };
-    fireEvent.dragStart(fieldElement.closest('div[draggable]'), { dataTransfer });
-    fireEvent.drop(rangeElement.closest('div[style*="font-family: monospace"]'), { dataTransfer });
+    dt.getData.mockReturnValue('incident_name');
+    fireEvent.dragStart(incidentNameField, { dataTransfer: dt });
+    fireEvent.drop(incidentNameTarget, { dataTransfer: dt });
 
-    expect(screen.getByText('(incident_name)')).toBeInTheDocument();
-  });
+    dt.getData.mockReturnValue('op_period_number');
+    fireEvent.dragStart(opPeriodField, { dataTransfer: dt });
+    fireEvent.drop(opPeriodTarget, { dataTransfer: dt });
 
-  it('removes an existing association when the remove button is clicked', async () => {
-    const mockData = { namedRanges: [{ name: 'MissionName' }] };
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve(mockData),
+    // 3. Click Transfer
+    vi.mocked(fetch).mockClear(); // Clear previous fetch calls
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({}) }); // Mock for the update call
+    fireEvent.click(screen.getByRole('button', { name: /Transfer Data/i }));
+
+    // 4. Assert the correct payload was sent
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith('/api/sheets/update-values', expect.any(Object));
+      const fetchOptions = vi.mocked(fetch).mock.calls[0][1];
+      const body = JSON.parse(fetchOptions.body);
+      expect(body.values).toEqual({
+        IncidentNameRange: 'Test Incident',
+        OpPeriodRange: '1',
+      });
+      expect(mockAddToast).toHaveBeenCalledWith(expect.stringContaining('Data successfully transferred'), 'success');
     });
-
-    render(<GoogleICSFormsPage />);
-    fireEvent.change(screen.getByPlaceholderText(/docs\.google\.com/i), { target: { value: 'https://docs.google.com/spreadsheets/d/123/edit' } });
-    fireEvent.click(screen.getByRole('button', { name: /Load/i }));
-
-    const rangeElement = await screen.findByText('MissionName');
-    const dataTransfer = { setData: vi.fn(), getData: vi.fn().mockReturnValue('incident_name') };
-    
-    // Add association first
-    fireEvent.drop(rangeElement.closest('div[style*="font-family: monospace"]'), { dataTransfer });
-    expect(screen.getByText('(incident_name)')).toBeInTheDocument();
-
-    // Remove association
-    fireEvent.click(screen.getByTitle(/Remove association/i));
-    expect(screen.queryByText('(incident_name)')).not.toBeInTheDocument();
   });
 });

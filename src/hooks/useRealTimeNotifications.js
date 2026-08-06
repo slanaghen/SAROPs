@@ -1,70 +1,93 @@
-import { useEffect, useRef, useState } from 'react';
-import logo from '../assets/logo.png';
+import { useEffect, useState, useRef } from 'react';
 
 /**
- * Custom hook to handle audio and browser notifications for status changes.
+ * Displays a browser notification using the most robust method available.
+ * Prefers the Service Worker API for reliability, with a fallback to the legacy constructor.
+ * @param {string} title - The title of the notification.
+ * @param {object} options - The options for the notification (e.g., body, icon).
  */
-export const useRealTimeNotifications = (isActive, responderStatus, teamStatus, assignmentStatus) => {
-  const [permission, setPermission] = useState(
-    typeof Notification !== 'undefined' ? Notification.permission : 'unsupported'
-  );
-
-  const prevStatusRef = useRef(responderStatus);
-  const prevTeamStatusRef = useRef(teamStatus);
-  const prevAssignmentStatusRef = useRef(assignmentStatus);
-
-  const triggerNotification = (title, body) => {
-    // 1. Play Sound
-    if (typeof Audio !== 'undefined') {
-      try {
-        const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
-        audio.play().catch(() => console.debug('Audio blocked: interaction required'));
-      } catch (e) {
-        console.debug('Audio playback failed');
-      }
-    }
-    // 2. Browser Notification
-    if ("Notification" in window) {
-      if (Notification.permission === "granted") {
-      new Notification(title, {
-        body: body,
-        icon: logo,
-        tag: 'status-change'
-      });
-      } else if (Notification.permission === "denied") {
-        console.warn('[Notifications] Visual notifications are blocked by browser settings. Falling back to audio alerts only.');
-      }
+const showNotification = (title, options) => {
+  const playSound = () => {
+    try {
+      const audio = new Audio('/notification.mp3');
+      audio.play().catch(e => console.error("Audio playback failed:", e));
+    } catch (e) {
+      console.error("Failed to create or play audio:", e);
     }
   };
 
-  // Monitor for permission changes and handle initial request logic
+  // Check if Service Worker API is available and the context is secure
+  if ('serviceWorker' in navigator && window.isSecureContext) {
+    navigator.serviceWorker.ready.then(registration => {
+      // Use the Service Worker to show the notification
+      registration.showNotification(title, options);
+      playSound();
+    }).catch(err => {
+      // If the service worker is not ready, we should not fall back to the legacy constructor,
+      // as this can cause "Illegal constructor" errors. We simply log the issue.
+      console.error('Service Worker not ready for notification:', err);
+    });
+  } else if ('Notification' in window && Notification.permission === 'granted') {
+    try {
+      new Notification(title, options);
+      playSound();
+    } catch (e) {
+      console.error("Legacy 'new Notification()' constructor failed:", e);
+    }
+  }
+};
+
+/**
+ * A React hook to manage and display real-time notifications for operational status changes.
+ */
+export const useRealTimeNotifications = (isActive, responderStatus, teamStatus, assignmentStatus) => {
+  const [permission, setPermission] = useState(Notification.permission);
+  const prevTeamStatus = useRef(teamStatus);
+  const prevAssignmentStatus = useRef(assignmentStatus);
+  const prevResponderStatus = useRef(responderStatus);
+
+  // Request permission on mount if not already granted
   useEffect(() => {
-    if (isActive && "Notification" in window) {
-      if (Notification.permission === "default") {
-        Notification.requestPermission().then(setPermission);
-      } else {
-        setPermission(Notification.permission);
-      }
+    if (Notification.permission !== 'granted' && Notification.permission !== 'denied') {
+      Notification.requestPermission().then(p => setPermission(p));
     }
-  }, [isActive]);
+  }, []);
 
+  // Effect to trigger notification on responder status change
   useEffect(() => {
-    if (!isActive) return;
+    if (isActive && permission === 'granted' && responderStatus && responderStatus !== prevResponderStatus.current) {
+      showNotification('SAROps: Your Status Changed', {
+        body: `Your operational status is now: ${responderStatus}`,
+        icon: '/logo.png',
+        tag: 'responder-status-update'
+      });
+    }
+    prevResponderStatus.current = responderStatus;
+  }, [isActive, permission, responderStatus]);
 
-    if (prevStatusRef.current && responderStatus && prevStatusRef.current !== responderStatus) {
-      triggerNotification("SAROps: Your Status Changed", `Your operational status has changed to: ${responderStatus}`);
+  // Effect to trigger notification on team status change
+  useEffect(() => {
+    if (isActive && permission === 'granted' && teamStatus && teamStatus !== prevTeamStatus.current) {
+      showNotification('Team Status Update', {
+        body: `Your team status is now: ${teamStatus}`,
+        icon: '/logo.png',
+        tag: 'team-status-update' // Use a tag to prevent multiple notifications
+      });
     }
-    if (prevTeamStatusRef.current && teamStatus && prevTeamStatusRef.current !== teamStatus) {
-      triggerNotification("SAROps: Team Status Changed", `Your team's status has changed to: ${teamStatus}`);
-    }
-    if (prevAssignmentStatusRef.current && assignmentStatus && prevAssignmentStatusRef.current !== assignmentStatus) {
-      triggerNotification("SAROps: Assignment Status Changed", `Your team's assignment status has changed to: ${assignmentStatus}`);
-    }
+    prevTeamStatus.current = teamStatus;
+  }, [isActive, permission, teamStatus]);
 
-    prevStatusRef.current = responderStatus;
-    prevTeamStatusRef.current = teamStatus;
-    prevAssignmentStatusRef.current = assignmentStatus;
-  }, [responderStatus, teamStatus, assignmentStatus, isActive]);
+  // Effect to trigger notification on assignment status change
+  useEffect(() => {
+    if (isActive && permission === 'granted' && assignmentStatus && assignmentStatus !== prevAssignmentStatus.current) {
+      showNotification('Assignment Status Update', {
+        body: `Your assignment status is now: ${assignmentStatus}`,
+        icon: '/logo.png',
+        tag: 'assignment-status-update'
+      });
+    }
+    prevAssignmentStatus.current = assignmentStatus;
+  }, [isActive, permission, assignmentStatus]);
 
   return { permission };
 };

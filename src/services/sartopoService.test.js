@@ -1,28 +1,48 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { getSartopoConfig, downloadAndSyncSartopoData } from './sartopoService';
-import * as sartopoAuth from '../utils/sartopoAuth';
-
-// Mock the crypto-dependent function
-vi.mock('../utils/sartopoAuth', () => ({
-  signSartopoRequest: vi.fn().mockResolvedValue('signed_string'),
-}));
+import { getSartopoConfig, downloadAndSyncSartopoData, createSartopoMap } from './sartopoService';
 
 describe('SARTopo Service', () => {
   const mockSupabase = {
-    from: vi.fn().mockReturnThis(),
-    select: vi.fn().mockReturnThis(),
-    update: vi.fn().mockReturnThis(),
-    upsert: vi.fn().mockReturnThis(),
-    insert: vi.fn().mockReturnThis(),
-    eq: vi.fn().mockReturnThis(),
-    maybeSingle: vi.fn(),
+    from: vi.fn(), // Will be implemented in tests
+    functions: { invoke: vi.fn() }, // Mock Supabase functions for the proxy
+  };
+
+  const mockTrackers = {
+    upsert: vi.fn().mockResolvedValue({ error: null }),
+    insert: vi.fn().mockResolvedValue({ error: null }),
+    update: vi.fn().mockResolvedValue({ error: null }),
+  };
+
+  // Helper to create a more robust mock for the Supabase fluent query API
+  const createSupabaseQueryMock = (data, error = null) => {
+    const mock = {
+      select: vi.fn(),
+      eq: vi.fn(),
+      maybeSingle: vi.fn().mockResolvedValue({ data, error }),
+      then: (cb) => Promise.resolve({ data, error }).then(cb),
+      // Integrate trackers and ensure chainability
+      update: vi.fn(function(...args) {
+        mockTrackers.update(...args);
+        return this;
+      }),
+      upsert: vi.fn(function(...args) {
+        mockTrackers.upsert(...args);
+        return this;
+      }),
+      insert: vi.fn(function(...args) {
+        mockTrackers.insert(...args);
+        return this;
+      }),
+    };
+    // Make chainable methods return the mock itself
+    mock.select.mockReturnThis();
+    mock.eq.mockReturnThis();
+    return mock;
   };
 
   beforeEach(() => {
     vi.clearAllMocks();
-    global.fetch = vi.fn();
-    vi.stubEnv('VITE_SARTOPO_API_CREDENTIAL_ID', 'test_id');
-    vi.stubEnv('VITE_SARTOPO_API_CREDENTIAL_SECRET', 'test_secret');
+    Object.values(mockTrackers).forEach(tracker => tracker.mockClear());
   });
 
   afterEach(() => {
@@ -58,39 +78,26 @@ describe('SARTopo Service', () => {
   });
 
   describe('downloadAndSyncSartopoData', () => {
-    it('should fetch, merge, and sync SARTopo data', async () => {
+    it('should invoke the proxy and sync current SARTopo data without caching map data', async () => {
       const sartopoConfig = { id: 'MAP123', params: new URLSearchParams(), query: '' };
       
-      // Mock existing data in the database
-      const existingDbData = {
-        result: {
-          state: {
-            features: [{ id: 'f1', properties: { title: 'Old Title' } }],
-          },
-        },
-      };
       mockSupabase.from.mockImplementation((table) => {
-        if (table === 'incidents') {
-          return { ...mockSupabase, maybeSingle: vi.fn().mockResolvedValue({ data: { sartopo_map_data: existingDbData }, error: null }) };
-        }
         if (table === 'assignments') {
-          const mockEq = vi.fn().mockResolvedValue({ data: [{ sartopo_id: 'f1', title: 'Old Title' }], error: null });
-          const mockSelect = vi.fn(() => ({ eq: mockEq }));
-          return { select: mockSelect };
+          return createSupabaseQueryMock([{ sartopo_id: 'f1', title: 'Old Title' }]);
         }
-        return mockSupabase;
+        if (table === 'action_logs') {
+          return createSupabaseQueryMock(null);
+        }
+        return createSupabaseQueryMock(null);
       });
-      mockSupabase.upsert.mockResolvedValue({ error: null });
-      mockSupabase.insert.mockResolvedValue({ error: null });
 
-      // Mock the fetch response from SARTopo
       const newSartopoFeatures = [
         { id: 'f1', properties: { class: 'Assignment', title: 'Updated Title' } }, // Update
         { id: 'f2', properties: { class: 'Assignment', name: 'New Assignment' } }, // Create
       ];
-      global.fetch.mockResolvedValue({
-        ok: true,
-        json: async () => ({ result: { state: { features: newSartopoFeatures } } }),
+      vi.mocked(mockSupabase.functions.invoke).mockResolvedValue({
+        data: { result: { state: { features: newSartopoFeatures } } },
+        error: null,
       });
 
       const result = await downloadAndSyncSartopoData({
@@ -100,39 +107,36 @@ describe('SARTopo Service', () => {
         sartopoConfig,
       });
 
-      // 1. Verify fetch was called correctly
-      expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/api/v1/map/MAP123/since/0'));
+      // 1. Verify invoke was called correctly
+      expect(mockSupabase.functions.invoke).toHaveBeenCalledWith('sartopo-proxy', {
+        body: expect.objectContaining({
+          method: 'GET',
+          path: '/api/v1/map/MAP123/since/0',
+        }),
+      });
 
-      // 2. Verify incident data was updated with merged features
-      const updateCall = vi.mocked(mockSupabase.update).mock.calls[0][0];
-      const mergedFeatures = updateCall.sartopo_map_data.features;
-      expect(mergedFeatures.length).toBe(2);
-      expect(mergedFeatures.find(f => f.id === 'f1').properties.title).toBe('Updated Title');
-      expect(mergedFeatures.find(f => f.id === 'f2').properties.name).toBe('New Assignment');
-
-      // 3. Verify assignments were upserted
-      const upsertPayload = vi.mocked(mockSupabase.upsert).mock.calls[0][0];
+      // 2. Verify assignments were upserted
+      const upsertPayload = mockTrackers.upsert.mock.calls[0][0];
       expect(upsertPayload.length).toBe(2);
       expect(upsertPayload.find(p => p.sartopo_id === 'f1').title).toBe('Updated Title');
       expect(upsertPayload.find(p => p.sartopo_id === 'f2').title).toBe('New Assignment');
-      expect(mockSupabase.upsert).toHaveBeenCalledWith(expect.any(Array), { onConflict: 'op_period_id,sartopo_id' });
+      expect(mockTrackers.upsert).toHaveBeenCalledWith(expect.any(Array), { onConflict: 'op_period_id,sartopo_id' });
 
-      // 4. Verify action log was created
-      expect(mockSupabase.insert).toHaveBeenCalledWith(expect.objectContaining({
+      // 3. Verify action log was created
+      expect(mockTrackers.insert).toHaveBeenCalledWith(expect.objectContaining({
         action: expect.stringContaining('Synced 2 assignments from SARTopo'),
       }));
 
-      // 5. Verify result object
+      // 4. Verify result object and no map data was stored in incidents.
       expect(result.syncCount).toBe(2);
+      expect(mockSupabase.from).not.toHaveBeenCalledWith('incidents');
     });
 
-    it('should throw an error if fetch is not ok', async () => {
+    it('should throw an error if the proxy invocation fails', async () => {
       const sartopoConfig = { id: 'MAP123', params: new URLSearchParams(), query: '' };
-      global.fetch.mockResolvedValue({
-        ok: false,
-        status: 404,
-        statusText: 'Not Found',
-        text: async () => 'Map not found',
+      vi.mocked(mockSupabase.functions.invoke).mockResolvedValue({
+        data: null,
+        error: { message: 'Proxy function crashed' },
       });
 
       await expect(downloadAndSyncSartopoData({
@@ -140,7 +144,18 @@ describe('SARTopo Service', () => {
         incidentId: 'inc-1',
         opPeriodId: 'op-1',
         sartopoConfig,
-      })).rejects.toThrow('SARTopo returned 404: Not Found');
+      })).rejects.toThrow('Edge Function Error: Proxy function crashed');
+    });
+  });
+
+  describe('createSartopoMap', () => {
+    it('should call the proxy with the correct parameters for map creation', async () => {
+      vi.mocked(mockSupabase.functions.invoke).mockResolvedValue({ data: { id: 'new-map' }, error: null });
+      await createSartopoMap(mockSupabase, 'New Test Map', {});
+
+      expect(mockSupabase.functions.invoke).toHaveBeenCalledWith('sartopo-proxy', expect.objectContaining({
+        body: expect.objectContaining({ method: 'POST', path: '/api/v1/acct/collaborative-map' })
+      }));
     });
   });
 });

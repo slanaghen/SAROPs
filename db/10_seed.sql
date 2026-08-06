@@ -5,7 +5,7 @@ INSERT INTO users (email, username, password, access_level, name, agency, identi
 VALUES (
   'admin@gmail.com', 
   'admin@gmail.com', 
-  crypt('grigware', gen_salt('bf')), 
+  crypt('password', gen_salt('bf')), 
   'admin', 
   'Steve Admin', 
   'SAROps', 
@@ -18,7 +18,7 @@ INSERT INTO users (email, username, password, access_level, name, agency, identi
 VALUES (
   'staff@gmail.com', 
   'staff@gmail.com', 
-  crypt('grigware', gen_salt('bf')), 
+  crypt('password', gen_salt('bf')), 
   'staff', 
   'Steve Staff', 
   'SAROps', 
@@ -31,7 +31,7 @@ INSERT INTO users (email, username, password, access_level, name, agency, identi
 VALUES (
   'responder@gmail.com', 
   'responder@gmail.com', 
-  crypt('grigware', gen_salt('bf')), 
+  crypt('password', gen_salt('bf')), 
   'responder', 
   'Steve Responder', 
   'SAROps', 

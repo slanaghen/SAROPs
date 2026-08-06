@@ -3,14 +3,22 @@ import { supabase } from '../lib/supabase'; // Assuming this is the centralized 
 import { useNavigate } from 'react-router-dom';
 import { useIncident } from '../context/IncidentContext';
 import { checkIsParOverdue, formatTimeSince } from '../utils/operationalUtils';
+import { normalizeEquipmentList } from '../utils/dataNormalization';
 import useResponderTeamAndAssignment from '../hooks/useResponderTeamAndAssignment'; // The new hook
 import { removeResponderFromTeam } from '../services/responderService';
 import { useToast } from '../context/ToastContext';
-import OperationsMap from '../components/OperationsMap';
+import OperationsMap from '../components/operations/OperationsMap';
 import '../styles/ResponderDashboard.css'; // New CSS file for styling
 import '../styles/ActionButtons.css';
 import '../styles/StatusChips.css';
 
+const getSartopoMapUrl = (id) => {
+  if (!id) return null;
+  // The ID might be a full URL already
+  if (id.startsWith('http')) return id;
+  // Or just the map ID, clean of any query params
+  return `https://sartopo.com/m/${id.split('?')[0]}`;
+};
 /**
  * ResponderDashboardPage
  *
@@ -60,6 +68,8 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
 
   // This hook must be called before any useMemos or useEffects that depend on 'team' or 'assignment'
   const { team, assignment, loading, error, refetch } = useResponderTeamAndAssignment(supabase, responderId); 
+
+  const sartopoUrl = getSartopoMapUrl(sartopoId);
 
   // Section Collapsibility State
   const [isExpanded, setIsExpanded] = useState({
@@ -389,9 +399,10 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
   const handleLeaveTeam = async () => {
     if (!team || !responderId) return;
     
-    // Safety guard: Team Leaders cannot leave while the team is deployed
-    if (isLeader && (team.status === 'Deployed' || assignment?.status === 'Deployed')) {
-      alert("As the Team Leader, you cannot leave your team while it is deployed to the field. Please complete your assignment or return to base first.");
+    // A Team Leader cannot leave their team. This is enforced by a database trigger,
+    // but we block it in the UI for a better user experience.
+    if (isLeader) {
+      addToast("A Team Leader cannot leave their team. Please have command staff designate a new leader first.", 'error');
       return;
     }
 
@@ -463,6 +474,11 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
   const handleCompleteAssignment = async () => {
     if (!team?.team_id || !assignment?.assignment_id) return;
     
+    if (assignment.title === 'Command Staff') {
+      addToast('The "Command Staff" assignment cannot be manually completed. It is closed automatically when the incident ends.', 'error');
+      return;
+    }
+
     setIsUpdatingAsnData(true);
     try {
       // 1. Update assignment: status -> Completed and save final mission results.
@@ -497,6 +513,11 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
   const handleCancelAssignment = async () => {
     if (!team?.team_id || !assignment?.assignment_id) return;
     
+    if (assignment.title === 'Command Staff') {
+      addToast('The "Command Staff" assignment cannot be manually cancelled. It is closed automatically when the incident ends.', 'error');
+      return;
+    }
+
     const msg = `Mark this assignment as "Incomplete"? This will disband your team and return you to Staged status.`;
     if (!window.confirm(msg)) return;
 
@@ -628,6 +649,11 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
               {narratives.incidentNotes && <p><strong>Incident Narrative:</strong> {narratives.incidentNotes}</p>}
               {narratives.opObjective && <p><strong>OP Objective:</strong> {narratives.opObjective}</p>}
               {narratives.saNarrative && <p><strong>Situational Awareness:</strong> {narratives.saNarrative}</p>}
+              {sartopoUrl && (
+                <p style={{ marginTop: '12px' }}>
+                  <strong>Map: </strong><a href={sartopoUrl} target="_blank" rel="noopener noreferrer">{sartopoUrl}</a>
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -688,7 +714,7 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
                     )}
                   </div>
                   
-                  {team.equipment && team.equipment.length > 0 && <p><strong>Equipment:</strong> {team.equipment.join(', ')}</p>}
+                  {normalizeEquipmentList(team.equipment).length > 0 && <p><strong>Equipment:</strong> {normalizeEquipmentList(team.equipment).join(', ')}</p>}
 
                   {team.status !== 'Staged' && team.type !== 'Staff' && parInterval > 0 && (
                     <div className={`par-integration ${parRequired ? 'par-required' : ''}`} style={{ marginTop: '16px', padding: '16px', backgroundColor: parRequired ? '#fff7ed' : '#f8fafc', borderRadius: '8px', border: parRequired ? '2px solid #f59e0b' : '1px solid #e2e8f0' }}>
@@ -731,8 +757,8 @@ const ResponderDashboardPage = ({ responderId: propId }) => {
                 <button 
                   className="action-btn action-btn-warning" 
                   onClick={handleLeaveTeam}
-                  disabled={isLeavingTeam || (team.status === 'Deployed' || assignment?.status === 'Deployed')}
-                  title={(team.status === 'Deployed' || assignment?.status === 'Deployed') ? "Cannot leave team while deployed" : "Remove yourself from this team"}
+                  disabled={isLeavingTeam || isLeader}
+                  title={isLeader ? "A Team Leader cannot leave their team. Designate a new leader first." : "Remove yourself from this team"}
                 >
                   {isLeavingTeam ? 'Leaving...' : 'Leave Team'}
                 </button>

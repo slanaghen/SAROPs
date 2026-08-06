@@ -1,6 +1,6 @@
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import { saveVehicle, checkOutVehicle, deleteVehicle } from './vehicleService';
-import { VEHICLE_STATUS } from '../utils/constants';
+import { VEHICLE_STATUS } from '../constants/operationalConstants';
 
 describe('Vehicle Service', () => {
   const mockSupabase = {

@@ -1,21 +1,27 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useIncident } from '../context/IncidentContext';
-import '../styles.css';
+import '../styles/styles.css';
 import { mapSartopoToAssignment, mapAssignmentToSartopo } from '../utils/gisUtils';
-import { SARTOPO_REFRESH_INTERVAL } from '../components/operationalConstants';
+import { SARTOPO_REFRESH_INTERVAL } from '../constants/operationalConstants';
 import { 
   getSartopoConfig, 
-  buildSecureSartopoUrl, 
-  downloadAndSyncSartopoData 
+  downloadAndSyncSartopoData,
+  uploadToSartopo
 } from '../services/sartopoService';
-import { 
-  getCachedMap, 
-  setCachedMap, 
-  mergeMapUpdates 
-} from '../utils/indexedDBCache';
 import { useToast } from '../context/ToastContext';
 import '../styles/ActionButtons.css';
+import SartopoHeader from '../components/sartopo/SartopoHeader';
+import SartopoSyncedAssignments from '../components/sartopo/SartopoSyncedAssignments';
+import SartopoGeoJsonDisplay from '../components/sartopo/SartopoGeoJsonDisplay';
+
+const getSartopoMapUrl = (id) => {
+  if (!id) return null;
+  // The ID might be a full URL already
+  if (id.startsWith('http')) return id;
+  // Or just the map ID, clean of any query params
+  return `https://sartopo.com/m/${id.split('?')[0]}`;
+};
 
 const SARTopoDataPage = () => {
   const { incidentId, isActive, incidentData, responderName, user } = useIncident();
@@ -39,7 +45,10 @@ const SARTopoDataPage = () => {
   const { addToast } = useToast();
   const [isAutoRefreshEnabled, setIsAutoRefreshEnabled] = useState(false);
 
-  const [displayDensity, setDisplayDensity] = useState('comfortable');
+  const [displayDensity, setDisplayDensity] = useState('compact');
+
+  const sartopoUrl = getSartopoMapUrl(sartopoId);
+  const sartopoCredsOk = import.meta.env.VITE_SARTOPO_ENABLED === 'true';
 
   useEffect(() => {
     const fetchDensity = async () => {
@@ -52,13 +61,6 @@ const SARTopoDataPage = () => {
   }, [user]);
 
   const sartopoConfig = useMemo(() => getSartopoConfig(sartopoId), [sartopoId]);
-
-  /**
-   * Helper to build a secure SARTopo URL, signing the request if credentials exist.
-   */
-  const buildSecureUrl = useCallback(async (method, path, payload = null) => {
-    return buildSecureSartopoUrl(method, path, sartopoConfig, payload);
-  }, [sartopoConfig]);
 
   const filteredDownloadFeatures = useMemo(() => {
     const featureArray = features?.result?.state?.features || features?.features || [];
@@ -125,33 +127,6 @@ const SARTopoDataPage = () => {
     return () => { supabase.removeChannel(channel); };
   }, [incidentId]);
 
-  // Hydrate features from database on mount or incident change to ensure persistent reference data
-  useEffect(() => {
-    const hydrateMapData = async () => {
-      if (!incidentId || !sartopoId || features) return;
-      
-      // Try local IndexedDB first (fastest path)
-      const localCache = await getCachedMap(sartopoId);
-      if (localCache?.features) {
-        setFeatures(localCache.features);
-        return;
-      }
-
-      // Fallback to Supabase cloud hydration
-      const { data, error: fetchErr } = await supabase
-        .from('incidents')
-        .select('sartopo_map_data')
-        .eq('incident_id', incidentId)
-        .maybeSingle();
-      
-      if (!fetchErr && data?.sartopo_map_data) {
-        setFeatures(data.sartopo_map_data);
-      }
-    };
-    
-    if (isActive) hydrateMapData();
-  }, [incidentId, isActive]); // features is omitted to prevent dependency loops
-
   const handleFetchFeatures = useCallback(async () => {
     if (!sartopoConfig.id) {
       return;
@@ -165,34 +140,20 @@ const SARTopoDataPage = () => {
     if (isInitialFetch) setFeatures(null);
 
     try {
-      // 1. Requirement: Check local cache for existing features to enable incremental merging
-      const localCache = await getCachedMap(sartopoId);
-      const baseData = localCache?.features || features;
-      const baseFeatures = baseData?.result?.state?.features || baseData?.features || [];
-
       const result = await downloadAndSyncSartopoData({
         supabase,
         incidentId,
         opPeriodId: incidentData.opPeriodId,
         sartopoConfig,
-        lastFetchTime, // Incremental 'since' parameter passed here
         userName: responderName || 'SARTopo Sync'
       });
 
       if (!result) return;
       const { mergedMapData: updates, fetchedAt, syncCount, syncedTitles } = result;
 
-      // 2. Perform local merge
-      const updateFeatures = updates?.features || updates?.result?.state?.features || [];
-      const finalFeatures = mergeMapUpdates(baseFeatures, updateFeatures);
-      const finalPayload = { ...updates, features: finalFeatures };
-
-      setFeatures(finalPayload);
+      setFeatures(updates);
       setLastFetchTime(fetchedAt);
       setSyncedAssignmentNames(syncedTitles);
-
-      // 3. Persist to local IndexedDB for future incremental syncs
-      await setCachedMap(sartopoId, finalPayload, fetchedAt);
 
       // Persist sync metadata to database for global visibility
       await supabase
@@ -218,7 +179,8 @@ const SARTopoDataPage = () => {
       const existingTitleMap = new Map(existingSaropsAsns?.filter(a => a.title).map(a => [a.title.trim().toLowerCase(), a]) || []);
 
       // Prepare display list for SARTopo Assignments div
-      const displayList = finalFeatures
+      const displayFeatures = updates?.result?.state?.features || updates?.features || [];
+      const displayList = displayFeatures
         .filter(f => f.properties?.class === 'Assignment')
         .map(f => {
           const title = (f.properties?.title || f.properties?.name)?.trim().toLowerCase();
@@ -236,7 +198,7 @@ const SARTopoDataPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [sartopoConfig, lastFetchTime, incidentData?.opPeriodId, incidentId, responderName]);
+  }, [sartopoConfig, lastFetchTime, incidentData?.opPeriodId, incidentId, responderName, addToast, supabase]);
 
   const generateUploadGeoJSON = useCallback(async () => { // Renamed function
     if (!incidentData?.opPeriodId) return;
@@ -265,40 +227,23 @@ const SARTopoDataPage = () => {
       const assignmentsToExport = (assignments || []).filter(asn => asn.origin === 'SARTopo' && asn.sartopo_id);
       if (assignmentsToExport.length === 0) return;
 
-      // Try local IndexedDB baseline first to avoid re-fetching for reconciliation
-      const localCache = await getCachedMap(sartopoId);
-      let baseData = localCache?.features || features;
+      let baseData = features;
       let fetchedFeatures = baseData?.result?.state?.features || baseData?.features || [];
 
-      // Fallback: If local UI state is empty or missing metadata for target assignments, 
-      // attempt to use persisted map data from the incident record.
+      // If the current page state is incomplete, request a fresh map state.
       const isStateIncomplete = !baseData || 
                                 fetchedFeatures.length === 0 || 
                                 assignmentsToExport.some(asn => !fetchedFeatures.some(f => f.id === asn.sartopo_id));
 
       if (isStateIncomplete && assignmentsToExport.length > 0 && incidentId) {
-        console.info('[SARTopo] Local state incomplete for reconciliation. Fetching persisted payload from database...');
-        const { data: incData } = await supabase
-          .from('incidents')
-          .select('sartopo_map_data')
-          .eq('incident_id', incidentId)
-          .maybeSingle();
-        
-        let retrievedData = incData?.sartopo_map_data;
-
-        // Fallback: If DB record is empty, perform a live full-state fetch to "build" the base map
-        if (!retrievedData && sartopoConfig.id) {
-          console.info('[SARTopo] DB base map empty. Performing live full-state fetch to build base record...');
-          const path = `/api/v1/map/${sartopoConfig.id}/since/0`;
-          const { url: buildUrl } = await buildSecureUrl('GET', path);
-          console.log(`[SARTopo] Building base map from: ${buildUrl}`);
-          const liveRes = await fetch(buildUrl);
-          if (liveRes.ok) {
-            retrievedData = await liveRes.json();
-            // Persist the newly built base map for future use
-            await supabase.from('incidents').update({ sartopo_map_data: retrievedData }).eq('incident_id', incidentId);
-          }
-        }
+        console.info('[SARTopo] Page state incomplete for reconciliation. Fetching current map data...');
+        const syncResult = await downloadAndSyncSartopoData({
+          supabase,
+          incidentId,
+          opPeriodId: incidentData.opPeriodId,
+          sartopoConfig,
+        });
+        const retrievedData = syncResult?.data;
 
         if (retrievedData) {
           baseData = retrievedData;
@@ -350,7 +295,7 @@ const SARTopoDataPage = () => {
     } finally {
       setIsGeneratingUpload(false);
     }
-  }, [incidentData?.opPeriodId, lastUploadTime, setSyncedAssignmentNames, incidentId, sartopoConfig.id, buildSecureUrl]);
+  }, [incidentData?.opPeriodId, lastUploadTime, setSyncedAssignmentNames, incidentId, sartopoConfig.id, features, addToast, sartopoId, supabase]);
   
   // Ref to hold the latest fetcher to avoid dependency loops with the refresh function
   const fetcherRef = useRef(handleFetchFeatures);
@@ -401,21 +346,6 @@ const SARTopoDataPage = () => {
 
     setIsUploading(true);
     setError(null);
-    // Robust environment detection for Vitest, Jest, and browser runtime
-    const isTest = (function() {
-      if (typeof globalThis !== 'undefined' && (globalThis.vitest || globalThis.__vitest_worker__ || globalThis.VITEST)) return true;
-      if (typeof process !== 'undefined' && (process.env?.VITEST || process.env?.NODE_ENV === 'test')) return true;
-      try {
-        if (import.meta.env?.MODE === 'test' || import.meta.env?.VITEST) return true;
-      } catch (e) {}
-      return (typeof vi !== 'undefined' && vi !== null) || (typeof jest !== 'undefined' && jest !== null);
-    })();
-
-    const apiKey = [
-      typeof process !== 'undefined' ? process.env?.VITE_SARTOPO_API_CREDENTIAL_SECRET : undefined,
-      import.meta.env?.VITE_SARTOPO_API_CREDENTIAL_SECRET
-    ].find(val => val && val !== 'YOUR_SARTOPO_API_SECRET') || (isTest ? 'test-secret' : undefined);
-
     let successCount = 0;
     const successfulAssignments = [];
     let failCount = 0;
@@ -424,23 +354,12 @@ const SARTopoDataPage = () => {
     try {
       const { id: mapId } = sartopoConfig;
 
-      // Step 1: Incremental Baseline Reconciliation
-      // Instead of fetching since/0, we fetch only the changes since our last known high-water mark.
-      const path = `/api/v1/map/${mapId}/since/${lastFetchTime}`;
-      const { url: baselineUrl } = await buildSecureUrl('GET', path);
-      
-      const baselineRes = await fetch(baselineUrl);
-      if (!baselineRes.ok) throw new Error(`Failed to fetch baseline map for reconciliation: ${baselineRes.status}`);
-      
-      const diffMapData = await baselineRes.json();
-      const updates = diffMapData?.features || diffMapData?.result?.state?.features || [];
-      
-      // Merge the diff into our cached state
-      const localCache = await getCachedMap(sartopoId);
-      const baseData = localCache?.features || features;
-      const baseFeatures = baseData?.result?.state?.features || baseData?.features || [];
-      const fetchedFeatures = mergeMapUpdates(baseFeatures, updates);
-      const currentMapData = { ...diffMapData, features: fetchedFeatures };
+      // Step 1: Incremental Baseline Reconciliation using the secure proxy
+      const diffMapData = await downloadAndSyncSartopoData({
+        supabase, incidentId, opPeriodId: incidentData.opPeriodId, sartopoConfig
+      });
+      const currentMapData = diffMapData?.mergedMapData || diffMapData?.data || diffMapData;
+      const fetchedFeatures = currentMapData?.result?.state?.features || currentMapData?.features || [];
 
       if (fetchedFeatures.length === 0) {
         throw new Error('Reconciliation baseline is missing from the database. Please click "Download from SARTopo" first.');
@@ -448,7 +367,6 @@ const SARTopoDataPage = () => {
 
       // Update local state to keep UI in sync with the baseline we are using
       setFeatures(currentMapData);
-      await setCachedMap(sartopoId, currentMapData, lastFetchTime);
 
       const sartopoFeatureLookup = new Map(fetchedFeatures.map(f => [f.id, f]));
       const updatedSartopoFeatures = [...fetchedFeatures]; // Work copy to accumulate property updates
@@ -493,39 +411,11 @@ const SARTopoDataPage = () => {
           properties: mapAssignmentToSartopo(asn, existingSartopoFeature.properties)
         };
 
-        const featureId = asn.sartopo_id;
-        const featurePath = `/api/v1/map/${mapId}/Assignment/${featureId}`;
-        const jsonPayload = JSON.stringify(payload);
-
-        // Requirement: signed POSTs must include authParams in the form body
-        const uploadEndpoint = await buildSecureUrl('POST', featurePath, jsonPayload);
-        const formBody = new URLSearchParams(uploadEndpoint.authParams);
-        formBody.set('json', jsonPayload);
-        
-        console.log(`[SARTopo] Uploading assignment "${asn.title}" to: ${uploadEndpoint.url}`);
-        console.log(`[SARTopo] Payload:`, payload);
-
         try {
-          const response = await fetch(uploadEndpoint.url, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/x-www-form-urlencoded',
-              'Accept': 'application/json'
-            },
-            body: formBody,
-          });
+          // Use the new service function to handle the upload
+          const response = await uploadToSartopo(supabase, mapId, asn.sartopo_id, payload, sartopoConfig);
+          console.log(`[SARTopo] Upload response for "${asn.title}":`, response);
 
-          console.log(`[SARTopo] Received response status for "${asn.title}": ${response.status}`);
-
-          if (!response.ok) {
-            const errorText = await response.text(); // Get detailed error from SARTopo
-            if (response.status === 401) {
-              const hasEnvKey = !!apiKey;
-              const msg = `401 Unauthorized: SARTopo requires a Sync Key to authorize writes. ${!hasEnvKey ? 'VITE_SARTOPO_API_CREDENTIAL_SECRET is not configured in your .env file. ' : ''}Ensure your Map ID includes a "?k=" or "?readCode=" parameter, or verify your global Sync Key has write access.`;
-              throw new Error(msg);
-            }
-            throw new Error(`SARTopo API returned ${response.status}: ${errorText}`); // Propagate the error
-          }
           successCount++;
           successfulAssignments.push(asn.title || 'Unknown');
 
@@ -554,16 +444,12 @@ const SARTopoDataPage = () => {
           .eq('incident_id', incidentId);
       }
 
-      // Persist the mutated features back to the DB so future reconciliation is accurate
       if (successCount > 0) {
         const finalMergedData = currentMapData.result 
           ? { ...currentMapData, result: { ...currentMapData.result, state: { ...currentMapData.result.state, features: updatedSartopoFeatures } } }
           : { ...currentMapData, features: updatedSartopoFeatures };
         
         setFeatures(finalMergedData);
-        if (incidentId) {
-          await supabase.from('incidents').update({ sartopo_map_data: finalMergedData }).eq('incident_id', incidentId);
-        }
       }
 
       if (failCount === 0) {
@@ -577,7 +463,7 @@ const SARTopoDataPage = () => {
     } finally {
       setIsUploading(false);
     }
-  }, [sartopoId, sartopoConfig, incidentData?.opPeriodId, buildSecureUrl, incidentId]);
+  }, [sartopoId, sartopoConfig, incidentData?.opPeriodId, incidentId, lastFetchTime, features, addToast, lastUploadTime, setLastUploadTime, setSyncedAssignmentNames, setFeatures, supabase]);
 
   if (!isActive) {
     return (
@@ -594,201 +480,67 @@ const SARTopoDataPage = () => {
         <p className="subtitle">Retrieve live map feature data from SARTopo integration.</p>
       </div>
 
-      <div className="section-card" style={{ marginBottom: 'var(--space-lg)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <p style={{ margin: 0, fontWeight: 600 }}>Map Connection</p>
-            <p style={{ margin: '4px 0 0', color: '#64748b', fontSize: '14px' }}>
-              SARTopo Map ID: <code style={{ color: '#0369a1', fontWeight: 700 }}>{sartopoId || 'Not Configured'}</code>
-            </p>
-            {lastFetchTime > 0 && (
-              <p style={{ margin: '2px 0 0', color: '#64748b', fontSize: '12px' }}>
-                Latest Download: <span style={{ color: '#0369a1', fontWeight: 500 }}>{new Date(lastFetchTime).toLocaleString()}</span>
-              </p>
-            )}
-            {lastUploadTime > 0 && (
-              <p style={{ margin: '2px 0 0', color: '#64748b', fontSize: '12px' }}>
-                Latest Upload: <span style={{ color: '#0369a1', fontWeight: 500 }}>{new Date(lastUploadTime).toLocaleString()}</span>
-              </p>
-            )}
-          </div>
-          <div style={{ display: 'flex', gap: '12px' }}>
-            <button 
-              className="action-btn action-btn-secondary" 
-              onClick={async () => {
-                setLastFetchTime(0);
-                setLastUploadTime(0);
-                setUploadGeoJSON(null);
-                setSyncedAssignmentNames([]);
-                
-                // Persist reset to database
-                if (incidentId) {
-                  await supabase
-                    .from('incidents')
-                    .update({ sartopo_last_fetch_at: 0, sartopo_last_upload_at: 0, sartopo_synced_titles: [] })
-                    .eq('incident_id', incidentId);
-                }
-              }}
-              disabled={!sartopoId}
-              title="Reset fetch and upload timestamps to 0"
-            >
-              Reset
-            </button>
-            <button 
-              className={`action-btn ${isAutoRefreshEnabled ? 'action-btn-secondary' : 'action-btn-primary'}`}
-              onClick={toggleAutoRefresh}
-              disabled={!sartopoId}
-            >
-              {isAutoRefreshEnabled ? 'Pause' : 'Sync'}
-            </button>
-            <button 
-              className="action-btn action-btn-primary" 
-              onClick={handleFetchFeatures}
-              disabled={loading || !sartopoId}
-            >
-              {loading ? 'Downloading...' : 'Download from SARTopo'}
-            </button>
-            <button 
-              className="action-btn action-btn-primary"
-              onClick={handleUploadToSARTopo}
-              disabled={isUploading || !incidentData?.opPeriodId || !sartopoId}
-            >
-              {isUploading ? 'Uploading...' : 'Upload to SARTopo'}
-            </button>
-        </div>
-        </div>
+      <SartopoHeader
+        sartopoId={sartopoId}
+        sartopoUrl={sartopoUrl}
+        lastFetchTime={lastFetchTime}
+        lastUploadTime={lastUploadTime}
+        isAutoRefreshEnabled={isAutoRefreshEnabled}
+        toggleAutoRefresh={toggleAutoRefresh}
+        onReset={async () => {
+          setLastFetchTime(0);
+          setLastUploadTime(0);
+          setUploadGeoJSON(null);
+          setSyncedAssignmentNames([]);
+          if (incidentId) {
+            await supabase
+              .from('incidents')
+              .update({ sartopo_last_fetch_at: 0, sartopo_last_upload_at: 0, sartopo_synced_titles: [] })
+              .eq('incident_id', incidentId);
+          }
+        }}
+        onFetch={handleFetchFeatures}
+        onUpload={handleUploadToSARTopo}
+        loading={loading}
+        isUploading={isUploading}
+        incidentId={incidentId}
+      />
 
-        <div style={{ marginTop: '16px', borderTop: '1px solid #e2e8f0', paddingTop: '12px' }}>
-          <p style={{ margin: '0 0 8px', fontSize: '13px', fontWeight: 600, color: '#475569' }}>
-            Recently Synced Assignments:
-          </p>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-            {syncedAssignmentNames.length > 0 ? (
-              syncedAssignmentNames.map((name, index) => (
-                <span key={index} className="status-indicator attached" style={{ textTransform: 'none', fontWeight: 500 }}>
-                  {name}
-                </span>
-              ))
-            ) : (
-              <span style={{ fontSize: '12px', color: '#94a3b8', fontStyle: 'italic' }}>No assignments synced yet.</span>
-            )}
-          </div>
-        </div>
+      {!sartopoCredsOk && (
+        <div className="alert alert-warning">SARTopo integration is not enabled. Set VITE_SARTOPO_ENABLED to 'true' in your environment file to use this feature.</div>
+      )}
 
-      </div>
+      <SartopoSyncedAssignments syncedAssignmentNames={syncedAssignmentNames} />
 
       <div style={{ display: 'flex', gap: 'var(--space-lg)', alignItems: 'flex-start', marginBottom: 'var(--space-lg)' }}>
-        <div className="section-card" style={{ flex: '1 1 0', minWidth: 0, margin: 0 }}>
-          <div 
-            onClick={() => setIsMapUploadExpanded(prev => !prev)}
-            style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', marginBottom: '16px' }}
-          >
-            <h2 style={{ margin: 0, fontSize: '18px' }}>GeoJSON Upload to SARTopo ({uploadGeoJSON?.features?.length || 0})</h2>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              {lastUploadTime > 0 && (
-                <span style={{ fontSize: '11px', color: '#64748b', fontStyle: 'italic' }}>
-                  Since: {new Date(lastUploadTime).toLocaleTimeString()}
-                </span>
-              )}
-              <button 
-                className="action-btn action-btn-secondary action-btn-header" 
-                onClick={(e) => { e.stopPropagation(); setLastUploadTime(0); setUploadGeoJSON(null); }}
-                disabled={!incidentData?.opPeriodId}
-                title="Reset upload timestamp to include all assignments"
-              >
-                Reset
-              </button>
-              <button 
-                className="action-btn action-btn-secondary action-btn-header" 
-                onClick={(e) => { e.stopPropagation(); setShowUploadGeometry(!showUploadGeometry); }}
-                title={showUploadGeometry ? "Hide coordinates data" : "Show coordinates data"}
-              >
-                {showUploadGeometry ? 'Hide Geometry' : 'Show Geometry'}
-              </button>
-              <button 
-                className="action-btn action-btn-primary action-btn-header" 
-                onClick={(e) => { e.stopPropagation(); generateUploadGeoJSON(); }}
-                disabled={isGeneratingUpload || !incidentData?.opPeriodId}
-              >
-                {isGeneratingUpload ? 'Generating...' : 'Generate JSON'}
-              </button>
-              <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 700 }}>
-                {isMapUploadExpanded ? 'COLLAPSE ▲' : 'EXPAND ▼'}
-              </span>
-            </div>
-          </div>
-          {isMapUploadExpanded && (
-            <div className="operations-table-wrapper">
-              <pre style={{ 
-                maxHeight: '600px', 
-                overflow: 'auto', 
-                fontSize: '12px', 
-                padding: 'var(--space-md)', 
-                background: '#f8fafc',
-                border: '1px solid #e2e8f0',
-                borderRadius: '8px',
-                margin: 0
-              }}>
-                {uploadGeoJSON ? JSON.stringify(uploadGeoJSON, (key, value) => {
-                  if (!showUploadGeometry && key === 'geometry') return undefined;
-                  return value;
-                }, 2) : '// No upload data generated yet. Click "Generate JSON" above.'}
-              </pre>
-            </div>
-          )}
-        </div>
-
-      
-        <div className="section-card" style={{ flex: '1 1 0', minWidth: 0, margin: 0 }}>
-          <div 
-            onClick={() => setIsMapDownloadExpanded(prev => !prev)}
-            style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', marginBottom: '16px' }}
-          >
-            <h2 style={{ margin: 0, fontSize: '18px' }}>GeoJSON Download from SARTopo ({filteredDownloadFeatures.length || 0})</h2>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <button 
-                className="action-btn action-btn-secondary action-btn-header" 
-                onClick={(e) => { e.stopPropagation(); setShowAllDownloadObjects(!showAllDownloadObjects); }}
-                title={showAllDownloadObjects ? "Show only Assignments" : "Show All Objects"}
-              >
-                {showAllDownloadObjects ? 'Show Assignments Only' : 'Show All Objects'}
-              </button>
-              <button 
-                className="action-btn action-btn-secondary action-btn-header" 
-                onClick={(e) => { e.stopPropagation(); setShowDownloadGeometry(!showDownloadGeometry); }}
-                title={showDownloadGeometry ? "Hide coordinates data" : "Show coordinates data"}
-              >
-                {showDownloadGeometry ? 'Hide Geometry' : 'Show Geometry'}
-              </button>
-              <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 700 }}>
-                {isMapDownloadExpanded ? 'COLLAPSE ▲' : 'EXPAND ▼'}
-              </span>
-            </div>
-          </div>
-          {isMapDownloadExpanded && (
-            <div className="operations-table-wrapper">
-              <pre style={{ 
-                maxHeight: '600px', 
-                overflow: 'auto', 
-                fontSize: '12px', 
-                padding: 'var(--space-md)', 
-                background: '#f8fafc',
-                border: '1px solid #e2e8f0',
-                borderRadius: '8px',
-                margin: 0
-              }}>
-                {/* Filter out coordinate-heavy geometry data to make the metadata preview more readable */}
-                {features ? JSON.stringify({ 
-                  type: 'FeatureCollection', 
-                  features: filteredDownloadFeatures 
-                }, (key, value) => {
-                  if (!showDownloadGeometry && key === 'geometry') return undefined;
-                  return value;
-                }, 2) : '// No download data available yet. Click "Download from SARTopo" above.'}
-              </pre>
-            </div>
-          )}
-        </div>  
+        <SartopoGeoJsonDisplay
+          title={`GeoJSON Upload to SARTopo (${uploadGeoJSON?.features?.length || 0})`}
+          data={uploadGeoJSON}
+          isExpanded={isMapUploadExpanded}
+          onToggleExpand={() => setIsMapUploadExpanded(prev => !prev)}
+          showGeometry={showUploadGeometry}
+          headerActions={
+            <>
+              {lastUploadTime > 0 && <span style={{ fontSize: '11px', color: '#64748b', fontStyle: 'italic' }}>Since: {new Date(lastUploadTime).toLocaleTimeString()}</span>}
+              <button className="action-btn action-btn-secondary action-btn-header" onClick={(e) => { e.stopPropagation(); setLastUploadTime(0); setUploadGeoJSON(null); }} disabled={!incidentData?.opPeriodId} title="Reset upload timestamp to include all assignments">Reset</button>
+              <button className="action-btn action-btn-secondary action-btn-header" onClick={(e) => { e.stopPropagation(); setShowUploadGeometry(!showUploadGeometry); }} title={showUploadGeometry ? "Hide coordinates data" : "Show coordinates data"}>{showUploadGeometry ? 'Hide Geometry' : 'Show Geometry'}</button>
+              <button className="action-btn action-btn-primary action-btn-header" onClick={(e) => { e.stopPropagation(); generateUploadGeoJSON(); }} disabled={isGeneratingUpload || !incidentData?.opPeriodId}>{isGeneratingUpload ? 'Generating...' : 'Generate JSON'}</button>
+            </>
+          }
+        />
+        <SartopoGeoJsonDisplay
+          title={`GeoJSON Download from SARTopo (${filteredDownloadFeatures.length || 0})`}
+          data={features ? { type: 'FeatureCollection', features: filteredDownloadFeatures } : null}
+          isExpanded={isMapDownloadExpanded}
+          onToggleExpand={() => setIsMapDownloadExpanded(prev => !prev)}
+          showGeometry={showDownloadGeometry}
+          headerActions={
+            <>
+              <button className="action-btn action-btn-secondary action-btn-header" onClick={(e) => { e.stopPropagation(); setShowAllDownloadObjects(!showAllDownloadObjects); }} title={showAllDownloadObjects ? "Show only Assignments" : "Show All Objects"}>{showAllDownloadObjects ? 'Assignments Only' : 'All Objects'}</button>
+              <button className="action-btn action-btn-secondary action-btn-header" onClick={(e) => { e.stopPropagation(); setShowDownloadGeometry(!showDownloadGeometry); }} title={showDownloadGeometry ? "Hide coordinates data" : "Show coordinates data"}>{showDownloadGeometry ? 'Hide Geometry' : 'Show Geometry'}</button>
+            </>
+          }
+        />
       </div>
     </div>
   );

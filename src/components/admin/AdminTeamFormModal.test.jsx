@@ -2,10 +2,15 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import AdminTeamFormModal from './AdminTeamFormModal';
 import { useToast } from '../../context/ToastContext';
+import { useIncident } from '../../context/IncidentContext';
 
 // Mock dependencies
 vi.mock('../../context/ToastContext', () => ({
   useToast: vi.fn(),
+}));
+
+vi.mock('../../context/IncidentContext', () => ({
+  useIncident: vi.fn(),
 }));
 
 describe('AdminTeamFormModal', () => {
@@ -16,6 +21,10 @@ describe('AdminTeamFormModal', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(useToast).mockReturnValue({ addToast: mockAddToast });
+    vi.mocked(useIncident).mockReturnValue({
+      incidentId: 'inc-123',
+      incidentData: { opPeriodId: 'op-123' },
+    });
   });
 
   const defaultProps = {

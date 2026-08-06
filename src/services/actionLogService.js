@@ -1,26 +1,34 @@
 // src/services/actionLogService.js
 
 /**
- * Adds a manual log entry to the action_logs table.
- * @param {object} params - The parameters for adding the log entry.
+ * Records an action to the action_logs table. This is a fire-and-forget
+ * operation; it logs errors to the console but does not throw them, as logging
+ * is a non-critical background task.
+ *
+ * @param {object} params - The parameters for recording the action.
  * @param {object} params.supabase - The Supabase client instance.
  * @param {string} params.incidentId - The ID of the current incident.
  * @param {string} params.action - The action description.
  * @param {string} params.userName - The name of the user performing the action.
- * @param {function} params.addToast - Function to display toast notifications.
  */
-export const addLogEntry = async ({ supabase, incidentId, action, userName, addToast }) => {
+export const recordAction = async ({ supabase, incidentId, action, userName }) => {
+  if (!incidentId || !userName || !action) {
+    // Do not proceed if essential information is missing.
+    return;
+  }
+
   try {
-    const { error: insertError } = await supabase
-      .from('action_logs')
-      .insert({
+    const { error } = await supabase.from('action_logs').insert({
         incident_id: incidentId,
         action: action,
         user_name: userName
-      });
+    });
 
-    if (insertError) throw insertError;
+    if (error) {
+      throw error;
+    }
   } catch (err) {
-    throw new Error('Failed to add log entry: ' + err.message);
+    // Log the error but do not re-throw, as this is a non-critical background task.
+    console.error('Failed to record action log:', err);
   }
 };

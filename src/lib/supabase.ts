@@ -1,8 +1,16 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Use the environment variable as the system default, allowing localStorage to override it for development toggling.
-const dbInstance = localStorage.getItem('SAROPS_DB_INSTANCE') || import.meta.env.VITE_SAROPS_DB_INSTANCE || 'LOCAL';
-export const SAROPS_DB_INSTANCE = dbInstance;
+let dbInstance;
+
+if (import.meta.env.PROD) {
+  // In production, always use the build-time environment variable. Ignore localStorage.
+  dbInstance = import.meta.env.VITE_SAROPS_DB_INSTANCE || 'REMOTE';
+} else {
+  // In development, allow localStorage to override for easy toggling.
+  dbInstance = localStorage.getItem('SAROPS_DB_INSTANCE') || import.meta.env.VITE_SAROPS_DB_INSTANCE || 'LOCAL';
+}
+
+export const SAROPS_DB_INSTANCE = dbInstance; // LOCAL or REMOTE
 
 const url = dbInstance === 'REMOTE'
   ? import.meta.env.VITE_REMOTE_SUPABASE_URL
