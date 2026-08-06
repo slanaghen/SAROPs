@@ -13,7 +13,20 @@ import OperationsTable from '../components/operations/OperationsTable';
 import OperationsStatsFooter from '../components/operations/OperationsStatsFooter';
 import OperationsMap from '../components/operations/OperationsMap';
 import VehicleFormModal from '../components/admin/VehicleFormModal';
-import { checkIsParOverdue, formatTimeSince } from '../utils/operationalUtils';
+import { checkIsParOverdue, formatTimeSince, generateTeamName } from '../utils/operationalUtils';
+
+// A team may now carry several linked assignments at once (e.g. one Deployed,
+// others queued as Planned/Assigned). Rows that need a single representative
+// status (view-mode filtering, row styling, default sort) use this precedence
+// -- the same Deployed > Assigned ordering the DB's team-status trigger uses --
+// while the actual per-assignment chips/statuses are rendered from row.assignments.
+const ASSIGNMENT_STATUS_PRECEDENCE = ['Deployed', 'Assigned', 'Planned', 'Incomplete', 'Completed'];
+const getDominantAssignmentStatus = (assignmentsArr) => {
+  for (const status of ASSIGNMENT_STATUS_PRECEDENCE) {
+    if (assignmentsArr.some(a => a.status === status)) return status;
+  }
+  return assignmentsArr[0]?.status || '';
+};
 
 const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   const { 
@@ -102,51 +115,64 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   };
 
   const rows = useMemo(() => {
-    const assignmentRows = (assignments || []).map(asnItem => {
-      // Restore client-side join for robustness against raw table fetches or RLS join blocks
-      const matchingTeam = asnItem.team_id ? teamById[asnItem.team_id] : null;
-      
-      return {
-        id: `asn-${asnItem.assignment_id}`,
-        isParOverdue: checkIsParOverdue(matchingTeam || asnItem, parInterval, currentTime),
-        timeSincePar: (matchingTeam || asnItem.team_id) ? formatTimeSince(matchingTeam?.last_par_check || asnItem.last_par_check || matchingTeam?.created_at || asnItem.created_at, currentTime) : '',
-        tacChannel: asnItem.frequency_primary || '—',
-        assignmentId: asnItem.assignment_id,
-        assignmentName: asnItem.title,
-        assignmentOrigin: asnItem.origin,
-        assignmentPriority: asnItem.priority || '—',
-        assignmentType: asnItem.resource_type || '—',
-        assignmentStatus: asnItem.status,
-        teamName: matchingTeam?.team_name_number || asnItem.team_name || '',
-        teamType: matchingTeam?.type || asnItem.team_type || '',
-        teamLeader: matchingTeam?.leader_name || asnItem.leader_name || leaderById[matchingTeam?.leader_responder_id || asnItem.leader_responder_id] || '',
-        leaderIdentifier: matchingTeam?.leader_identifier || asnItem.leader_identifier || leaderIdentifierById[matchingTeam?.leader_responder_id || asnItem.leader_responder_id] || '—',
-        teamSize: matchingTeam?.member_count || asnItem.member_count || matchingTeam?.current_responders?.length || 0,
-        leaderId: matchingTeam?.leader_responder_id || asnItem.leader_responder_id || null,
-        teamStatus: matchingTeam?.status || asnItem.team_status || '',
-        hasBoth: !!(asnItem.team_id || matchingTeam),
-        teamId: asnItem.team_id,
-      };
+    // Group every assignment that has a team by that team_id, so a team with
+    // several linked assignments produces ONE row (with an assignments[] array)
+    // instead of one duplicated row per assignment.
+    const assignmentsByTeamId = new Map();
+    const orphanAssignments = [];
+    (assignments || []).forEach(a => {
+      if (a.team_id) {
+        if (!assignmentsByTeamId.has(a.team_id)) assignmentsByTeamId.set(a.team_id, []);
+        assignmentsByTeamId.get(a.team_id).push(a);
+      } else {
+        orphanAssignments.push(a);
+      }
     });
 
-    const assignmentTeamSet = new Set();
-    (assignments || []).forEach(a => { if (a.team_id) assignmentTeamSet.add(a.team_id); });
+    // Aggregate fields (joined strings + a dominant status) let search/sort/
+    // view-mode filtering keep working unchanged whether a row has 0, 1, or
+    // several assignments. Rendering the actual stack of chips uses `assignments`.
+    const buildAssignmentFields = (assignmentsArr) => ({
+      assignments: assignmentsArr,
+      assignmentOrigin: assignmentsArr[0]?.origin,
+      assignmentName: assignmentsArr.map(a => a.title).join(', '),
+      assignmentType: assignmentsArr.map(a => a.resource_type || '—').join(', '),
+      assignmentPriority: assignmentsArr.map(a => a.priority || '—').join(', '),
+      tacChannel: assignmentsArr.map(a => a.frequency_primary || '—').join(', '),
+      assignmentStatus: getDominantAssignmentStatus(assignmentsArr),
+    });
 
-    // Team only rows benefit from metadata in the dashboard_teams view
-    const teamOnlyRows = (teams || []).filter(tItem => !assignmentTeamSet.has(tItem.team_id)).map(tItem => ({
+    // One row per team (0 or more linked assignments) -- the team is the
+    // authoritative source here, so no client-side lookup fallback is needed.
+    const teamRows = (teams || []).map(tItem => ({
       id: `team-${tItem.team_id}`,
       isParOverdue: checkIsParOverdue(tItem, parInterval, currentTime),
       timeSincePar: formatTimeSince(tItem.last_par_check || tItem.created_at, currentTime),
-      tacChannel: '', assignmentId: '', assignmentName: '', assignmentPriority: '', assignmentType: '', assignmentStatus: '',
+      ...buildAssignmentFields(assignmentsByTeamId.get(tItem.team_id) || []),
       teamName: tItem.team_name_number, teamType: tItem.type, teamStatus: tItem.status,
       teamLeader: tItem.leader_name || leaderById[tItem.leader_responder_id] || 'Unknown',
       leaderIdentifier: tItem.leader_identifier || leaderIdentifierById[tItem.leader_responder_id] || '—',
       teamSize: tItem.member_count || tItem.current_responders?.length || 0,
       leaderId: tItem.leader_responder_id || null,
-      hasBoth: false, teamId: tItem.team_id,
+      teamId: tItem.team_id,
     }));
 
-    let result = [...assignmentRows, ...teamOnlyRows];
+    // One row per assignment with no team yet.
+    const orphanAssignmentRows = orphanAssignments.map(asnItem => ({
+      id: `asn-${asnItem.assignment_id}`,
+      isParOverdue: checkIsParOverdue(asnItem, parInterval, currentTime),
+      timeSincePar: '',
+      ...buildAssignmentFields([asnItem]),
+      teamName: asnItem.team_name || '', teamType: asnItem.team_type || '',
+      teamLeader: asnItem.leader_name || leaderById[asnItem.leader_responder_id] || '',
+      leaderIdentifier: asnItem.leader_identifier || leaderIdentifierById[asnItem.leader_responder_id] || '—',
+      teamSize: asnItem.member_count || 0,
+      leaderId: asnItem.leader_responder_id || null,
+      teamStatus: asnItem.team_status || '',
+      teamId: null,
+    }));
+
+    let result = [...teamRows, ...orphanAssignmentRows];
     if (viewMode === 'Operations') {
       result = result.filter(r => r.teamType === 'Staff' || (r.teamStatus === 'Assigned' || r.teamStatus === 'Deployed' || r.assignmentStatus === 'Completed' || r.assignmentStatus === 'Incomplete'));
     } else if (viewMode === 'Planning') {
@@ -174,8 +200,8 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       const getPriority = (row) => {
         if (row.assignmentStatus === 'Deployed') return 1;
         if (row.assignmentStatus === 'Assigned') return 2;
-        if (row.assignmentId && !row.teamId) return 3; // Assignment with no team
-        if (!row.assignmentId && row.teamId) return 4; // Team with no assignment
+        if (row.assignments.length > 0 && !row.teamId) return 3; // Assignment with no team
+        if (row.assignments.length === 0 && row.teamId) return 4; // Team with no assignment
         if (row.assignmentStatus === 'Incomplete') return 5;
         if (row.assignmentStatus === 'Completed') return 6;
         return 7;
@@ -202,11 +228,12 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     const { id: targetId, type: targetType } = target;
 
     try {
-      // Team <-> Assignment linkage
+      // Team <-> Assignment linkage. Validity (no same-type drops, e.g. a team
+      // dropped on a row that already has a team) is already enforced by the
+      // drag-and-drop hook's type-mismatch check before this ever fires -- a
+      // team can always receive an additional assignment, so no extra guard
+      // is needed here.
       if ((draggedType === 'team' && targetType === 'assignment') || (draggedType === 'assignment' && targetType === 'team')) {
-        const targetRow = rows.find(r => r.id === targetId);
-        if (targetRow?.hasBoth) return;
-
         let teamId, assignmentId;
         if (draggedType === 'team') {
           teamId = getRawUuid(draggedId);
@@ -226,7 +253,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     } catch (err) {
        // Error is handled by the planning hook, which should show a toast.
     }
-  }, [rows, assignTeamToAssignment, attachResponderToTeam]);
+  }, [assignTeamToAssignment, attachResponderToTeam]);
 
   const { draggedItem, dropTarget, ...dndHandlers } = useResourceDragAndDrop({ onDropResource: handleDropResource });
 
@@ -296,6 +323,13 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
       setCurrentTime(Date.now());
     } catch (err) {
       console.error('Failed to update status:', err);
+      // Postgres unique_violation from the one_deployed_assignment_per_team
+      // index -- a team already has a different Deployed assignment. This is
+      // the race-condition backstop for the UI's disabled-option guard.
+      if (err.code === '23505' && err.message?.includes('one_deployed_assignment_per_team')) {
+        addToast('This team already has an active deployed assignment. Complete or reassign it before deploying another.', 'error');
+        return;
+      }
       // Use the local setError state from the planning hook
       setError(err.message || 'Permission denied or update failed. Please verify your access level.');
     }
@@ -506,17 +540,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     try {
       setLoading(true);
       
-      let finalTeamName = formData.team_name_number?.trim();
-      if (!finalTeamName) {
-        const type = formData.type || 'Other';
-        const existingOfSameType = (teams || []).filter(t => t.type === type);
-        let nextNum = existingOfSameType.length + 1;
-        finalTeamName = `${type} ${nextNum}`;
-        while ((teams || []).some(t => t.team_name_number === finalTeamName)) {
-          nextNum++;
-          finalTeamName = `${type} ${nextNum}`;
-        }
-      }
+      let finalTeamName = formData.team_name_number?.trim() || generateTeamName(opPeriod?.op_number, teams);
 
       const finalResponderIds = formData.responder_ids || [];
       console.log(`[OperationsDashboardPage] handleSaveTeam: Persisting team data. Leader: ${formData.leader_responder_id}, Members:`, finalResponderIds);
@@ -683,7 +707,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
               parInterval={parInterval}
               onStatusUpdate={(asnId, teamId, status) => handleStatusUpdate(asnId, teamId, status)}
               onResetPar={handleResetPar} onUnassignTeam={handleUnassignTeam}
-              onEditTeam={(id) => openEditTeamForm(teamById[id])} onReleaseTeam={handleDisbandTeam}
+              onEditTeam={(id) => openEditTeamForm(teamById[id])} onDisbandTeam={handleDisbandTeam}
               openNewTeamForm={openNewTeamForm}
               openNewAssignmentForm={openNewAssignmentForm}
               onEditAssignment={(id) => openEditAssignmentForm(assignmentById[id])}
@@ -785,14 +809,14 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
         <BaseModal
           isOpen={!!assigningRow}
           onClose={() => setAssigningRow(null)}
-          title={assigningRow.assignmentId ? 'Assign Team to Assignment' : 'Assign to Assignment'}
+          title={!assigningRow.teamId ? 'Assign Team to Assignment' : 'Assign to Assignment'}
           loading={loading}
           actions={
-            <button 
-              className="btn btn-primary" 
+            <button
+              className="btn btn-primary"
               disabled={!selectedAssignTarget || loading}
               onClick={() => {
-                const asnId = assigningRow.assignmentId ? assigningRow.assignmentId : selectedAssignTarget;
+                const asnId = !assigningRow.teamId ? assigningRow.assignments?.[0]?.assignment_id : selectedAssignTarget;
                 const teamId = assigningRow.teamId ? assigningRow.teamId : selectedAssignTarget;
                 handlePerformLink(asnId, teamId);
                 setAssigningRow(null);
@@ -803,18 +827,18 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
           }
         >
           <p style={{ fontSize: '14px', color: '#475569', marginBottom: '16px' }}>
-            Assigning resource for: <strong>{assigningRow.assignmentName || assigningRow.teamName}</strong>
+            Assigning resource for: <strong>{assigningRow.teamName || assigningRow.assignments?.[0]?.title}</strong>
           </p>
           <div className="form-row">
-            <label htmlFor="assign-resource-select">{assigningRow.assignmentId ? 'Select Team' : 'Select Planned Assignment'}</label>
+            <label htmlFor="assign-resource-select">{!assigningRow.teamId ? 'Select Team' : 'Select Planned Assignment'}</label>
             <select
               id="assign-resource-select"
-              className="status-update-select" 
-              value={selectedAssignTarget} 
+              className="status-update-select"
+              value={selectedAssignTarget}
               onChange={(e) => setSelectedAssignTarget(e.target.value)}
             >
               <option value="" disabled>Choose a resource...</option>
-              {assigningRow.assignmentId ? 
+              {!assigningRow.teamId ?
                 availableTeams.map(t => <option key={t.team_id} value={t.team_id}>{t.team_name_number} ({t.type})</option>) :
                 availableAssignments.map(a => <option key={a.assignment_id} value={a.assignment_id}>{a.title} ({a.segment})</option>)
               }

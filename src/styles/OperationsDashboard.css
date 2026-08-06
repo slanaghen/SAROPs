@@ -122,6 +122,24 @@
   background-color: #f1f5f9; /* Light Gray */
 }
 
+/* Whole-row highlight while dragging a chip over a valid drop target (e.g. an
+   assignment chip hovering over a team row it can be added to), in addition
+   to the existing per-chip .chip.drop-target glow. */
+.operations-table tbody tr.row-drop-target {
+  box-shadow: inset 0 0 0 2px #2563eb;
+  background-color: #eff6ff;
+}
+
+/* Vertical stack of chips/values in a cell when a team carries multiple
+   linked assignments -- each entry lines up horizontally across the
+   Name/Type/Priority/TAC/Status columns. */
+.chip-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
 .operations-table td {
   color: #202020;
   font-size: var(--table-font-size);

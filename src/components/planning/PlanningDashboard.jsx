@@ -11,6 +11,7 @@ import TeamColumn from './TeamColumn';
 import AssignmentColumn from './AssignmentColumn';
 
 import { useToast } from '../../context/ToastContext';
+import { generateTeamName } from '../../utils/operationalUtils';
 /**
  * PlanningDashboard Component
  * 
@@ -21,8 +22,9 @@ import { useToast } from '../../context/ToastContext';
  * - Provides UI to select a team and assignment, then execute the mapping
  * - Displays team details (type, equipment, leader) and assignment info
  */
-const PlanningDashboard = ({ 
-  operationalPeriodId, 
+const PlanningDashboard = ({
+  operationalPeriodId,
+  opNumber,
   teams = [],
   assignments = [], 
   responders = [],
@@ -441,20 +443,7 @@ const PlanningDashboard = ({
     try {
       setLoading(true);
       
-      // Auto-generate team name if blank
-      let finalTeamName = formData.team_name_number?.trim();
-      if (!finalTeamName) {
-        const type = formData.type || 'Other';
-        const existingOfSameType = (teams || []).filter(t => t.type === type);
-        let nextNum = existingOfSameType.length + 1;
-        finalTeamName = `${type} ${nextNum}`;
-
-        // Local uniqueness check to avoid immediate collisions
-        while ((teams || []).some(t => t.team_name_number === finalTeamName)) {
-          nextNum++;
-          finalTeamName = `${type} ${nextNum}`;
-        }
-      }
+      let finalTeamName = formData.team_name_number?.trim() || generateTeamName(opNumber, teams);
 
       const finalResponderIds = formData.responder_ids || [];
 

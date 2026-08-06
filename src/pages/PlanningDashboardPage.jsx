@@ -39,6 +39,7 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
     assignments,
     responders,
     vehicles,
+    opPeriod,
     loading,
     stats,
     refresh: fetchTable,
@@ -276,6 +277,7 @@ const PlanningDashboardPage = ({ operationalPeriodId: propOpId }) => {
         <>
           <PlanningDashboard
             operationalPeriodId={operationalPeriodId}
+            opNumber={opPeriod?.op_number}
             teams={teams}
             assignments={assignments}
             responders={responders}
