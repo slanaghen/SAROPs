@@ -1,7 +1,5 @@
 // src/services/messageService.js
 
-import { TEAM_TYPE } from '../utils/constants';
-
 /**
  * Sends a message to a specific team.
  * @param {object} params - The parameters for sending the message.
@@ -61,7 +59,7 @@ export const sendBroadcastMessage = async ({
   if (!broadcastMessage.trim() || teams.length === 0) return;
 
   try {
-    const staffTeam = teams.find(t => t.type === TEAM_TYPE.STAFF);
+    const staffTeam = teams.find(t => t.type === 'Staff');
     if (!staffTeam) throw new Error('No Staff team found to receive broadcast.');
 
     const { error: broadcastErr } = await supabase.from('team_messages').insert({

@@ -1,7 +1,7 @@
 // sarops-types.d.ts
 
 export type AssignmentStatus = 'Planned' | 'Assigned' | 'Deployed' | 'Completed' | 'Incomplete';
-export type AccessLevel = 'responder' | 'command staff' | 'admin';
+export type AccessLevel = 'responder' | 'staff' | 'admin';
 export type TeamStatus = 'Staged' | 'Assigned' | 'Deployed' | 'Disbanded';
 export type TeamType = 'Hasty' | 'Ground' | 'Vehicle' | 'UAS' | 'Water' | 'Tracking' | 'Dog' | 'Avalanche' | 'Transport' | 'Helicopter' | 'Medical' | 'Staff' | 'Other';
 export type ResponderType = 'SAR' | 'Fire' | 'Law' | 'Medical';

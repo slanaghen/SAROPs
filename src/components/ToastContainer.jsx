@@ -7,7 +7,7 @@ const ToastContainer = () => {
 
   return (
     <div className="toast-container">
-      {(toasts || []).map((toast) => (
+      {toasts.map((toast) => (
         <div
           key={toast.id}
           className={`toast toast-${toast.type}`}
@@ -25,7 +25,10 @@ const ToastContainer = () => {
             </span>
             <span className="toast-message">{toast.message}</span>
           </div>
-          <button className="toast-close-button" onClick={() => removeToast(toast.id)}>
+          <button className="toast-close-button" onClick={(e) => {
+            e.stopPropagation();
+            removeToast(toast.id);
+          }}>
             &times;
           </button>
         </div>

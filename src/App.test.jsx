@@ -30,7 +30,11 @@ vi.mock('./lib/supabase', () => ({
   supabase: {
     auth: {
       getSession: vi.fn().mockResolvedValue({ data: { session: null } }),
-      onAuthStateChange: vi.fn().mockReturnValue({ data: { subscription: { unsubscribe: vi.fn() } } }),
+      onAuthStateChange: vi.fn((callback) => {
+        // Immediately invoke the callback to simulate auth state being resolved on mount.
+        callback('INITIAL_SESSION', { user: { id: 'test-user' } });
+        return { data: { subscription: { unsubscribe: vi.fn() } } };
+      }),
       signOut: vi.fn().mockResolvedValue({ error: null }),
     },
     from: vi.fn(() => globalThis.createSupabaseQueryMock([])),
@@ -127,13 +131,20 @@ describe('App Component', () => {
     // Set initial operational state: Staged
     vi.mocked(useIncident).mockReturnValue({
       isActive: true,
+      isAdmin: false,
+      incidentId: 'inc-123',
       responderId: 'res-123',
+      responderName: 'Steve',
       responderStatus: 'Staged',
       setResponderStatus: vi.fn(),
       setCurrentTeamStatus: vi.fn(),
       setCurrentAssignmentStatus: vi.fn(),
       accessLevel: 'responder',
       incidentData: { name: 'Mountain Rescue', opNumber: '1' },
+      logout: vi.fn(),
+      setAccessLevel: vi.fn(),
+      currentTeamStatus: null,
+      currentAssignmentStatus: null,
     });
 
     const { rerender } = render(<MemoryRouter><App /></MemoryRouter>);
@@ -141,13 +152,20 @@ describe('App Component', () => {
     // Update context to trigger a status change
     vi.mocked(useIncident).mockReturnValue({
       isActive: true,
+      isAdmin: false,
+      incidentId: 'inc-123',
       responderId: 'res-123',
+      responderName: 'Steve',
       responderStatus: 'Deployed', // Changed from initial 'Staged'
       setResponderStatus: vi.fn(),
       setCurrentTeamStatus: vi.fn(),
       setCurrentAssignmentStatus: vi.fn(),
       accessLevel: 'responder',
       incidentData: { name: 'Mountain Rescue', opNumber: '1' },
+      logout: vi.fn(),
+      setAccessLevel: vi.fn(),
+      currentTeamStatus: null,
+      currentAssignmentStatus: null,
     });
 
     rerender(<MemoryRouter><App /></MemoryRouter>);
@@ -162,7 +180,22 @@ describe('App Component', () => {
   });
 
   it('updates connectivity indicator when browser goes offline/online', () => {
-    vi.mocked(useIncident).mockReturnValue({ isActive: false, logout: vi.fn(), accessLevel: 'responder' });
+    vi.mocked(useIncident).mockReturnValue({
+      isActive: false,
+      isAdmin: false,
+      accessLevel: 'responder',
+      logout: vi.fn(),
+      incidentData: null,
+      responderName: null,
+      responderId: null,
+      responderStatus: null,
+      setResponderStatus: vi.fn(),
+      setAccessLevel: vi.fn(),
+      currentTeamStatus: null,
+      currentAssignmentStatus: null,
+      setCurrentTeamStatus: vi.fn(),
+      setCurrentAssignmentStatus: vi.fn(),
+    });
     render(<MemoryRouter><App /></MemoryRouter>);
 
     const dot = document.querySelector('.connection-dot');
@@ -182,8 +215,19 @@ describe('App Component', () => {
     vi.mocked(useIncident).mockReturnValue({
       isActive: false,
       isAdmin: false,
-      accessLevel: 'responder',
+      accessLevel: null,
       logout: vi.fn(),
+      // Provide a more complete mock to prevent crashes in other hooks
+      incidentData: null,
+      responderName: null,
+      responderId: null,
+      responderStatus: null,
+      setResponderStatus: vi.fn(),
+      setAccessLevel: vi.fn(),
+      currentTeamStatus: null,
+      currentAssignmentStatus: null,
+      setCurrentTeamStatus: vi.fn(),
+      setCurrentAssignmentStatus: vi.fn(),
     });
 
     render(<MemoryRouter initialEntries={['/operations']}><App /></MemoryRouter>);
@@ -197,9 +241,16 @@ describe('App Component', () => {
     vi.mocked(useIncident).mockReturnValue({
       isActive: true,
       isAdmin: false,
-      accessLevel: 'responder', // Logged in but not staff
+      accessLevel: 'responder',
       logout: vi.fn(),
-      incidentData: { name: 'Test Inc' }
+      incidentData: { name: 'Test Inc', opPeriodId: 'op-1' },
+      incidentId: 'inc-1',
+      responderId: 'res-1',
+      responderName: 'Test Responder',
+      responderStatus: 'Staged',
+      setResponderStatus: vi.fn(),
+      setCurrentTeamStatus: vi.fn(),
+      setCurrentAssignmentStatus: vi.fn(),
     });
 
     render(<MemoryRouter initialEntries={['/operations']}><App /></MemoryRouter>);
@@ -251,6 +302,88 @@ describe('App Component', () => {
 
     await waitFor(() => {
       expect(supabase.auth.signOut).toHaveBeenCalled();
+      expect(mockLogout).toHaveBeenCalled();
+    });
+  });
+
+  it('should not clear session during the check-in race condition', async () => {
+    const mockLogout = vi.fn();
+
+    // 1. Initial State: Not active, no responder
+    vi.mocked(useIncident).mockReturnValue({
+      isActive: false,
+      responderId: null,
+      logout: mockLogout,
+      setResponderStatus: vi.fn(),
+      setCurrentTeamStatus: vi.fn(),
+      setCurrentAssignmentStatus: vi.fn(),
+      setAccessLevel: vi.fn(),
+    });
+    vi.mocked(useResponderTeamAndAssignment).mockReturnValue({
+      responderRecord: null,
+      loading: false,
+      refetch: vi.fn(),
+    });
+
+    const { rerender } = render(<MemoryRouter><App /></MemoryRouter>);
+
+    // 2. Simulate Check-in: responderId is set, but the hook hasn't fetched the record yet
+    vi.mocked(useIncident).mockReturnValue({
+      isActive: true,
+      responderId: 'res-123', // ID has just been set
+      logout: mockLogout,
+      setResponderStatus: vi.fn(),
+      setCurrentTeamStatus: vi.fn(),
+      setCurrentAssignmentStatus: vi.fn(),
+      setAccessLevel: vi.fn(),
+    });
+    // The hook is now loading the new record
+    vi.mocked(useResponderTeamAndAssignment).mockReturnValue({
+      responderRecord: null, // Record is still null
+      loading: true, // Hook is loading
+      refetch: vi.fn(),
+    });
+
+    rerender(<MemoryRouter><App /></MemoryRouter>);
+
+    // 3. Assert that logout was NOT called, even though responderRecord is null
+    // This verifies that the `prevResponderId` check is preventing the session from being cleared.
+    expect(mockLogout).not.toHaveBeenCalled();
+  });
+
+  it('should clear the session if the responder record is missing after initial load', async () => {
+    const mockLogout = vi.fn();
+
+    // 1. Initial State: Active session with a valid responder record
+    vi.mocked(useIncident).mockReturnValue({
+      isActive: true,
+      responderId: 'res-123',
+      logout: mockLogout,
+      setResponderStatus: vi.fn(),
+      setCurrentTeamStatus: vi.fn(),
+      setCurrentAssignmentStatus: vi.fn(),
+      setAccessLevel: vi.fn(),
+    });
+    vi.mocked(useResponderTeamAndAssignment).mockReturnValue({
+      responderRecord: { responder_id: 'res-123', status: 'Staged', access_level: 'responder' },
+      loading: false,
+      refetch: vi.fn(),
+    });
+
+    const { rerender } = render(<MemoryRouter><App /></MemoryRouter>);
+
+    // 2. Simulate Deletion: The responder record is now missing from the database
+    // The hook returns null, and is not loading. The responderId in context remains the same.
+    vi.mocked(useResponderTeamAndAssignment).mockReturnValue({
+      responderRecord: null,
+      loading: false,
+      refetch: vi.fn(),
+    });
+
+    rerender(<MemoryRouter><App /></MemoryRouter>);
+
+    // 3. Assert that logout was called because the session is now invalid.
+    await waitFor(() => {
       expect(mockLogout).toHaveBeenCalled();
     });
   });

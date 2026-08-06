@@ -1,32 +1,26 @@
 import React, { useState, useEffect } from 'react';
 import BaseModal from '../BaseModal';
-import { RESPONDER_STATUS_LIST } from '../operationalConstants';
+import { RESPONDER_STATUS_LIST } from '../../constants/operationalConstants';
 import { useToast } from '../../context/ToastContext';
 
 const VehicleFormModal = ({ isOpen, onClose, onSave, initialData, loading, error }) => {
-  const [formData, setFormData] = useState({
-    designation: '',
-    type: '',
-    status: 'Staged',
+  const getInitialState = (data) => ({
+    designation: data?.designation || '',
+    type: data?.type || '',
+    status: data?.status || 'Staged',
+    vehicle_id: data?.vehicle_id || null,
+    incident_id: data?.incident_id || null,
   });
 
+  const [formData, setFormData] = useState(() => getInitialState(initialData));
+
+  const isEditing = !!initialData?.vehicle_id;
   const { addToast } = useToast();
+
   useEffect(() => {
-    if (initialData) {
-      setFormData({
-        vehicle_id: initialData.vehicle_id,
-        designation: initialData.designation || '',
-        type: initialData.type || '',
-        status: initialData.status || 'Staged',
-        incident_id: initialData.incident_id
-      });
-    } else {
-      setFormData({
-        designation: '',
-        type: '',
-        status: 'Staged',
-      });
-    }
+    // This effect now primarily serves to reset the form state if the modal is
+    // re-opened with different initialData, or reset for a new entry.
+    setFormData(getInitialState(initialData));
   }, [initialData, isOpen]);
 
   const handleChange = (e) => {
@@ -38,7 +32,7 @@ const VehicleFormModal = ({ isOpen, onClose, onSave, initialData, loading, error
     <BaseModal
       isOpen={isOpen}
       onClose={onClose}
-      title={initialData ? 'Edit Vehicle' : 'Add New Vehicle'}
+      title={isEditing ? `Edit Vehicle: ${formData.designation}` : 'Add New Vehicle'}
       actions={
         <>
           {!initialData && (

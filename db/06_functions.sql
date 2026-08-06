@@ -4,19 +4,18 @@
 -- potentially absent JWT claims, which is critical when creating a new incident
 -- where no incident-specific context exists yet.
 CREATE OR REPLACE FUNCTION check_is_operational_staff()
-RETURNS BOOLEAN AS $$
-DECLARE
-    user_role TEXT;
-BEGIN
-    -- Get the role from the users table based on the logged-in user's email.
-    SELECT access_level INTO user_role
-    FROM public.users
-    WHERE email = auth.email()
-    LIMIT 1;
-
-    RETURN (user_role IN ('staff', 'admin'));
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+RETURNS BOOLEAN AS $func$
+  SELECT EXISTS (
+    -- Allow if the user has an explicit staff/admin session via Auth metadata or custom claims
+    SELECT 1 WHERE (auth.jwt() ->> 'access_level') IN ('staff', 'admin')
+    UNION ALL
+    -- Use auth.uid to join against auth.users for a reliable system user check
+    SELECT 1 FROM users WHERE email = (SELECT email FROM auth.users WHERE id = auth.uid()) AND access_level IN ('staff', 'admin')
+    UNION ALL
+    -- Check against the specific responder record for this incident
+    SELECT 1 FROM responders WHERE auth_uid = auth.uid() AND access_level IN ('staff', 'admin')
+  );
+$func$ LANGUAGE sql STABLE SECURITY DEFINER;
 
 -- Function to update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -30,6 +29,10 @@ $func$ LANGUAGE plpgsql;
 -- ICS Automation: Staffing
 CREATE OR REPLACE FUNCTION create_staff_team_for_op()
 RETURNS TRIGGER AS $func$
+-- This function creates the 'Staff' team and a corresponding 'Command Staff'
+-- assignment for each new operational period. It does NOT pre-populate roles
+-- like 'Planning Section Chief' or 'Mapper'. Those roles are text labels assigned
+-- to responders when they are manually added to the Staff team.
 DECLARE
     _team_id UUID;
 BEGIN

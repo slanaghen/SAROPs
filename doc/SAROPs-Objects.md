@@ -49,14 +49,14 @@ A functional unit consisting of at least one Leader, optional Members, and optio
     *   0+ **Team Members** (Responders).
     *   0+ **Team Vehicles**.
 *   **Assignment Link**: A Team is assigned to exactly one **Assignment** to move from `Staged` to `Assigned`.
+*   **Assignment Link**: A Team can be assigned to multiple **Assignments**, but only one can be `Deployed` at a time.
 
 ### Assignments (Tasks)
 A defined objective or search area.
 *   **Parent**: Operational Period.
 *   **Resource Link**: An Assignment is linked to exactly one **Team**.
 *   **Status Synchronization**: 
-    *   Moving an Assignment to `Deployed` automatically marks the linked **Team**, its **Responders**, and its **Vehicles** as `Deployed`.
-    *   Completing an Assignment automatically disbands the **Team** and returns all **Responders** and **Vehicles** to `Staged` status.
+    *   Changing an Assignment's status automatically updates the linked **Team's** aggregate status.
 
 ---
 
@@ -67,7 +67,8 @@ A defined objective or search area.
 | **Incident** | Has Many | **Operational Periods** | Primary mission container. |
 | **Operational Period** | Has Many | **Assignments** | Tasking specific to a shift. |
 | **Operational Period** | Has Many | **Teams** | Logistics specific to a shift. |
-| **Assignment** | Has One | **Team** | A task is performed by one team. |
+| **Assignment** | Belongs To | **Team** | A task is performed by one team. |
+| **Team** | Has Many | **Assignments** | A team can have multiple tasks, but only one active at a time. |
 | **Team** | Has Many | **Responders** | Personnel assigned to the unit. |
 | **Team** | Has Many | **Vehicles** | Equipment assigned to the unit. |
 | **Responder** | Member Of | **Team** | Personnel tactical assignment. |

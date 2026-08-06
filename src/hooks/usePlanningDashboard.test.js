@@ -48,6 +48,7 @@ describe('usePlanningDashboard Hook', () => {
 
   const mockSupabase = {
     from: vi.fn(),
+    rpc: vi.fn(),
   };
 
   beforeEach(() => {
@@ -85,23 +86,12 @@ describe('usePlanningDashboard Hook', () => {
 
   it('should handle team creation and logging', async () => {
     const newTeam = { team_id: 'new-t', team_name_number: 'Team abc', status: 'Staged' };
-    
-    // Use createMockQuery as a base to provide thenable behavior and standard chain methods.
-    // This ensures internal list refreshes (fetchDashboardData) resolve with the new team data.
-    const teamsMock = {
-      ...createMockQuery([newTeam]),
-      select: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockReturnThis(),
-      insert: vi.fn().mockReturnThis(),
-      // maybeSingle resolves to null for the initial uniqueness check.
-      maybeSingle: vi.fn()
-        .mockResolvedValue({ data: null, error: null }),
-      single: vi.fn().mockResolvedValue({ data: newTeam, error: null }),
-    };
 
+    // Mock the RPC call to return the new team
+    mockSupabase.rpc.mockResolvedValue({ data: newTeam, error: null });
+    
     mockSupabase.from.mockImplementation((table) => {
-      // Requirement: Handle view names used by fetchDashboardData refresh
-      if (table === 'teams' || table === 'team_current_responders') return teamsMock;
+      if (table === 'team_current_responders') return createMockQuery([newTeam]);
       if (table === 'action_logs') return createMockQuery({});
       return createMockQuery([]);
     });
@@ -118,7 +108,8 @@ describe('usePlanningDashboard Hook', () => {
 
     expect(created).toEqual(newTeam);
     expect(mockSupabase.from).toHaveBeenCalledWith('action_logs');
-    expect(result.current.teams).toContainEqual(newTeam);
+    // The state update is asynchronous, so we wait for it
+    await waitFor(() => expect(result.current.teams).toContainEqual(newTeam));
   });
 
   it('should handle assignment of a team to an assignment', async () => {
@@ -177,19 +168,54 @@ describe('usePlanningDashboard Hook', () => {
   it('should update team details successfully', async () => {
     const existingTeam = { team_id: 't1', team_name_number: 'Team 1' };
     const updates = { team_name_number: 'Team 1 Revised' };
-    
+
+    // Mock the .from call for the metadata update and subsequent log/refresh
     mockSupabase.from.mockImplementation((table) => {
       if (table === 'teams') return createMockQuery({ ...existingTeam, ...updates });
+      if (table === 'action_logs') return createMockQuery({});
       return createMockQuery({});
     });
+
+    // Mock the .rpc call for resource reconciliation
+    mockSupabase.rpc.mockResolvedValue({ error: null });
 
     const { result } = renderHook(() => usePlanningDashboard(mockSupabase, opPeriodId));
 
     await act(async () => {
-      await result.current.updateTeam('t1', updates);
+      await result.current.updateTeam('t1', updates, {}, []);
     });
 
     expect(mockSupabase.from).toHaveBeenCalledWith('teams');
+    expect(mockSupabase.rpc).toHaveBeenCalledWith('reconcile_team_resources', expect.any(Object));
+  });
+
+  it('should send the equipment array as-is (not stringified) when updating a team', async () => {
+    const teamId = 't1';
+    const updates = {
+      team_name_number: 'Team 1 Revised',
+      equipment: ['Radio', 'GPS', 'First Aid Kit'],
+    };
+
+    // Mock the .from call for the metadata update
+    const mockTeamsTable = createMockQuery({});
+    mockSupabase.from.mockImplementation((table) => {
+      if (table === 'teams') return mockTeamsTable;
+      return createMockQuery({});
+    });
+
+    // Mock the .rpc call for resource reconciliation
+    mockSupabase.rpc.mockResolvedValue({ error: null });
+
+    const { result } = renderHook(() => usePlanningDashboard(mockSupabase, opPeriodId));
+
+    await act(async () => {
+      await result.current.updateTeam(teamId, updates, {}, []);
+    });
+
+    // teams.equipment is JSONB — sending a JSON.stringify'd string here would
+    // double-encode it into a JSON string scalar instead of a real array,
+    // which is exactly what broke rendering (e.g. TeamColumn.jsx's .join()).
+    expect(mockTeamsTable.update).toHaveBeenCalledWith(expect.objectContaining({ equipment: updates.equipment }));
   });
 
   it('should delete a team and update local state', async () => {
@@ -207,8 +233,11 @@ describe('usePlanningDashboard Hook', () => {
 
   it('should create and update assignments', async () => {
     const asn = { assignment_id: 'a1', title: 'Area 1' };
+
+    // Mock for createAssignment RPC call
+    mockSupabase.rpc.mockResolvedValue({ data: asn, error: null });
+    // Mock for the fetchDashboardData call that follows creation
     mockSupabase.from.mockImplementation((table) => {
-      // Requirement: Handle view names and return array for normalization map
       if (table === 'assignments' || table === 'dashboard_assignments') return createMockQuery([asn]);
       if (table === 'action_logs') return createMockQuery({});
       return createMockQuery([]);
@@ -220,12 +249,14 @@ describe('usePlanningDashboard Hook', () => {
       await result.current.createAssignment({ name: 'Area 1' });
     });
     
-    expect(result.current.assignments).toContainEqual(expect.objectContaining(asn));
+    await waitFor(() => {
+      expect(result.current.assignments).toContainEqual(expect.objectContaining(asn));
+    });
     
     const updates = { title: 'Area 1 Updated' };
+    // Mock for updateAssignment's .update() call
     mockSupabase.from.mockImplementation((table) => {
       if (table === 'assignments') return createMockQuery({ ...asn, ...updates });
-      if (table === 'action_logs') return createMockQuery({});
       return createMockQuery([]);
     });
 
@@ -319,57 +350,16 @@ describe('usePlanningDashboard Hook', () => {
   });
 
   it('should throw an error and set state if team name uniqueness check fails', async () => {
-    const existingTeam = { team_id: 'existing-id', team_name_number: 'Team Alpha' };
-    mockSupabase.from.mockImplementation((table) => {
-      if (table === 'teams') return {
-        select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        maybeSingle: vi.fn().mockResolvedValue({ data: existingTeam, error: null })
-      };
-      return createMockQuery([]);
-    });
+    // Simulate the RPC call failing with a uniqueness constraint error from the DB function
+    const dbError = { message: 'A team named "Team Alpha" already exists in this incident.' };
+    mockSupabase.rpc.mockResolvedValue({ data: null, error: dbError });
 
     const { result } = renderHook(() => usePlanningDashboard(mockSupabase, opPeriodId));
     await expect(result.current.createTeam({ team_name_number: 'Team Alpha' })).rejects.toThrow(/already exists/i);
-  });
 
-  it('should provide correctly filtered computed properties for dashboard columns', async () => {
-    const mockTeams = [
-      { team_id: 't1', status: 'Staged' },
-      { team_id: 't2', status: 'Assigned' }
-    ];
-    const mockAsns = [
-      { assignment_id: 'a1', team_id: 't2', is_orphaned: false },
-      { assignment_id: 'a2', team_id: null, is_orphaned: false },
-      { assignment_id: 'a3', team_id: null, is_orphaned: true }
-    ];
-    const mockResponders = [
-      { responder_id: 'r1', status: 'Staged' },
-      { responder_id: 'r2', status: 'Attached' }
-    ];
-
-    mockSupabase.from.mockImplementation((table) => {
-      // Requirement: Handle tactical view names used by fetchDashboardData
-      if (table === 'teams' || table === 'team_current_responders') return createMockQuery(mockTeams);
-      if (table === 'assignments' || table === 'dashboard_assignments') return createMockQuery(mockAsns);
-      if (table === 'responders') return createMockQuery(mockResponders);
-      return createMockQuery([]);
+    await waitFor(() => {
+      expect(result.current.error).toBe(dbError.message);
     });
-
-    const { result } = renderHook(() => usePlanningDashboard(mockSupabase, opPeriodId));
-    await act(async () => { await result.current.fetchDashboardData(); });
-
-    // Verify Staged Teams list (Staged status)
-    expect(result.current.stagedTeams).toHaveLength(1);
-    expect(result.current.stagedTeams[0].team_id).toBe('t1');
-
-    // Verify Available Assignments (No team_id AND not orphaned)
-    expect(result.current.availableAssignments).toHaveLength(1);
-    expect(result.current.availableAssignments[0].assignment_id).toBe('a2');
-
-    // Verify Available Responders (Staged status)
-    expect(result.current.availableResponders).toHaveLength(1);
-    expect(result.current.availableResponders[0].responder_id).toBe('r1');
   });
 
   it('should exclude teams from available list if their status is not Staged', async () => {

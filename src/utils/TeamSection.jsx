@@ -1,4 +1,5 @@
 import React from 'react';
+import { useIncident } from '../context/IncidentContext';
 
 const TeamSection = ({ 
   team, parRequired, timeSinceLastPar, parInterval, 
@@ -6,7 +7,9 @@ const TeamSection = ({
   isLeavingTeam, accessLevel, icsRole, isExpanded, onToggle,
   assignmentStatus 
 }) => {
+  const { responderId } = useIncident();
   if (!team) return null;
+  const isLeader = team.leader_responder_id === responderId;
 
   return (
     <div className={`dashboard-section ${parRequired ? 'overdue' : ''}`}>
@@ -66,8 +69,8 @@ const TeamSection = ({
             <button 
               className="btn btn-secondary btn-sm" 
               onClick={(e) => { e.stopPropagation(); handleLeaveTeam(); }} 
-              disabled={isLeavingTeam || (team.status === 'Deployed' || assignmentStatus === 'Deployed')}
-              title={(team.status === 'Deployed' || assignmentStatus === 'Deployed') ? 'As Leader, you cannot leave your team while deployed' : ''}
+              disabled={isLeavingTeam || isLeader}
+              title={isLeader ? 'A Team Leader cannot leave their team. Designate a new leader first.' : ''}
             >
               {isLeavingTeam ? 'Leaving...' : 'Leave Team'}
             </button>

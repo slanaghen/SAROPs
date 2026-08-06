@@ -1,21 +1,25 @@
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useIncident } from '../context/IncidentContext';
+import { useToast } from '../context/ToastContext';
 import '../styles/OperationsDashboard.css';
 import '../styles/PlanningDashboard.css'; // Reusing form styles
 import { usePlanningDashboard } from '../hooks/usePlanningDashboard';
-import TeamFormModal from '../components/TeamFormModal';
+import TeamFormModal from '../components/team/TeamFormModal';
+import { useResourceDragAndDrop } from '../hooks/useResourceDragAndDrop';
 import AssignmentFormModal from '../components/AssignmentFormModal';
 import BaseModal from '../components/BaseModal';
-import OperationsTable from '../components/OperationsTable';
-import OperationsMap from '../components/OperationsMap';
+import OperationsTable from '../components/operations/OperationsTable';
+import OperationsStatsFooter from '../components/operations/OperationsStatsFooter';
+import OperationsMap from '../components/operations/OperationsMap';
 import VehicleFormModal from '../components/admin/VehicleFormModal';
 import { checkIsParOverdue, formatTimeSince } from '../utils/operationalUtils';
 
 const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   const { 
     incidentData, incidentId, responderName, user, operationsRefreshInterval
-  } = useIncident(); 
+  } = useIncident();
+  const { addToast } = useToast();
   
   const [showGlobalMap, setShowGlobalMap] = useState(false); // Local state for layout toggle
   const operationalPeriodId = propOpId || incidentData?.opPeriodId;
@@ -42,15 +46,15 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   const [pendingAssignmentId, setPendingAssignmentId] = useState(null);
   const [pendingTeamId, setPendingTeamId] = useState(null);
 
-  const [draggedItem, setDraggedItem] = useState(null); // { id, type }
-  const [viewMode, setViewMode] = useState(() => localStorage.getItem('sarops_view_mode') || 'All'); 
-  const [dropTarget, setDropTarget] = useState(null); // { id, type }
+  const [viewMode, setViewMode] = useState('All'); 
   const [assigningRow, setAssigningRow] = useState(null);
   const [selectedAssignTarget, setSelectedAssignTarget] = useState('');
   const [showBroadcastModal, setShowBroadcastModal] = useState(false);
   const [broadcastMessage, setBroadcastMessage] = useState('');
   const [currentTime, setCurrentTime] = useState(Date.now());
 
+  const lastFetchedIncidentId = useRef(null);
+  const lastFetchedOpId = useRef(null);
   const contentWrapperRef = useRef(null);
 
   const sartopoId = opPeriod?.incidents?.sartopo_id;
@@ -193,6 +197,39 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     return result; // currentTime is a dependency for checkIsParOverdue and formatTimeSince
   }, [assignments, teams, teamById, leaderById, leaderIdentifierById, assignmentFilter, teamFilter, sortConfig, viewMode, parInterval, currentTime]);
 
+  const handleDropResource = useCallback(async (dragged, target) => {
+    const { id: draggedId, type: draggedType } = dragged;
+    const { id: targetId, type: targetType } = target;
+
+    try {
+      // Team <-> Assignment linkage
+      if ((draggedType === 'team' && targetType === 'assignment') || (draggedType === 'assignment' && targetType === 'team')) {
+        const targetRow = rows.find(r => r.id === targetId);
+        if (targetRow?.hasBoth) return;
+
+        let teamId, assignmentId;
+        if (draggedType === 'team') {
+          teamId = getRawUuid(draggedId);
+          assignmentId = getRawUuid(targetId);
+        } else {
+          teamId = getRawUuid(targetId);
+          assignmentId = getRawUuid(draggedId);
+        }
+        
+        await assignTeamToAssignment(teamId, assignmentId);
+      } 
+      // Responder -> Team attachment
+      else if (draggedType === 'responder' && targetType === 'team') {
+        const teamId = getRawUuid(targetId);
+        if (teamId) await attachResponderToTeam(draggedId, teamId);
+      }
+    } catch (err) {
+       // Error is handled by the planning hook, which should show a toast.
+    }
+  }, [rows, assignTeamToAssignment, attachResponderToTeam]);
+
+  const { draggedItem, dropTarget, ...dndHandlers } = useResourceDragAndDrop({ onDropResource: handleDropResource });
+
   // Keep a live clock for timer displays and overdue calculations
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(Date.now()), 15000);
@@ -206,15 +243,29 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     }
   }, [responders, vehicles]);
 
+  // Robust data fetch on initial load and context change, mirroring PlanningDashboardPage
   useEffect(() => {
-    fetchDashboardData();
-  }, [operationalPeriodId, fetchDashboardData]);
+    const initFetch = async () => {
+      const isNewContext = lastFetchedIncidentId.current !== incidentId || 
+                           lastFetchedOpId.current !== operationalPeriodId;
+
+      if (incidentId && operationalPeriodId && fetchDashboardData && isNewContext) {
+        console.debug(`[Operations] New context detected (Inc: ${incidentId}, OP: ${operationalPeriodId}). Fetching data...`);
+        lastFetchedIncidentId.current = incidentId;
+        lastFetchedOpId.current = operationalPeriodId;
+        
+        await fetchDashboardData();
+      }
+    };
+    initFetch();
+  }, [incidentId, operationalPeriodId, fetchDashboardData]);
 
   // Periodically refresh dashboard data to ensure real-time accuracy (every 60s)
   useEffect(() => {
     if (!operationalPeriodId) return;
 
     const interval = setInterval(() => {
+      console.debug(`[Operations] Performing periodic refresh for OP: ${operationalPeriodId}`);
       fetchDashboardData();
     }, operationsRefreshInterval || 30000);
 
@@ -233,6 +284,10 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
   const handleStatusUpdate = async (assignmentId, teamId, newStatus) => {
     try {
       const assignment = assignmentById[assignmentId];
+      if (assignment?.title === 'Command Staff' && (newStatus === 'Completed' || newStatus === 'Incomplete')) {
+        addToast('The "Command Staff" assignment cannot be manually completed or cancelled. It is closed automatically when the incident ends.', 'error');
+        return;
+      }
       await recordAction(`Updated status of assignment "${assignment?.title || 'Unknown'}" to ${newStatus}.`);
       await updateResourceStatus(assignmentId, teamId, newStatus);
       
@@ -317,76 +372,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     const assignment = assignmentById[assignmentId];
     const team = teamById[teamId];
     await recordAction(`Assigned team "${team?.team_name_number || 'Unknown'}" to assignment "${assignment?.title || 'Unknown'}".`);
-    await assignTeamToAssignment(teamId, assignmentId);
-  };
-
-  const handleDragStart = (e, id, type) => {
-    setDraggedItem({ id, type });
-    e.dataTransfer.setData('text/plain', id);
-    e.dataTransfer.effectAllowed = 'move';
-  };
-
-  const handleDragOver = (e, id, type) => {
-    if (!draggedItem || draggedItem.type === type) return;
-
-    // Validate drop targets for Team/Assignment linkage
-    if (draggedItem.type === 'team' || draggedItem.type === 'assignment') {
-      const targetRow = rows.find(r => r.id === id);
-      if (targetRow?.hasBoth) return;
-    }
-
-    // Responders can only be dropped onto teams
-    if (draggedItem.type === 'responder' && type !== 'team') return;
-
-    e.preventDefault();
-  };
-
-  const handleDragEnter = (e, id, type) => {
-    if (!draggedItem || draggedItem.type === type) return;
-    
-    // Validate drop targets to prevent invalid visual states.
-    const targetRow = rows.find(r => r.id === id);
-    if (targetRow?.hasBoth) return;
-
-    if (draggedItem.type === 'responder' && type !== 'team') return;
-
-    // This is required to signal that this element is a valid drop target.
-    e.preventDefault();
-    setDropTarget({ id, type });
-  };
-
-  const handleDrop = async (e, targetId, targetType) => {
-    e.preventDefault();
-    if (!draggedItem || draggedItem.type === targetType) return;
-
-    try {
-      // Team <-> Assignment linkage
-      if ((draggedItem.type === 'team' && targetType === 'assignment') || (draggedItem.type === 'assignment' && targetType === 'team')) {
-        const targetRow = rows.find(r => r.id === targetId);
-        if (targetRow?.hasBoth) return;
-
-        let teamId, assignmentId;
-        if (draggedItem.type === 'team') {
-          teamId = getRawUuid(draggedItem.id);
-          assignmentId = getRawUuid(targetId);
-        } else {
-          teamId = getRawUuid(targetId);
-          assignmentId = getRawUuid(draggedItem.id);
-        }
-        
-        await assignTeamToAssignment(teamId, assignmentId);
-      } 
-      // Responder -> Team attachment
-      else if (draggedItem.type === 'responder' && targetType === 'team') {
-        const teamId = getRawUuid(targetId);
-        if (teamId) await attachResponderToTeam(draggedItem.id, teamId);
-      }
-    } catch (err) {
-       // Error is handled by hook
-    } finally {
-      setDraggedItem(null);
-      setDropTarget(null);
-    }
+    await assignTeamToAssignment(teamId, assignmentId); // Corrected argument order
   };
 
   const openNewTeamForm = () => {
@@ -599,7 +585,9 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
     }
   };
 
-  const availableTeams = useMemo(() => teams.filter(t => t.status === 'Staged'), [teams]);
+  // A team can support zero or more assignments; only disbanded teams are
+  // unavailable for a new assignment link.
+  const availableTeams = useMemo(() => teams.filter(t => t.status !== 'Disbanded'), [teams]);
   const availableAssignments = useMemo(() => assignments.filter(a => !a.team_id && a.status === 'Planned'), [assignments]);
 
   const requestSort = (key) => {
@@ -679,8 +667,6 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
           className="operations-content-wrapper layout-table" 
           style={{
             ...(loading ? { opacity: 0.8 } : {}),
-            display: 'block',
-            height: 'calc(100vh - 200px)',
             overflowY: 'auto'
           }}
         >
@@ -704,57 +690,21 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
               onNewTeam={(asnId) => { setPendingAssignmentId(asnId); setTeamForm({ op_period_id: operationalPeriodId, status: 'Staged', type: 'Ground' }); setShowTeamForm(true); }}
                 onNewAssignment={(teamId) => { setPendingTeamId(teamId); setAssignmentForm({ op_period_id: operationalPeriodId, status: 'Assigned', segment: 'A' }); setShowAssignmentForm(true); }}
               onDeleteAssignment={handleDeleteAssignment} onAssignResource={(row) => { setAssigningRow(row); setSelectedAssignTarget(''); }}
-              draggedItem={draggedItem} dropTarget={dropTarget}
-              onDragStart={handleDragStart} onDragEnd={() => { setDraggedItem(null); setDropTarget(null); }}
-              onDragOver={handleDragOver} onDragEnter={handleDragEnter} onDragLeave={() => setDropTarget(null)} onDrop={handleDrop}
+              draggedItem={draggedItem}
+              dropTarget={dropTarget}
+              onDragStart={dndHandlers.handleDragStart}
+              onDragEnd={dndHandlers.handleDragEnd}
+              onDragOver={dndHandlers.handleDragOver}
+              onDragEnter={dndHandlers.handleDragEnter}
+              onDragLeave={dndHandlers.handleDragLeave}
+              onDrop={dndHandlers.handleDrop}
             />
           </div>
         </div>
       )}
 
       {!loading && !error && (
-        <div className="operations-stats-footer" style={{ 
-          marginTop: '24px',
-          display: 'flex',
-          gap: '32px',
-          flexWrap: 'wrap',
-          padding: '8px 20px',
-          background: '#ffffff',
-          borderRadius: '12px',
-          border: '1px solid #e2e8f0',
-          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)',
-          alignItems: 'center'
-        }}
-        >
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            <strong style={{ color: '#1e293b', fontSize: '10px', textTransform: 'uppercase', marginBottom: '2px' }}>Teams</strong>
-            <div style={{ fontSize: '12px', color: '#475569' }}>
-              Staged: {stats.teams.staged}, Assigned: {stats.teams.assigned}, Deployed: {stats.teams.deployed}, 
-              Overdue: <span style={{ color: rows.some(r => r.isParOverdue) ? '#dc2626' : 'inherit', fontWeight: rows.some(r => r.isParOverdue) ? 700 : 'inherit' }}>{rows.filter(r => r.isParOverdue).length}</span>, 
-              Total: {stats.teams.total}
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            <strong style={{ color: '#1e293b', fontSize: '10px', textTransform: 'uppercase', marginBottom: '2px' }}>Assignments</strong>
-            <div style={{ fontSize: '12px', color: '#475569' }}>
-              Planned: {stats.assignments.planned}, Assigned: {stats.assignments.assigned}, Deployed: {stats.assignments.deployed}, 
-              Complete: {stats.assignments.complete}, Incomplete: {stats.assignments.incomplete}, Total: {stats.assignments.total}
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            <strong style={{ color: '#1e293b', fontSize: '10px', textTransform: 'uppercase', marginBottom: '2px' }}>Responders</strong>
-            <div style={{ fontSize: '12px', color: '#475569' }}>
-              Staged: {stats.responders.staged}, Attached: {stats.responders.attached}, Assigned: {stats.responders.assigned}, 
-              Deployed: {stats.responders.deployed}, Total: {stats.responders.total}
-            </div>
-          </div>
-
-          <div style={{ fontSize: '13px', marginLeft: 'auto', fontWeight: 700, color: '#1e293b' }}>
-            {new Date(currentTime).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }).replace(',', '')}
-          </div>
-        </div>
+        <OperationsStatsFooter stats={stats} rows={rows} currentTime={currentTime} />
       )}
 
       {showTeamForm && (
@@ -856,7 +806,7 @@ const OperationsDashboardPage = ({ operationalPeriodId: propOpId }) => {
             Assigning resource for: <strong>{assigningRow.assignmentName || assigningRow.teamName}</strong>
           </p>
           <div className="form-row">
-            <label htmlFor="assign-resource-select">{assigningRow.assignmentId ? 'Select Staged Team' : 'Select Planned Assignment'}</label>
+            <label htmlFor="assign-resource-select">{assigningRow.assignmentId ? 'Select Team' : 'Select Planned Assignment'}</label>
             <select
               id="assign-resource-select"
               className="status-update-select" 

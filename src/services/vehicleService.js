@@ -1,6 +1,6 @@
 // src/services/vehicleService.js
 
-import { VEHICLE_STATUS } from '../utils/constants';
+import { VEHICLE_STATUS } from '../constants/operationalConstants';
 
 /**
  * Saves (creates or updates) a vehicle record.

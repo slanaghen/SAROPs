@@ -24,6 +24,7 @@ export default defineConfig({
   },
   server: {
     host: true, // Expose server on the local network
+    host: true, // Expose server on the local network
     proxy: {
       '/sartopo-api': {
         target: 'https://sartopo.com',

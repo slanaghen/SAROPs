@@ -48,7 +48,8 @@ BEGIN
   ON CONFLICT (device_id) DO UPDATE SET
     incident_id = EXCLUDED.incident_id, name = EXCLUDED.name, agency = EXCLUDED.agency,
     identifier = EXCLUDED.identifier, cell_phone = EXCLUDED.cell_phone, 
-    auth_uid = EXCLUDED.auth_uid, checkin_datetime = EXCLUDED.checkin_datetime,
+    auth_uid = EXCLUDED.auth_uid, access_level = EXCLUDED.access_level, 
+    checkin_datetime = EXCLUDED.checkin_datetime,
     updated_at = CURRENT_TIMESTAMP
   RETURNING * INTO _responder_record;
 

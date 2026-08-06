@@ -12,7 +12,7 @@ const ICSAssignmentPage = () => {
   const { incidentData, user } = useIncident();
   const operationalPeriodId = incidentData?.opPeriodId;
 
-  const [displayDensity, setDisplayDensity] = useState('comfortable');
+  const [displayDensity, setDisplayDensity] = useState('compact');
 
   useEffect(() => {
     const fetchDensity = async () => {
@@ -36,7 +36,7 @@ const ICSAssignmentPage = () => {
   // Derived mapping of ICS positions to names based on the Staff team members
   const icsMapping = useMemo(() => {
     const mapping = {
-      ic: null, safety: null, pio: null, liaison: null, ops: null, planning: null, logistics: null, admin: null
+      ic: null, safety: null, pio: null, liaison: null, ops: null, planning: null, logistics: null, admin: null, mapper: null
     };
 
     const staffTeam = teams?.find(t => t.type === 'Staff');
@@ -62,6 +62,7 @@ const ICSAssignmentPage = () => {
         else if (role.includes('planning')) mapping.planning = data;
         else if (role.includes('logistics')) mapping.logistics = data;
         else if (role.includes('admin') || role.includes('finance')) mapping.admin = data;
+        else if (role.includes('mapper')) mapping.mapper = data;
       });
     }
     return mapping;
@@ -142,7 +143,13 @@ const ICSAssignmentPage = () => {
         {/* Level 3: General Staff */}
         <div className="ics-row ics-general">
           <OrgBox title="Operations Section" field="ops" />
-          <OrgBox title="Planning Section" field="planning" />
+          <div className="ics-section">
+            <OrgBox title="Planning Section" field="planning" />
+            <div className="ics-connector-down-short" />
+            <div className="ics-unit">
+              <OrgBox title="Mapper" field="mapper" />
+            </div>
+          </div>
           <OrgBox title="Logistics Section" field="logistics" />
           <OrgBox title="Admin / Finance" field="admin" />
         </div>

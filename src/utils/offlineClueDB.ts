@@ -1,4 +1,4 @@
-import { Clue } from '../types/sarops-types';
+import { Clue } from '../../sarops-types';
 
 /**
  * IndexedDB utilities for offline Clue storage in SAROps

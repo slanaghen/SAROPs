@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase';
 import useResponderTeamAndAssignment from '../hooks/useResponderTeamAndAssignment';
 import { useToast } from '../context/ToastContext';
 import { useIncident } from '../context/IncidentContext';
-import '../styles.css';
+import '../styles/styles.css';
 import '../styles/ActionButtons.css';
 
 /**
@@ -135,7 +135,7 @@ const PDFsPage = () => {
     return () => {
       if (currentBlobUrl) URL.revokeObjectURL(currentBlobUrl);
     };
-  }, [selectedPdf, incidentData?.name, getAutoFillValue]);
+  }, [selectedPdf, getAutoFillValue]);
 
   return (
     <div className="app-shell" style={{ padding: '24px' }}>

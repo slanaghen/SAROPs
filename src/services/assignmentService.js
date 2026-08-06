@@ -1,7 +1,7 @@
 // src/services/assignmentService.js
 
 import { v4 as uuidv4 } from 'uuid';
-import { ASSIGNMENT_STATUS, TEAM_STATUS, RESPONDER_STATUS } from '../utils/constants';
+import { ASSIGNMENT_STATUS, TEAM_STATUS, RESPONDER_STATUS } from '../constants/operationalConstants';
 
 /**
  * Saves (creates or updates) an assignment record.
@@ -25,36 +25,11 @@ export const saveAssignment = async ({
   updateAssignmentHook,
 }) => {
   try {
-    let finalTitle = formData.title?.trim();
-    if (!finalTitle && !formData.assignment_id) { // Only auto-generate for new assignments if title is blank
-      const division = formData.segment?.trim() || 'A';
-      const { data: existingAssignments } = await supabase
-        .from('assignments')
-        .select('title')
-        .eq('op_period_id', opPeriodId)
-        .eq('segment', division);
-
-      const usedSuffixes = new Set(
-        (existingAssignments || [])
-          .filter(a => a.title && a.title.startsWith(division))
-          .map(a => a.title.slice(division.length))
-          .filter(s => s && s.length === 1)
-      );
-
-      let nextSuffix = 'A';
-      for (let i = 65; i <= 90; i++) {
-        const s = String.fromCharCode(i);
-        if (!usedSuffixes.has(s)) {
-          nextSuffix = s;
-          break;
-        }
-      }
-      finalTitle = `${division}${nextSuffix}`;
-    }
-
+    // The hook now handles all creation logic, including title generation.
+    // The service's role is simplified to data mapping and calling the appropriate hook.
     const payload = {
       op_period_id: opPeriodId,
-      title: finalTitle,
+      title: formData.title?.trim() || null, // Pass null to trigger auto-generation in the hook/RPC
       status: formData.team_id ? ASSIGNMENT_STATUS.ASSIGNED : (formData.status || ASSIGNMENT_STATUS.PLANNED),
       segment: formData.segment || '',
       resource_type: formData.resource_type || '',
@@ -72,28 +47,18 @@ export const saveAssignment = async ({
       prepared_by: formData.prepared_by || null,
     };
 
+    let savedAssignment;
     if (formData.assignment_id) {
-      if (updateAssignmentHook) {
-        await updateAssignmentHook(formData.assignment_id, payload);
-      } else {
-        const { error: updateError } = await supabase
-          .from('assignments')
-          .update(payload)
-          .eq('assignment_id', formData.assignment_id);
-        if (updateError) throw updateError;
-      }
-      addToast(`Assignment ${finalTitle} updated successfully.`, 'success');
+      if (!updateAssignmentHook) throw new Error("Update function not provided.");
+      savedAssignment = await updateAssignmentHook(formData.assignment_id, payload);
+      addToast(`Assignment ${payload.title || 'updated'} successfully.`, 'success');
     } else {
       if (!opPeriodId) throw new Error("No active operational period found for the selected incident.");
-      if (createAssignmentHook) {
-        await createAssignmentHook(payload);
-      } else {
-        const { error: insertError } = await supabase.from('assignments').insert({ ...payload, assignment_id: uuidv4() });
-        if (insertError) throw insertError;
-      }
-      addToast(`Assignment ${finalTitle} created.`, 'success');
+      if (!createAssignmentHook) throw new Error("Create function not provided.");
+      savedAssignment = await createAssignmentHook(payload);
+      addToast(`Assignment ${savedAssignment.title} created successfully.`, 'success');
     }
-    return { ...payload, assignment_id: formData.assignment_id || uuidv4() };
+    return savedAssignment;
   } catch (err) {
     console.error('Failed to save assignment:', err);
     addToast(err.message || 'Failed to save assignment.', 'error');

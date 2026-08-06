@@ -75,8 +75,11 @@ const LoginPage = () => {
     }
 
     if (selectedId) {
-      setIsAdmin(userRecord.access_level === 'staff' || userRecord.access_level === 'admin');
-      if (userRecord?.access_level === 'staff' || userRecord?.access_level === 'admin') {
+      // Determine effective access level for navigation.
+      // The responderRecord reflects the role for this specific incident session (e.g., promoted to IC).
+      const effectiveAccessLevel = finalResponder?.access_level || userRecord.access_level;
+      setIsAdmin(effectiveAccessLevel === 'staff' || effectiveAccessLevel === 'admin');
+      if (effectiveAccessLevel === 'staff' || effectiveAccessLevel === 'admin') {
         navigate('/operations');
       } else {
         navigate('/responder');

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useIncident } from '../context/IncidentContext';
 import { useToast } from '../context/ToastContext';
-import '../styles.css';
+import '../styles/styles.css';
 import '../styles/ActionButtons.css';
 import '../styles/StatusChips.css';
 
@@ -17,7 +17,7 @@ const ActionLogPage = () => {
   const [loading, setLoading] = useState(false);
   const [manualAction, setManualAction] = useState('');
   const { addToast } = useToast();
-  const [displayDensity, setDisplayDensity] = useState('comfortable');
+  const [displayDensity, setDisplayDensity] = useState('compact');
 
   useEffect(() => {
     const fetchDensity = async () => {

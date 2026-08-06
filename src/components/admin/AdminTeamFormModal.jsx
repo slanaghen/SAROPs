@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import BaseModal from '../BaseModal';
 
 import { useToast } from '../../context/ToastContext';
-const AdminTeamFormModal = ({ isOpen, onClose, onSave, initialData, loading, error, responders }) => {
+const AdminTeamFormModal = ({ isOpen, onClose, onSave, initialData, loading, error, responders = [] }) => {
   const [formData, setFormData] = useState({
     team_id: '',
     team_name_number: '',

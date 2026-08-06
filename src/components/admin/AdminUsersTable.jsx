@@ -85,9 +85,9 @@ const AdminUsersTable = ({
             </thead>
             <tbody>
               {fetching ? (
-                <tr><td colSpan="5" className="empty-row">Loading system users...</td></tr>
+                <tr><td colSpan="8" className="empty-row">Loading system users...</td></tr>
               ) : users.length === 0 ? (
-                <tr><td colSpan="5" className="empty-row">No system users configured.</td></tr>
+                <tr><td colSpan="8" className="empty-row">No system users configured.</td></tr>
               ) : (
                 sortedUsers.map(user => (
                   <tr key={user.email}>

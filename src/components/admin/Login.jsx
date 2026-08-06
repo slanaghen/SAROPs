@@ -16,7 +16,7 @@ const Login = ({ onLoginSuccess }) => {
   const [view, setView] = useState('login'); // 'login', 'register', 'verify'
   const [otpToken, setOtpToken] = useState(''); 
   const [vehicles, setVehicles] = useState('');
-  const [displayDensity, setDisplayDensity] = useState('comfortable');
+  const [displayDensity, setDisplayDensity] = useState('compact');
 
   // Fetch display density for local component styling
   useEffect(() => {

@@ -5,12 +5,14 @@ import { supabase } from '../lib/supabase';
 import { useIncident } from '../context/IncidentContext';
 import { 
   getSartopoConfig, 
-  buildSecureSartopoUrl, 
-  downloadAndSyncSartopoData 
+  downloadAndSyncSartopoData,
+  createSartopoMap
 } from '../services/sartopoService';
 import { useToast } from '../context/ToastContext';
 import '../styles/IncidentEditPage.css';
 import '../styles/ActionButtons.css';
+import IncidentInfoFormSection from './IncidentInfoFormSection';
+import OpPeriodFormSection from './OpPeriodFormSection';
 
 const getCurrentLocalDatetime = () => {
   const now = new Date();
@@ -37,7 +39,7 @@ const getDefaultIncidentNumber = () => {
 const defaultIncident = {
   name: 'Missing Person Search',
   number: getDefaultIncidentNumber(),
-  sartopo_id: 'CVJP9L4',
+  sartopo_id: '',
   start_datetime: getCurrentLocalDatetime(),
   end_datetime: '',
   notes: '',
@@ -50,6 +52,14 @@ const defaultOperationalPeriod = {
   situation_narrative: 'Perform reflex tasking, establish search assignments and deploy search teams.',
   par_check_interval: 60,
   situational_awareness_narrative: '',
+};
+
+const getSartopoMapUrl = (id) => {
+  if (!id) return null;
+  // The ID might be a full URL already
+  if (id.startsWith('http')) return id;
+  // Or just the map ID, clean of any query params
+  return `https://sartopo.com/m/${id.split('?')[0]}`;
 };
 
 const IncidentEditPage = () => {
@@ -78,6 +88,10 @@ const IncidentEditPage = () => {
   const [sartopoSyncErrorMessage, setSartopoSyncErrorMessage] = useState(null);
   const [incident, setIncident] = useState(defaultIncident);
   const [initialIncident, setInitialIncident] = useState(defaultIncident);
+
+  const sartopoUrl = getSartopoMapUrl(incident.sartopo_id);
+  const sartopoCredsOk = import.meta.env.VITE_SARTOPO_ENABLED === 'true';
+
 
   const [operationalPeriod, setOperationalPeriod] = useState(defaultOperationalPeriod);
   const [initialOpPeriod, setInitialOpPeriod] = useState(defaultOperationalPeriod);
@@ -119,7 +133,7 @@ const IncidentEditPage = () => {
     };
   }, []);
 
-  const [displayDensity, setDisplayDensity] = useState('comfortable');
+  const [displayDensity, setDisplayDensity] = useState('compact');
 
   useEffect(() => {
     const fetchDensity = async () => {
@@ -163,6 +177,12 @@ const IncidentEditPage = () => {
           supabase.from('incidents').select('*').eq('incident_id', existingId).maybeSingle(),
           supabase.from('operational_periods').select('*').eq('op_period_id', targetOpId).maybeSingle()
         ]);
+
+        // Add a guard to ensure both fetches are successful before setting state.
+        // This prevents race conditions where the form could be partially hydrated.
+        if (incRes.error || opRes.error) {
+          throw new Error(incRes.error?.message || opRes.error?.message || 'Failed to fetch incident data.');
+        }
 
         if (incRes.data) {
           const hydratedInc = {
@@ -215,10 +235,14 @@ const IncidentEditPage = () => {
       // Case 1: Navigated from Admin page with full incident object in state
       if (targetIncident) {
         const latestOp = [...(targetIncident.operational_periods || [])].sort((a, b) => (b.op_number || 0) - (a.op_number || 0))[0];
+        // Ensure null values from the database are converted to empty strings for controlled inputs.
         const incidentState = {
-          ...targetIncident,
-          start_datetime: targetIncident.start_datetime ? targetIncident.start_datetime.slice(0, 16) : '',
+          name: targetIncident.name || '',
+          number: targetIncident.number || '',
+          sartopo_id: targetIncident.sartopo_id || '',
+          start_datetime: targetIncident.start_datetime ? targetIncident.start_datetime.slice(0, 16) : getCurrentLocalDatetime(),
           end_datetime: targetIncident.end_datetime ? targetIncident.end_datetime.slice(0, 16) : '',
+          notes: targetIncident.notes || '',
         };
         setIncident(incidentState);
         setInitialIncident(incidentState);
@@ -226,7 +250,7 @@ const IncidentEditPage = () => {
         if (latestOp) {
           const opState = {
             ...latestOp,
-            start_datetime: latestOp.start_datetime ? latestOp.start_datetime.slice(0, 16) : '',
+            start_datetime: latestOp.start_datetime ? latestOp.start_datetime.slice(0, 16) : getCurrentLocalDatetime(),
             end_datetime: latestOp.end_datetime ? latestOp.end_datetime.slice(0, 16) : '',
             par_check_interval: latestOp.par_check_interval ?? 60,
           };
@@ -245,7 +269,13 @@ const IncidentEditPage = () => {
         }
 
         if (incData) {
-          const incidentState = { ...incData, start_datetime: incData.start_datetime.slice(0, 16), end_datetime: incData.end_datetime ? incData.end_datetime.slice(0, 16) : '' };
+          const incidentState = { 
+            ...incData, 
+            start_datetime: incData.start_datetime.slice(0, 16), 
+            end_datetime: incData.end_datetime ? incData.end_datetime.slice(0, 16) : '',
+            sartopo_id: incData.sartopo_id || '',
+            notes: incData.notes || '',
+          };
           setIncident(incidentState);
           setInitialIncident(incidentState);
         }
@@ -261,13 +291,6 @@ const IncidentEditPage = () => {
   }, [targetIncident, isActive, contextIncidentId, incidentData?.opPeriodId]);
 
   const sartopoConfig = useMemo(() => getSartopoConfig(incident.sartopo_id), [incident.sartopo_id]);
-
-  /**
-   * Helper to build a secure SARTopo URL, signing the request if credentials exist.
-   */
-  const buildSecureUrl = useCallback(async (method, path, payload = null) => {
-    return buildSecureSartopoUrl(method, path, sartopoConfig, payload);
-  }, [sartopoConfig]);
 
   // Helper to sync SARTopo data (logic mirrored from SARTopoDataPage)
   const syncSartopoData = async (config, opId, incId) => {
@@ -298,81 +321,22 @@ const IncidentEditPage = () => {
    * Adheres to the Get-Modify-Push pattern for map initialization.
    */
   const handleCreateMap = async () => {
-    // Robust environment detection for Vitest, Jest, and browser runtime
-    const isTest = (function() {
-      if (typeof globalThis !== 'undefined' && (globalThis.vitest || globalThis.__vitest_worker__ || globalThis.VITEST)) return true;
-      if (typeof process !== 'undefined' && (process.env?.VITEST || process.env?.NODE_ENV === 'test')) return true;
-      try {
-        if (import.meta.env?.MODE === 'test' || import.meta.env?.VITEST) return true;
-      } catch (e) {}
-      return (typeof vi !== 'undefined' && vi !== null) || (typeof jest !== 'undefined' && jest !== null);
-    })();
-
-    const credId = [
-      typeof process !== 'undefined' ? process.env?.VITE_SARTOPO_API_CREDENTIAL_ID : undefined,
-      import.meta.env?.VITE_SARTOPO_API_CREDENTIAL_ID
-    ].find(val => val && val !== 'YOUR_SARTOPO_API_ID') || (isTest ? 'test-id' : undefined);
-
-    const secret = [
-      typeof process !== 'undefined' ? process.env?.VITE_SARTOPO_API_CREDENTIAL_SECRET : undefined,
-      import.meta.env?.VITE_SARTOPO_API_CREDENTIAL_SECRET
-    ].find(val => val && val !== 'YOUR_SARTOPO_API_SECRET') || (isTest ? 'test-secret' : undefined);
-    
-    if (!secret || !credId) {
-      addToast("SARTopo API credentials not configured. Map creation requires VITE_SARTOPO_API_CREDENTIAL_ID and VITE_SARTOPO_API_CREDENTIAL_SECRET for signed requests.", 'error');
-      return;
-    }
-
     if (!incident.number) {
       alert("Please enter an Incident Number before creating a map.");
       return;
     }
-
     setIsCreatingMap(true);
     setSartopoSyncErrorMessage(null);
 
     try {
-      const payload = {
-        title: `Mission ${incident.start_datetime.replace('T', ' ')}`,
-        mode: "sar",
-        state: {
-          zoom: "13",
-          center: [-105.2705, 40.0150],
-          layers: ["mbt"]
-        },
-        sharing: "URL"
-      };
-
-      const jsonPayload = JSON.stringify(payload);
-      let url = '';
-      let body = jsonPayload;
-      let headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
-
-      const path = `/api/v1/acct/${credId}/CollaborativeMap`;
-      const { url: signedUrl, authParams } = await buildSecureUrl('POST', path, jsonPayload);
-      
-      url = signedUrl;
-      const form = new URLSearchParams(authParams);
-      form.set('json', jsonPayload);
-      body = form;
-      headers['Content-Type'] = 'application/x-www-form-urlencoded';
-
-      console.debug(`[SARTopo] Creating new collaborative map at: ${url}`);
-      console.debug(`[SARTopo] Creation Payload:`, payload);
-
-      const response = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: body
-      });
-
-      if (credId && secret) {
-        console.log(`[SARTopo] Signed POST request completed for map creation. Status: ${response.status}`);
+      if (!sartopoCredsOk) { // This check now uses the new, safer environment variable
+        addToast("SARTopo API credentials not configured. Map creation requires VITE_SARTOPO_API_CREDENTIAL_ID and VITE_SARTOPO_API_CREDENTIAL_SECRET for signed requests.", 'error');
+        return;
       }
 
-      if (!response.ok) throw new Error(`SARTopo returned HTTP ${response.status}`);
+      const mapTitle = `Mission ${incident.start_datetime.replace('T', ' ')}`;
+      const data = await createSartopoMap(supabase, mapTitle, sartopoConfig);
 
-      const data = await response.json();
       if (data?.id) {
         handleIncidentChange('sartopo_id', data.id);
       } else {
@@ -427,9 +391,12 @@ const IncidentEditPage = () => {
           addToast('Please provide an Incident Name before activating SARStream.', 'error');
           return;
         }
+        console.log(`[IncidentEditPage] Invoking 'sarstream-proxy' function with label: "${incident.name}"`);
         const { data, error } = await supabase.functions.invoke('sarstream-proxy', {
           body: { label: incident.name },
         });
+
+        console.log('[IncidentEditPage] Response from "sarstream-proxy":', { data, error });
         if (error) throw error;
         streamData = data;
       }
